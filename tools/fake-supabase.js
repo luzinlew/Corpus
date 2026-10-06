@@ -1,0 +1,187 @@
+/* A small stand-in for the parts of Supabase the site uses (Auth, PostgREST on public.docs + the
+   corpus_doc_update RPC, Storage on the 'plates' bucket), for local browser tests only.
+   It enforces the same rules as supabase/setup.sql: the invite code, owner-only rows and photos.
+   Usage: node tools/fake-supabase.js [port] [invite] */
+const http = require('http');
+const crypto = require('crypto');
+
+const PORT = +(process.argv[2] || 54321);
+const INVITE = process.argv[3] === undefined ? 'p8wyzmtw' : process.argv[3];
+const users = new Map();      // email -> {id,email,password,meta,created}
+const access = new Map();     // access token -> uid
+const refresh = new Map();    // refresh token -> uid
+const docs = new Map();       // owner|coll|id -> row
+const objects = new Map();    // name -> {owner,type,buf}
+const log = [];
+
+const b64u = (s) => Buffer.from(s).toString('base64url');
+function jwt(u) {
+  const now = Math.floor(Date.now() / 1000);
+  return b64u(JSON.stringify({ alg: 'HS256', typ: 'JWT' })) + '.' +
+    b64u(JSON.stringify({ sub: u.id, email: u.email, role: 'authenticated', aud: 'authenticated', iat: now, exp: now + 3600, session_id: crypto.randomUUID() })) +
+    '.' + b64u('fake-signature');
+}
+function userObj(u) {
+  return { id: u.id, aud: 'authenticated', role: 'authenticated', email: u.email, email_confirmed_at: u.created, phone: '',
+    confirmed_at: u.created, last_sign_in_at: new Date().toISOString(), app_metadata: { provider: 'email', providers: ['email'] },
+    user_metadata: u.meta, identities: [{ identity_id: crypto.randomUUID(), id: u.id, user_id: u.id, identity_data: { email: u.email, sub: u.id }, provider: 'email' }],
+    created_at: u.created, updated_at: u.created, is_anonymous: false };
+}
+function session(u) {
+  const at = jwt(u), rt = crypto.randomBytes(16).toString('hex');
+  access.set(at, u.id); refresh.set(rt, u.id);
+  return { access_token: at, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: rt, user: userObj(u) };
+}
+const byId = (id) => Array.from(users.values()).find((u) => u.id === id);
+
+function cors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'authorization,apikey,content-type,prefer,x-client-info,x-upsert,accept-profile,content-profile,range,cache-control,x-supabase-api-version,accept');
+  res.setHeader('Access-Control-Expose-Headers', 'content-range,content-type,x-supabase-api-version');
+}
+function send(res, status, body, type) {
+  cors(res);
+  if (body === undefined || body === null) { res.writeHead(status); res.end(); return; }
+  if (Buffer.isBuffer(body)) { res.writeHead(status, { 'Content-Type': type || 'application/octet-stream' }); res.end(body); return; }
+  res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+}
+const authErr = (res, status, code, msg) => send(res, status, { code: status, error_code: code, msg: msg });
+function uidOf(req) {
+  const h = req.headers.authorization || '';
+  const t = h.replace(/^Bearer\s+/i, '');
+  return access.get(t) || null;
+}
+function readBody(req) {
+  return new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
+}
+function merge(a, b) {
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) || Array.isArray(b)) return b;
+  const r = Object.assign({}, a);
+  for (const k of Object.keys(b)) {
+    r[k] = (r[k] && typeof r[k] === 'object' && !Array.isArray(r[k]) && b[k] && typeof b[k] === 'object' && !Array.isArray(b[k])) ? merge(r[k], b[k]) : b[k];
+  }
+  return r;
+}
+function multipartFile(buf, ctype) {
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ctype || '');
+  if (!m) return null;
+  const sep = Buffer.from('--' + (m[1] || m[2]));
+  let pos = buf.indexOf(sep), found = null;
+  while (pos >= 0) {
+    const next = buf.indexOf(sep, pos + sep.length);
+    if (next < 0) break;
+    const part = buf.slice(pos + sep.length + 2, next - 2);
+    const hEnd = part.indexOf('\r\n\r\n');
+    const head = part.slice(0, hEnd).toString();
+    const body = part.slice(hEnd + 4);
+    if (/filename=/i.test(head) || /name=""/.test(head)) {
+      const t = /content-type:\s*([^\r\n]+)/i.exec(head);
+      found = { type: t ? t[1].trim() : 'application/octet-stream', buf: body };
+    }
+    pos = next;
+  }
+  return found;
+}
+
+http.createServer(async (req, res) => {
+  const u = new URL(req.url, 'http://x');
+  const p = u.pathname;
+  if (req.method === 'OPTIONS') { send(res, 204); return; }
+  const raw = await readBody(req);
+  let body = null;
+  try { body = raw.length && /json/.test(req.headers['content-type'] || '') ? JSON.parse(raw.toString()) : null; } catch (e) {}
+  log.push(req.method + ' ' + p);
+
+  /* ---------- test helpers ---------- */
+  if (p === '/__state') { send(res, 200, { users: users.size, docs: Array.from(docs.values()), objects: Array.from(objects.entries()).map(([k, v]) => ({ name: k, owner: v.owner, type: v.type, size: v.buf.length })) }); return; }
+  if (p === '/__log') { send(res, 200, log.splice(0)); return; }
+
+  /* ---------- auth ---------- */
+  if (p === '/auth/v1/signup' && req.method === 'POST') {
+    const email = String(body.email || '').toLowerCase(), pw = String(body.password || ''), meta = body.data || {};
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return authErr(res, 400, 'validation_failed', 'Unable to validate email address: invalid format');
+    if (pw.length < 6) return authErr(res, 422, 'weak_password', 'Password should be at least 6 characters.');
+    if (users.has(email)) return authErr(res, 422, 'user_already_exists', 'User already registered');
+    if (INVITE && meta.invite !== INVITE) return authErr(res, 500, 'unexpected_failure', 'Database error saving new user');
+    const nu = { id: crypto.randomUUID(), email, password: pw, meta, created: new Date().toISOString() };
+    users.set(email, nu);
+    send(res, 200, session(nu)); return;
+  }
+  if (p === '/auth/v1/token' && req.method === 'POST') {
+    const g = u.searchParams.get('grant_type');
+    if (g === 'password') {
+      const usr = users.get(String(body.email || '').toLowerCase());
+      if (!usr || usr.password !== body.password) return authErr(res, 400, 'invalid_credentials', 'Invalid login credentials');
+      send(res, 200, session(usr)); return;
+    }
+    if (g === 'refresh_token') {
+      const id = refresh.get(body.refresh_token);
+      if (!id) return authErr(res, 400, 'refresh_token_not_found', 'Invalid Refresh Token: Refresh Token Not Found');
+      refresh.delete(body.refresh_token);
+      send(res, 200, session(byId(id))); return;
+    }
+  }
+  if (p === '/auth/v1/user' && req.method === 'GET') {
+    const id = uidOf(req); if (!id) return authErr(res, 401, 'bad_jwt', 'invalid JWT');
+    send(res, 200, userObj(byId(id))); return;
+  }
+  if (p === '/auth/v1/logout') { const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, ''); access.delete(t); send(res, 204); return; }
+
+  /* ---------- rest: public.docs (row-level security: owner = auth.uid()) ---------- */
+  if (p === '/rest/v1/docs') {
+    const uid = uidOf(req);
+    const f = {};
+    for (const [k, v] of u.searchParams) if (/^(owner|coll|id)$/.test(k) && v.startsWith('eq.')) f[k] = v.slice(3);
+    const rows = () => Array.from(docs.values()).filter((r) => r.owner === uid && Object.keys(f).every((k) => r[k] === f[k]));
+    if (req.method === 'GET') {
+      let list = rows().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const off = +(u.searchParams.get('offset') || 0), lim = u.searchParams.get('limit');
+      list = list.slice(off, lim ? off + +lim : undefined);
+      const cols = (u.searchParams.get('select') || '*').split(',');
+      send(res, 200, list.map((r) => (cols[0] === '*' ? r : Object.fromEntries(cols.map((c) => [c, r[c]]))))); return;
+    }
+    if (req.method === 'POST') {
+      const arr = Array.isArray(body) ? body : [body];
+      for (const r of arr) {
+        if (!uid || r.owner !== uid) { send(res, 403, { code: '42501', message: 'new row violates row-level security policy for table "docs"', details: null, hint: null }); return; }
+      }
+      for (const r of arr) docs.set(r.owner + '|' + r.coll + '|' + r.id, { owner: r.owner, coll: r.coll, id: r.id, data: r.data, updated_at: r.updated_at || new Date().toISOString() });
+      send(res, 201); return;
+    }
+    if (req.method === 'DELETE') { rows().forEach((r) => docs.delete(r.owner + '|' + r.coll + '|' + r.id)); send(res, 204); return; }
+  }
+  if (p === '/rest/v1/rpc/corpus_doc_update' && req.method === 'POST') {
+    const uid = uidOf(req);
+    const k = uid + '|' + body.p_coll + '|' + body.p_id, row = docs.get(k);
+    if (!uid || !row) { send(res, 404, { code: 'P0002', message: 'doc_missing', details: null, hint: null }); return; }
+    row.data = merge(row.data, body.p_patch); row.updated_at = new Date().toISOString();
+    send(res, 204); return;
+  }
+
+  /* ---------- storage: bucket 'plates' (public reads, owner-only delete, image/* only) ---------- */
+  let m;
+  if ((m = /^\/storage\/v1\/object\/public\/plates\/(.+)$/.exec(p)) && req.method === 'GET') {
+    const o = objects.get(decodeURIComponent(m[1]));
+    if (!o) { send(res, 400, { statusCode: '404', error: 'not_found', message: 'Object not found' }); return; }
+    cors(res); res.writeHead(200, { 'Content-Type': o.type, 'Cache-Control': 'max-age=3600' }); res.end(o.buf); return;
+  }
+  if ((m = /^\/storage\/v1\/object\/plates\/(.+)$/.exec(p)) && req.method === 'POST') {
+    const uid = uidOf(req);
+    if (!uid) { send(res, 400, { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' }); return; }
+    const name = decodeURIComponent(m[1]);
+    const file = /multipart/i.test(req.headers['content-type'] || '') ? multipartFile(raw, req.headers['content-type']) : { type: req.headers['content-type'], buf: raw };
+    if (!file) { send(res, 400, { statusCode: '400', error: 'invalid', message: 'no file' }); return; }
+    if (!/^image\//.test(file.type)) { send(res, 400, { statusCode: '415', error: 'invalid_mime_type', message: 'mime type ' + file.type + ' is not supported' }); return; }
+    if (file.buf.length > 26214400) { send(res, 400, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' }); return; }
+    if (objects.has(name)) { send(res, 400, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' }); return; }
+    objects.set(name, { owner: uid, type: file.type, buf: file.buf });
+    send(res, 200, { Key: 'plates/' + name, Id: crypto.randomUUID() }); return;
+  }
+  if (p === '/storage/v1/object/plates' && req.method === 'DELETE') {
+    const uid = uidOf(req), out = [];
+    for (const name of (body && body.prefixes) || []) { const o = objects.get(name); if (o && o.owner === uid) { objects.delete(name); out.push({ name }); } }
+    send(res, 200, out); return;
+  }
+  send(res, 404, { message: 'not found: ' + req.method + ' ' + p });
+}).listen(PORT, () => console.log('fake supabase on :' + PORT + (INVITE ? ' (invite ' + INVITE + ')' : ' (open sign-up)')));

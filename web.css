@@ -1,0 +1,32 @@
+/* Corpus — screens of the web runtime (sign in, file sheet). Colors and buttons come from the app's own tokens. */
+.cw-auth{position:fixed;inset:0;z-index:500;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;
+  display:flex;justify-content:center;padding:calc(28px + env(safe-area-inset-top,0px)) 16px calc(28px + env(safe-area-inset-bottom,0px));
+  animation:cwIn .28s ease both}
+.cw-auth.out{opacity:0;transition:opacity .2s}
+.cw-card{width:100%;max-width:420px;margin:auto 0}
+.cw-brand{display:flex;align-items:center;gap:12px;font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-weight:600;font-size:36px;letter-spacing:.2px;margin:0 0 6px}
+.cw-brand .brand-mark i{width:20px}
+.cw-sub{color:var(--ink2);margin:0 0 20px;line-height:1.5;font-size:15px}
+.cw-box{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px}
+.cw-tabs{display:flex;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:16px}
+.cw-tabs button{flex:1;border:none;background:none;padding:9px 6px;border-radius:9px;font-weight:600;font-size:14px;color:var(--ink2)}
+.cw-tabs button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.cw-f{display:block;font-size:12.5px;font-weight:600;color:var(--ink2);margin:0 0 12px}
+.cw-f input{display:block;width:100%;height:48px;margin-top:5px;border-radius:12px;border:1px solid var(--line);background:var(--surface2);
+  color:var(--ink);padding:0 14px;font:inherit;font-size:16px;font-weight:400}
+.cw-f input:focus{outline:2px solid var(--primary);outline-offset:1px}
+.cw-err{min-height:20px;color:var(--bad);font-size:13.5px;line-height:1.4;margin:0 0 10px}
+.cw-err:empty{min-height:0;margin:0}
+.cw-go{margin-top:4px}
+.cw-note{color:var(--ink3);font-size:12.5px;line-height:1.45;margin:12px 4px 0;text-align:center}
+.cw-lang{display:flex;justify-content:center;gap:6px;margin-top:18px}
+.cw-lang button{border:1px solid var(--line);background:var(--surface);color:var(--ink2);border-radius:20px;padding:6px 12px;font-size:13px;font-weight:600}
+.cw-lang button.on{border-color:var(--primary);color:var(--primary)}
+.cw-ov{position:fixed;inset:0;z-index:520;background:rgba(12,18,16,.45);display:flex;align-items:flex-end;justify-content:center;animation:cwIn .2s ease both}
+.cw-sheet{width:100%;max-width:520px;background:var(--surface);border-radius:20px 20px 0 0;padding:18px 14px calc(14px + env(safe-area-inset-bottom,0px));
+  display:flex;flex-direction:column;gap:8px}
+.cw-sheet b{font-size:17px;text-align:center}
+.cw-fn{font-size:13px;color:var(--ink2);text-align:center;overflow-wrap:anywhere;margin-bottom:6px}
+@media (min-width:640px){.cw-ov{align-items:center;padding:24px}.cw-sheet{border-radius:20px}}
+@keyframes cwIn{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.cw-auth,.cw-ov{animation:none}}

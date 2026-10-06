@@ -10,7 +10,8 @@
                  a daily allowance per user). Until that function is deployed, AI features stay hidden.
    Beyond window.claude, window.CORPUS_WEB.shares passes a deck or folder to another person by a short
    code (shown as a QR code): the snapshot lives in public.shares, photos stay in the public bucket and
-   are copied into the receiver's own Corpus on import (supabase/share.sql). */
+   are copied into the receiver's own Corpus on import (supabase/share.sql), and window.CORPUS_WEB.push
+   turns on push reminders for this device (supabase/push.sql, supabase/functions/corpus-push). */
 (function () {
   'use strict';
   var CFG = window.CORPUS_CONFIG || {};
@@ -119,6 +120,92 @@
     try { await caches.delete(CACHE); } catch (e) {}
     location.reload();
   }
+
+  /* ---------- push: reminders on this device (supabase/functions/corpus-push shows them through sw.js).
+     On iPhone and iPad they work only when Corpus is opened from the home screen (iOS 16.4+). ---------- */
+  var PUSH_FN = configured ? CFG.url.replace(/\/+$/, '') + '/functions/v1/corpus-push' : '';
+  W.startView = '';
+  try { if (new URL(location.href).searchParams.get('v') === 'cal') W.startView = 'calendar'; } catch (e) {}
+  W.clearStartView = function () {
+    W.startView = '';
+    try { var u = new URL(location.href); u.searchParams.delete('v'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch (e) {}
+  };
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', function (e) {
+    var d = e.data || {};
+    if (d.corpus === 'open' && d.view && W.onOpenView) W.onOpenView(d.view);
+  });
+  function isIOS() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function standalone() { return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
+  function pushCapable() { return configured && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function b64ToU8(b) {
+    var s = atob((b + '='.repeat((4 - b.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')), a = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+    return a;
+  }
+  async function subId(ep) {
+    var h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ep)));
+    return Array.prototype.slice.call(h, 0, 16).map(function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  }
+  async function pushFetch(method, body) {
+    var s = await sb.auth.getSession();
+    var tok = s && s.data && s.data.session ? s.data.session.access_token : '';
+    var r;
+    try {
+      r = await fetch(PUSH_FN, { method: method, headers: { Authorization: 'Bearer ' + tok, apikey: CFG.key, 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined });
+    } catch (e) { throw { code: 'unavailable', message: String((e && e.message) || e) }; }
+    var j = null;
+    try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw { code: r.status === 404 ? 'not_set_up' : ((j && j.code) || 'unavailable'), message: (j && j.message) || ('HTTP ' + r.status) };
+    return j;
+  }
+  async function swReg() {
+    if (!('serviceWorker' in navigator)) return null;
+    return Promise.race([navigator.serviceWorker.ready, new Promise(function (r) { setTimeout(function () { r(null); }, 5000); })]);
+  }
+  W.push = Object.freeze({
+    /* 'on' | 'off' | 'denied' | 'install' (iPhone/iPad: open from the home screen first) | 'unsupported' */
+    state: async function () {
+      if (!pushCapable()) return isIOS() && !standalone() ? 'install' : 'unsupported';
+      if (Notification.permission === 'denied') return 'denied';
+      var reg = await swReg();
+      if (!reg) return 'unsupported';
+      var sub = await reg.pushManager.getSubscription();
+      return sub && Notification.permission === 'granted' ? 'on' : 'off';
+    },
+    /* call straight from a tap: the permission prompt needs it */
+    enable: async function () {
+      if (!pushCapable()) throw { code: isIOS() && !standalone() ? 'install' : 'unsupported' };
+      var perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+      if (perm !== 'granted') throw { code: perm === 'denied' ? 'denied' : 'declined' };
+      var reg = await swReg();
+      if (!reg) throw { code: 'unsupported' };
+      var j = await pushFetch('GET');
+      if (!j || !j.publicKey) throw { code: 'not_set_up' };
+      var key = b64ToU8(j.publicKey), sub = await reg.pushManager.getSubscription();
+      if (sub && sub.options && sub.options.applicationServerKey) {
+        var cur = new Uint8Array(sub.options.applicationServerKey), same = cur.length === key.length;
+        for (var i = 0; same && i < key.length; i++) same = cur[i] === key[i];
+        if (!same) { try { await sub.unsubscribe(); } catch (e) {} sub = null; }
+      }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      var js = sub.toJSON();
+      var res = await sb.from('docs').upsert({ owner: W.uid, coll: 'push', id: await subId(js.endpoint),
+        data: { endpoint: js.endpoint, keys: js.keys, ua: String(navigator.userAgent || '').slice(0, 160), at: Date.now() },
+        updated_at: new Date().toISOString() }, { onConflict: 'owner,coll,id' });
+      if (res.error) throw { code: 'unavailable', message: res.error.message };
+      return true;
+    },
+    disable: async function () {
+      var reg = await swReg(), sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (!sub) return;
+      var id = await subId(sub.endpoint);
+      try { await sub.unsubscribe(); } catch (e) {}
+      await sb.from('docs').delete().eq('owner', W.uid).eq('coll', 'push').eq('id', id);
+    },
+    /* a test notification to this person's devices */
+    test: function (lang) { return pushFetch('POST', { test: true, lang: lang }); }
+  });
 
   /* ---------- db: documents in public.docs (owner, coll, id) → data ---------- */
   function mkDb(uid) {

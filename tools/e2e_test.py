@@ -384,6 +384,38 @@ async def main():
             await app_ready(pg)
             check('Anki import: everything is there after a reload', await pg.evaluate('S.plates.length===9 && S.cards.length===14 && S.decks.filter(d=>d.ad).length===2'))
 
+            # ---------- calendar of tests and push reminders ----------
+            await pg.click('.tabbar [data-v=calendar]')
+            await pg.wait_for_selector('.cgrid .cday.ctd')
+            check('calendar tab opens (translated)', (await pg.inner_text('.page .h1t')).strip() == 'Kalender')
+            day = await pg.evaluate("(()=>{const d=new Date();d.setDate(d.getDate()+5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()")
+            await pg.evaluate("()=>{editExamDlg(null,{folderIds:[S.folders[0].id]});}")
+            await pg.fill('#exT', 'Kollokvium: kolju')
+            await pg.fill('#exD', day)
+            await pg.click('#layer [data-s="1"]')
+            st = await state_when(lambda s: any(d['coll'] == 'exams' for d in s['docs']))
+            ex = [d for d in st['docs'] if d['coll'] == 'exams']
+            check('a test is saved with its date and folder', len(ex) == 1 and ex[0]['data']['date'] == day and ex[0]['data']['folderIds'] == [await pg.evaluate('S.folders[0].id')], json.dumps(ex)[:200])
+            check('the test drives the plan of its decks', await pg.evaluate("S.decks.filter(d=>d.folderId===S.folders[0].id).every(d=>planQuota(d)!=null)"))
+            await pg.wait_for_function("document.querySelector('#pushBox') && document.querySelector('#pushBox').dataset.st", timeout=10000)
+            pst = await pg.evaluate("[pushBox.dataset.st, pushSt.textContent]")
+            check('push box: notifications blocked → says where to allow them', pst[0] == 'denied' and 'Seaded' in pst[1], json.dumps(pst, ensure_ascii=False))
+            # headless Chromium always reports "denied"; a phone asks first ("default")
+            await pg.evaluate("Object.defineProperty(Notification,'permission',{configurable:true,get:()=>'default'});pushBox.dataset.st='';pushPaint()")
+            await pg.wait_for_function("pushBox.dataset.st", timeout=10000)
+            pst = await pg.evaluate("[pushBox.dataset.st, pushSt.textContent, pushBtns.textContent]")
+            check('push box: allowed but not subscribed → offered to turn on', pst[0] == 'off' and 'Lülita sisse' in pst[2], json.dumps(pst, ensure_ascii=False))
+            await pg.evaluate("META.pushOn=true;META.remTime='19:00';pushSync()")
+            st = await state_when(lambda s: any(d['coll'] == 'meta' and d['id'] == 'notify' for d in s['docs']))
+            nt = next((d['data'] for d in st['docs'] if d['coll'] == 'meta' and d['id'] == 'notify'), {})
+            check('reminder summary kept for the push service', nt.get('daily') == '19:00' and len(nt.get('due', {})) == 14 and nt.get('tz') and
+                  [e['date'] for e in nt.get('exams', [])] == [day] and 'cards' not in nt, json.dumps(nt)[:300])
+            await pg.evaluate("META.pushOn=false")
+            await pg.goto(SITE + '?v=cal')
+            await app_ready(pg)
+            await pg.wait_for_function("view.name==='calendar'", timeout=5000)
+            check('a reminder link opens the calendar, then leaves the address clean', '?v=' not in pg.url, pg.url)
+
             # account section and sign out
             await pg.evaluate("go({name:'settings'})")
             acc = await pg.inner_text('.page')

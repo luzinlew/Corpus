@@ -10,7 +10,7 @@ Corpus — карточки по анатомии из фото атласа: р
 |---|---|
 | `src/corpus.html` | Само приложение. Тот же файл, что артефакт Corpus в claude.ai |
 | `web.js` | Веб-среда: даёт приложению `window.claude.use('db' / 'assets' / 'downloads' / 'user')` поверх Supabase, экран входа и регистрации |
-| `sw.js` | Service worker: отдаёт фото по адресу `<сайт>/_blob/<id>` из Supabase Storage и кэширует их на устройстве |
+| `sw.js` | Service worker: отдаёт фото по адресу `<сайт>/_blob/<id>` из Supabase Storage и кэширует их на устройстве, показывает push-уведомления |
 | `config.js` | URL проекта Supabase и publishable key (оба публичные) |
 | `index.html` | Собирается из `src/corpus.html` командой `python3 build.py`. Руками не править |
 | `supabase/setup.sql` | Разовая настройка базы: таблица `docs` с RLS, бакет `plates`, проверка кода приглашения |
@@ -18,10 +18,11 @@ Corpus — карточки по анатомии из фото атласа: р
 | `supabase/ai.sql` | Тарифы и дневные лимиты ИИ: `ai_plans`, `ai_usage`, функция `corpus_ai_take` |
 | `supabase/share.sql` | Обмен колодами по коду / QR: таблица `shares`, функции `corpus_share_put`, `corpus_share_open` |
 | `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
+| `supabase/push.sql`, `supabase/functions/corpus-push/` | Push-уведомления: ключи VAPID, расписание каждые 15 минут (pg_cron), рассылка |
 | `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js, qrcode-generator |
 | `tools/` | Тестовый сервер-заглушка Supabase и сквозной тест в браузере |
 
-Данные лежат в одной таблице `public.docs (owner, coll, id) → data jsonb`. Коллекции те же, что в claude.ai: `decks`, `plates`, `packs`, `terms`, `stats`, `folders`, `meta`. Частичные обновления идут через RPC `corpus_doc_update` с рекурсивным слиянием, как у `update()` в claude.ai.
+Данные лежат в одной таблице `public.docs (owner, coll, id) → data jsonb`. Коллекции те же, что в claude.ai: `decks`, `plates`, `packs`, `terms`, `stats`, `folders`, `exams`, `meta`. Только на сайте: `push` (подписки устройств) и `meta/notify` (сводка для уведомлений). Частичные обновления идут через RPC `corpus_doc_update` с рекурсивным слиянием, как у `update()` в claude.ai.
 
 ИИ (подсказки, чат, распознавание подписей по фото, сверка с конспектом) на сайте идёт через функцию `corpus-ai` с ключом Claude API владельца. Текст обрабатывает Haiku 4.5, фото — Sonnet 5.5. Каждый запрос списывается с дневного лимита пользователя (фото = 1 + число фото). Пока функция не развёрнута, ИИ-кнопки на сайте скрыты. Распознавание подписей на устройстве (Tesseract) работает всегда.
 
@@ -40,6 +41,33 @@ select u.email, s.kind, s.name, s.code, s.opens, s.updated_at from public.shares
 -- отозвать чужой код
 delete from public.shares where code = 'abcde23456';
 ```
+
+## Календарь контрольных и push-уведомления
+
+Вкладка «Календарь»: контрольные с датой и привязанными папками или колодами (коллекция `exams`). План контрольной распределяет новые карточки по дням.
+
+Push-уведомления приходят, даже если Corpus закрыт:
+- о повторении: каждый день в выбранное время, если есть карточки;
+- о контрольной: в 8:00 по времени пользователя, за выбранные дни (по умолчанию 7, 3, 1), накануне и в сам день.
+
+На iPhone и iPad нужен iOS 16.4+ и Corpus, открытый с экрана «Домой». Включаются в «Календарь → Напоминания → Включить».
+
+Как это устроено. Устройство подписывается и кладёт подписку в `docs` (`coll = 'push'`). Приложение держит короткую сводку `meta/notify`: часовой пояс, язык, время напоминания, сколько карточек к повтору на 14 дней вперёд, ближайшие контрольные. Карточек и фото в ней нет. Каждые 15 минут pg_cron вызывает функцию `corpus-push`. Она решает, кому что пора отправить, и записывает отправленное в `meta/notify_sent`, чтобы ничего не повторялось. Ключи VAPID функция создаёт сама при первом запуске и хранит в `private.settings`.
+
+Настройка (один раз):
+1. Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-push`, код из `supabase/functions/corpus-push/index.ts`. В настройках функции выключить «Verify JWT» (вызов по расписанию идёт без токена пользователя; функция проверяет свой ключ сама).
+2. Supabase → SQL Editor: выполнить `supabase/push.sql`.
+
+Проверка: в приложении «Календарь → Напоминания → Проверить» присылает тестовое уведомление на все устройства человека.
+
+```sql
+-- последние вызовы по расписанию (200 = ок; в теле: users, sent, dropped)
+select status_code, left(content, 200), created from net._http_response order by created desc limit 5;
+-- у кого включены уведомления
+select u.email, count(*) devices from public.docs d join auth.users u on u.id = d.owner where d.coll = 'push' group by 1;
+```
+
+Тест функции: `CORPUS_PUSH_NO_SERVE=1 deno run --allow-net --allow-env --allow-read --allow-sys tools/push_test.ts` (правила расписания и настоящее шифрование Web Push).
 
 ## Импорт из Anki
 

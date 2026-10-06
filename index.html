@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="web.css?v=189aa54a8c">
 <script src="config.js?v=6bc1b13838"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=f5157a15b7"></script>
+<script src="web.js?v=74e4575b21"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -118,7 +118,7 @@ button:disabled{cursor:default;opacity:.38}
 .tabbar{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:760px;z-index:40;display:flex;background:var(--surface);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px))}
 .tabbar button{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;padding:6px 2px;border-radius:12px;color:var(--ink3);font-size:10.5px;font-weight:600}
 .tabbar button.on{color:var(--primary)}
-.tabpill{position:absolute;z-index:0;left:4px;top:6px;bottom:calc(6px + env(safe-area-inset-bottom,0px));width:calc((100% - 8px) / 4);border-radius:14px;background:var(--primary-soft);transition:transform .5s cubic-bezier(.34,1.45,.64,1)}
+.tabpill{position:absolute;z-index:0;left:4px;top:6px;bottom:calc(6px + env(safe-area-inset-bottom,0px));width:calc((100% - 8px) / 5);border-radius:14px;background:var(--primary-soft);transition:transform .5s cubic-bezier(.34,1.45,.64,1)}
 .tabbar button.bump .i{animation:tabBump .5s cubic-bezier(.34,1.56,.64,1)}
 .page.tabbed{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
 .counts{display:flex;gap:26px;margin:10px 0 14px}
@@ -795,6 +795,95 @@ label.cmp-row{cursor:pointer}
 .dlg.share .muted.sm{margin:0 0 14px;line-height:1.5}
 .dlg .chk input{margin:0;flex:none}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* calendar of tests */
+.tabbar button span{white-space:nowrap}
+.examline .exn{font-weight:700}
+.examline .cd{font-style:normal;font-weight:600}
+.examline.soon{background:var(--learn-soft);color:var(--learn)}
+.calbox{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:10px 10px 12px}
+.calhead{display:flex;align-items:center;gap:4px;margin:0 0 6px}
+.calttl{flex:1;border:none;background:none;font-weight:600;font-size:16px;padding:6px;border-radius:10px;color:var(--ink)}
+.cgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+.cwd{text-align:center;font-size:11px;font-weight:600;color:var(--ink3);padding:2px 0 4px}
+.cwd.we{color:var(--ink3);opacity:.7}
+.cday{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;height:46px;min-width:0;border:none;border-radius:12px;background:none;padding:0;color:var(--ink);font-variant-numeric:tabular-nums;transition:background-color .15s,transform .2s cubic-bezier(.34,1.56,.64,1)}
+.cday:active{transform:scale(.92);transition-duration:.08s}
+.cday.out{visibility:hidden}
+.cday .cn{font-size:15px;font-weight:500;line-height:1}
+.cday.past{color:var(--ink3)}
+.cday.ctd .cn{color:var(--primary);font-weight:700}
+.cday.ctd{box-shadow:inset 0 0 0 1.5px var(--primary)}
+.cday.has{background:var(--learn-soft)}
+.cday.has .cn{font-weight:700;color:var(--learn)}
+.cday.has.past{background:var(--surface2)}
+.cday.has.past .cn{color:var(--ink2)}
+.cday.sel{background:var(--primary);box-shadow:none}
+.cday.sel .cn{color:var(--primary-ink)!important}
+.cdots,.cmark{display:flex;justify-content:center;align-items:center;gap:2px;height:5px}
+.cdots i{display:block;width:5px;height:5px;border-radius:50%;background:var(--learn)}
+.cday.sel .cdots i{background:var(--primary-ink)}
+.cload{display:block;height:3px;border-radius:2px;background:var(--due);opacity:.35}
+.cload.l1{width:6px}.cload.l2{width:12px;opacity:.55}.cload.l3{width:18px;opacity:.8}
+.cday.sel .cload{background:var(--primary-ink)}
+.cdaybox{border-top:1px solid var(--line);margin-top:10px;padding:12px 4px 0}
+.cdayhead{font-size:15px;margin:0 0 8px}
+.cdue{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink2);margin:0 0 10px}
+.cdue .i{color:var(--due)}
+.cdaybox .excard{background:var(--surface2)}
+.cdaybox>.btn{margin-top:2px}
+.excard{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:8px}
+.excard.soon{border-color:var(--learn)}
+.excard.past{opacity:.75}
+.exmain{display:flex;gap:12px;align-items:flex-start;width:100%;border:none;background:none;padding:0;text-align:left;color:inherit}
+.exdate{flex:none;width:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 0;border-radius:12px;background:var(--new-soft);color:var(--new);line-height:1.05}
+.excard.soon .exdate{background:var(--learn-soft);color:var(--learn)}
+.excard.past .exdate{background:var(--surface2);color:var(--ink2)}
+.exdate b{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.exdate small{font-size:11.5px;font-weight:600}
+.exbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.exbody .exn{font-size:16px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.exsub{font-size:13px;color:var(--ink2)}
+.exsub .cd{font-style:normal;font-weight:600;color:var(--ink)}
+.excard.soon .exsub .cd{color:var(--learn)}
+.extags{display:flex;flex-wrap:wrap;gap:4px}
+.extags i{font-style:normal;font-size:12px;font-weight:600;color:var(--ink2);background:var(--surface2);border-radius:20px;padding:2px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cdaybox .extags i{background:var(--surface)}
+.exprog{display:flex;align-items:center;gap:8px}
+.exprog .dprog{flex:1}
+.exmeta{font-size:13px;color:var(--ink2)}
+.exmeta .warn{color:var(--learn);font-weight:600}
+.exgo{align-self:stretch}
+.exgo small{margin-left:4px;background:rgba(255,255,255,.22);color:inherit;border-radius:20px;padding:0 7px;font-weight:700;font-size:12px}
+.remind .remrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.remind .remrow>span:first-child{flex:1;min-width:150px}
+.remind .sesslim{margin:0;justify-content:flex-start}
+.remtime input{height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);padding:0 10px;font:inherit;font-size:16px;min-width:110px}
+.exdlg .exrow{display:flex;gap:8px}
+.exdlg .exrow label{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink2);font-weight:600}
+.exdlg .exrow label small{font-weight:500;color:var(--ink3)}
+.exdlg .exrow input{margin-bottom:12px;min-width:0;-webkit-appearance:none;appearance:none}
+.xlab{font-size:13px;color:var(--ink2);font-weight:600;margin:0 0 6px}
+.xchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.xchip{display:inline-flex;align-items:center;gap:6px;min-height:36px;max-width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink2);border-radius:20px;padding:0 12px;font-size:14px;font-weight:600}
+.xchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xchip.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary)}
+.xmore{display:inline-flex;align-items:center;gap:6px;border:none;background:none;color:var(--primary);font-weight:600;font-size:13.5px;padding:4px 2px 10px}
+.xgroup{margin:0 0 4px}
+.xgt{font-size:12.5px;color:var(--ink3);font-weight:600;margin:0 2px 5px}
+@media (max-width:360px){.tabbar button{font-size:9.5px}.exdlg .exrow{flex-direction:column;gap:0}}
+.cdaybox .dprog{background:var(--surface)}
+.pushbox{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:0 0 12px}
+.pushic{flex:none;width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--ink2)}
+.pushbox[data-st=on] .pushic{background:var(--due-soft);color:var(--due)}
+.pusht{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px}
+.pusht b{font-size:15px;font-weight:600}
+.pusht small{font-size:13px;color:var(--ink2);line-height:1.4}
+.pushbox[data-st=on] .pusht small{color:var(--due)}
+.pushbtns{display:flex;gap:6px;flex-wrap:wrap}
+.pushbtns:empty{display:none}
+.xmore .i{transition:transform .2s}.xmore.open .i{transform:rotate(90deg)}
+
 </style>
 </head>
 <body>
@@ -844,6 +933,8 @@ const ICONS={
   volume:'<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
   send:'<path d="M5 12h13M13 6l6 6-6 6"/>',
   help:'<circle cx="12" cy="12" r="9"/><path d="M9.4 9.4a2.7 2.7 0 015.2 1c0 1.8-2.6 2.2-2.6 3.9"/><circle cx="12" cy="17.4" r=".9" fill="currentColor" stroke="none"/>',
+  bell:'<path d="M6 16v-5a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 004 0"/>',
+  cal:'<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   link:'<path d="M10 14a4.5 4.5 0 006.4 0l3-3a4.5 4.5 0 00-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 00-6.4 0l-3 3a4.5 4.5 0 006.4 6.4l1-1"/>'
 };
 function ic(n,s){s=s||20;return '<svg class="i" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICONS[n]||'')+'</svg>';}
@@ -931,6 +1022,75 @@ I18N_DICT.push(["Поделиться по QR-коду","Share by QR code","Jaga
 I18N_DICT.push(["Фото → карточки", "Photo → cards", "Foto → kaardid"],["Сфотографируйте страницу атласа и закройте подписи рамками — каждая рамка станет карточкой.", "Photograph an atlas page and cover the labels with frames — each frame becomes a card.", "Pildista atlase lehekülg ja kata nimetused raamidega — iga raam muutub kaardiks."],["Текст подписи читается сам, прямо на устройстве — фото никуда не уходит", "Label text is read automatically, right on your device — the photo never leaves it", "Nimetuse tekst loetakse automaatselt otse seadmes — foto ei lahku sealt"],["Латинские слова сверяются со словарём анатомии", "Latin words are checked against an anatomy dictionary", "Ladina sõnu kontrollitakse anatoomiasõnastikuga"],["Учитесь по-разному", "Study in different ways", "Õpi eri viisidel"],["Скрыть все, Выбор, Ввод, Найти на рисунке — режим выбирается на главной и прямо во время учёбы", "Hide all, Choice, Typing, Find on the picture — pick a mode on Home or while studying", "Peida kõik, Valik, Sisestus, Leia pildilt — režiimi saab valida avalehel ja õppimise ajal"],["Повторения сами подбирают время (FSRS, как в современном Anki)", "Reviews schedule themselves (FSRS, as in modern Anki)", "Kordused planeeruvad ise (FSRS, nagu tänapäeva Ankis)"],["Трудные карточки собираются в «Статистике» — их можно потренировать отдельно", "Hard cards are collected in “Statistics” — you can drill them separately", "Rasked kaardid kogutakse „Statistikasse“ — neid saab eraldi harjutada"],["Claude под рукой", "Claude at hand", "Claude käepärast"],["Придумает подсказку-ассоциацию для трудного термина", "Comes up with a mnemonic hint for a hard term", "Mõtleb raske termini jaoks välja mäluvihje"],["Чат по карточке — кнопка с облачком вверху во время учёбы", "Chat about a card — the speech-bubble button at the top while studying", "Vestlus kaardi kohta — jutumulli nupp üleval õppimise ajal"],["Прочитает подписи на фото и сверит колоду с вашим конспектом", "Reads labels from a photo and compares the deck with your notes", "Loeb fotolt nimetused ja võrdleb pakki sinu konspektiga"],["Латынь вслух, три языка", "Latin aloud, three languages", "Ladina keel valjusti, kolm keelt"],["Динамик у латинского термина произносит его вслух", "The speaker button next to a Latin term says it aloud", "Kõlarinupp ladinakeelse termini juures ütleb selle valjusti"],["Включить озвучку", "Turn on speech", "Lülita hääldus sisse"],["Озвучка включена", "Speech is on", "Hääldus on sees"],["Интерфейс на русском, English и eesti — язык можно сменить в любой момент", "The interface speaks Russian, English and Estonian — switch any time", "Liides on vene, inglise ja eesti keeles — keelt saab igal ajal vahetada"],["Светлая, тёмная и бумажная темы, крупный текст и спокойный режим — всё в «Ещё»", "Light, dark and paper themes, larger text and a calm mode — all in “More”", "Hele, tume ja paberteema, suurem tekst ja rahulik režiim — kõik menüüs „Veel“"],["Делитесь колодами", "Share your decks", "Jaga oma pakke"],["Колоду или папку можно передать по QR-коду или ссылке — фото, рамки и названия приедут вместе", "Send a deck or folder by QR code or link — photos, frames and names come along", "Paki või kausta saab saata QR-koodi või lingiga — fotod, raamid ja nimetused tulevad kaasa"],["Принять: «Ещё → Получить по коду» или просто навести камеру на QR", "To receive: “More → Get by code”, or just point a camera at the QR", "Vastuvõtmiseks: „Veel → Võta koodiga“ või suuna kaamera QR-koodile"],["Колоду или папку можно передать файлом: меню колоды → «Поделиться файлом»", "Send a deck or folder as a file: deck menu → “Share as file”", "Paki või kausta saab saata failina: paki menüü → „Jaga failina“"],["Колоды из Anki (.apkg) тоже можно импортировать — в «Ещё»", "Anki decks (.apkg) can be imported too — in “More”", "Anki pakke (.apkg) saab samuti importida — menüüs „Veel“"],["Дальше", "Next", "Edasi"],["Начать", "Get started", "Alusta"],["Пропустить", "Skip", "Jäta vahele"],["Что умеет Corpus", "What Corpus can do", "Mida Corpus oskab"],["Что умеет Corpus?", "What can Corpus do?", "Mida Corpus oskab?"],["Обзор возможностей", "Feature tour", "Võimaluste ülevaade"],["Короткая обучалка: фото и рамки, распознавание текста, ИИ, озвучка латыни, обмен по QR и многое другое.", "A short walkthrough: photos and frames, text recognition, AI, Latin speech, QR sharing and more.", "Lühike ülevaade: fotod ja raamid, tekstituvastus, tehisintellekt, ladina keele hääldus, QR-jagamine ja palju muud."],["Показать обзор", "Show the tour", "Näita ülevaadet"],["Новое: короткий обзор возможностей Corpus", "New: a quick tour of what Corpus can do", "Uus: lühike ülevaade Corpuse võimalustest"]);
 I18N_DICT.push(["Делитесь по QR-коду", "Share by QR code", "Jaga QR-koodiga"],["Покажите QR-код колоды или папки — друг наведёт камеру и получит её у себя.", "Show the QR code of a deck or folder — a friend points a camera at it and gets it in their own Corpus.", "Näita paki või kausta QR-koodi — sõber suunab kaamera sellele ja saab selle oma Corpusesse."],["В меню колоды или папки: «Поделиться по QR-коду» — фото, рамки и названия приедут вместе", "In the deck or folder menu: “Share by QR code” — photos, frames and names come along", "Paki või kausta menüüs: „Jaga QR-koodiga“ — fotod, raamid ja nimetused tulevad kaasa"],["Можно отправить ссылку или короткий код вместо QR", "You can send a link or a short code instead of the QR", "QR-koodi asemel saab saata lingi või lühikese koodi"],["Принять: навести камеру на QR или «Ещё → Получить по коду»", "To receive: point a camera at the QR or use “More → Get by code”", "Vastuvõtmiseks: suuna kaamera QR-koodile või vali „Veel → Võta koodiga“"]);
 I18N_DICT.push(["На сайте Corpus колода передаётся по QR-коду или ссылке — в этой версии пока только файлом", "On the Corpus website a deck is sent by QR code or link — in this version only as a file for now", "Corpuse veebilehel saadetakse pakk QR-koodi või lingiga — selles versioonis praegu ainult failina"],["Файл: меню колоды → «Поделиться файлом»", "File: deck menu → “Share as file”", "Fail: paki menüü → „Jaga failina“"]);
+I18N_DICT.push(
+  ["Календарь","Calendar","Kalender"],["последний день","the last day","viimane päev"],["Контрольная","Test","Kontrolltöö"],["Новая контрольная","New test","Uus kontrolltöö"],["Контрольная и план","Test & plan","Kontrolltöö ja plaan"],
+  ["Дата для всех колод папки — новые карточки распределятся по дням","One date for all decks in the folder — new cards are spread across the days","Üks kuupäev kõigile kausta pakkidele — uued kaardid jaotatakse päevade vahel"],
+  ["Сейчас по плану контрольной:","Now set by the test plan:","Praegu kontrolltöö plaani järgi:"],
+  ["сегодня","today","täna"],["завтра","tomorrow","homme"],["Завтра","Tomorrow","Homme"],["Удачи!","Good luck!","Edu!"],["Сегодня — удачи!","Today — good luck!","Täna — edu!"],
+  ["Например, Коллоквиум: кости черепа","e.g. Colloquium: skull bones","nt Kollokvium: koljuluud"],["Дата","Date","Kuupäev"],["Время","Time","Kellaaeg"],["необязательно","optional","valikuline"],
+  ["Что будет на контрольной","What the test covers","Mida kontrolltöö hõlmab"],
+  ["Пока нет колод — создайте их, и контрольную можно будет привязать.","No decks yet — create some, then link them to the test.","Pakke veel pole — loo need ja seo siis kontrolltööga."],
+  ["Отдельные колоды из папок","Single decks from folders","Üksikud pakid kaustadest"],["Скрыть колоды из папок","Hide decks from folders","Peida kaustade pakid"],
+  ["Отметьте папки или колоды — тогда новые карточки из них распределятся по дням до контрольной.","Tick folders or decks — their new cards will be spread across the days until the test.","Märgi kaustad või pakid — nende uued kaardid jaotatakse päevade vahel kuni kontrolltööni."],
+  ["Колод:","Decks:","Pakke:"],["новых карточек:","new cards:","uusi kaarte:"],
+  ["Эта дата уже прошла — контрольная попадёт в прошедшие.","This date has passed — the test will go to past ones.","See kuupäev on möödas — kontrolltöö läheb möödunute hulka."],
+  ["Контрольная сегодня. Новых карточек:","The test is today. New cards:","Kontrolltöö on täna. Uusi kaarte:"],
+  ["До контрольной","Until the test:","Kontrolltööni"],["— только повторение","— review only","— ainult kordamine"],["— повторение","— review","— kordamine"],
+  ["— осталось только повторение","— only review left","— jäänud on ainult kordamine"],
+  ["Удалить контрольную?","Delete the test?","Kustutada kontrolltöö?"],
+  ["Колоды и прогресс останутся — уберётся только дата и план к ней.","Decks and progress stay — only the date and its plan are removed.","Pakid ja edenemine jäävad alles — eemaldatakse ainult kuupäev ja selle plaan."],
+  ["Контрольная удалена","Test deleted","Kontrolltöö kustutatud"],["Выберите дату контрольной","Pick the test date","Vali kontrolltöö kuupäev"],
+  ["Контрольная сохранена","Test saved","Kontrolltöö salvestatud"],["Контрольная добавлена","Test added","Kontrolltöö lisatud"],
+  ["Чтобы телефон напомнил заранее, добавьте контрольные в его календарь","To get reminded in advance, add your tests to the phone’s calendar","Et telefon tuletaks varem meelde, lisa kontrolltööd selle kalendrisse"],
+  ["Не привязаны папки — нажмите, чтобы выбрать","No folders linked — tap to choose","Kaustu pole seotud — puuduta, et valida"],
+  ["Все карточки пройдены — только повторение","All cards seen — review only","Kõik kaardid läbitud — ainult kordamine"],
+  ["Готовиться","Prepare","Valmistu"],["Тренировка","Practice","Harjutamine"],
+  ["Предыдущий месяц","Previous month","Eelmine kuu"],["Следующий месяц","Next month","Järgmine kuu"],
+  ["К повторению сегодня:","Due today:","Täna kordamiseks:"],["Повторений по расписанию:","Scheduled reviews:","Plaanitud kordamisi:"],
+  ["Контрольная на этот день","Test on this day","Kontrolltöö sellele päevale"],
+  ["Ближайшие контрольные","Upcoming tests","Eelseisvad kontrolltööd"],["Все ближайшие — в выбранном дне выше.","All upcoming ones are in the selected day above.","Kõik eelseisvad on ülal valitud päeval."],
+  ["Добавьте дату контрольной или коллоквиума и привяжите папки — Corpus распределит новые карточки по дням до неё и покажет обратный отсчёт.","Add the date of a test or colloquium and link folders — Corpus spreads the new cards across the days until then and shows a countdown.","Lisa kontrolltöö või kollokviumi kuupäev ja seo kaustad — Corpus jaotab uued kaardid päevade vahel kuni selleni ja näitab, mitu päeva on jäänud."],
+  ["Добавить контрольную","Add a test","Lisa kontrolltöö"],["Прошедшие","Past","Möödunud"],["Скрыть прошедшие","Hide past","Peida möödunud"],
+  ["Напоминания","Reminders","Meeldetuletused"],
+  ["Corpus пока не умеет сам присылать уведомления. Добавьте контрольные в календарь телефона — он напомнит заранее. А в приложении напоминание появится, когда вы его откроете.","Corpus can’t send notifications by itself yet. Add your tests to the phone’s calendar — it will remind you in advance. Inside the app a reminder shows when you open it.","Corpus ei oska veel ise teavitusi saata. Lisa kontrolltööd telefoni kalendrisse — see tuletab varem meelde. Rakenduses ilmub meeldetuletus, kui selle avad."],
+  ["Напомнить за","Remind","Tuleta meelde"],["Каждый день напоминать о повторении","Daily reminder to review","Igapäevane kordamise meeldetuletus"],["Время напоминания","Reminder time","Meeldetuletuse aeg"],
+  ["Добавить в календарь телефона","Add to phone calendar","Lisa telefoni kalendrisse"],
+  ["Файл .ics откроется в «Календаре». Если поменяете даты, удалите старые события и добавьте файл снова.","The .ics file opens in Calendar. If you change dates, delete the old events and add the file again.",".ics-fail avaneb kalendris. Kui muudad kuupäevi, kustuta vanad sündmused ja lisa fail uuesti."],
+  ["Время сохранено — добавьте файл в календарь, чтобы телефон напоминал","Time saved — add the file to your calendar so the phone reminds you","Aeg salvestatud — lisa fail kalendrisse, et telefon tuletaks meelde"],
+  ["Ежедневное напоминание выключено","Daily reminder off","Igapäevane meeldetuletus väljas"],
+  ["Изменить","Edit","Muuda"],["Название, дата, папки","Name, date, folders","Nimi, kuupäev, kaustad"],
+  ["Все карточки контрольной, не влияет на расписание","All cards of the test, doesn’t affect the schedule","Kõik kontrolltöö kaardid, ei mõjuta ajakava"],
+  ["В календарь телефона","To phone calendar","Telefoni kalendrisse"],["Только эта контрольная, с напоминаниями","Just this test, with reminders","Ainult see kontrolltöö, meeldetuletustega"],
+  ["Только пройденные","Only seen ones","Ainult läbitud"],["Трудные","Hard ones","Rasked"],["Где чаще всего ошибались","Where you slipped most often","Kus kõige sagedamini eksisid"],
+  ["Темы:","Topics:","Teemad:"],["Повторяйте в Corpus","Review in Corpus","Korda Corpuses"],["Corpus — повторить карточки","Corpus — review cards","Corpus — korda kaarte"],
+  ["Несколько минут повторения в Corpus","A few minutes of review in Corpus","Mõni minut kordamist Corpuses"],
+  ["Нет будущих контрольных — добавьте дату или включите ежедневное напоминание","No upcoming tests — add a date or turn on the daily reminder","Eelseisvaid kontrolltöid pole — lisa kuupäev või lülita sisse igapäevane meeldetuletus"],
+  ["Файл сохранён — откройте его, чтобы добавить в календарь","File saved — open it to add it to your calendar","Fail salvestatud — ava see, et lisada kalendrisse"],
+  ["Файл сохранён — откройте его и нажмите «Добавить всё»","File saved — open it and tap “Add All”","Fail salvestatud — ava see ja puuduta „Lisa kõik“"],
+  ["К календарю","To the calendar","Kalendrisse"],["Открыть","Open","Ava"],
+  ["Новое: календарь контрольных — укажите дату, и Corpus распределит карточки до неё","New: a calendar for tests — set a date and Corpus spreads your cards until then","Uus: kontrolltööde kalender — määra kuupäev ja Corpus jaotab kaardid selleni"]
+);
+
+I18N_DICT.push(
+  ["Уведомления на этом устройстве","Notifications on this device","Teavitused selles seadmes"],["Проверяю…","Checking…","Kontrollin…"],
+  ["Включены — напоминания придут, даже если Corpus закрыт","On — reminders arrive even when Corpus is closed","Sees — meeldetuletused tulevad ka siis, kui Corpus on suletud"],
+  ["Выключены","Off","Väljas"],["Запрещены в настройках телефона: Настройки → Уведомления → Corpus","Blocked in the phone settings: Settings → Notifications → Corpus","Telefoni seadetes keelatud: Seaded → Teavitused → Corpus"],
+  ["На iPhone и iPad: «Поделиться» → «На экран „Домой“», откройте Corpus оттуда и включите здесь","On iPhone and iPad: Share → “Add to Home Screen”, open Corpus from there and turn them on here","iPhone’is ja iPadis: Jaga → „Lisa kodukuvale“, ava Corpus sealt ja lülita siin sisse"],
+  ["Этот браузер не умеет показывать уведомления","This browser can’t show notifications","See brauser ei oska teavitusi näidata"],
+  ["Проверить","Test","Proovi"],["Включить","Turn on","Lülita sisse"],["Выключить","Turn off","Lülita välja"],["Включаю…","Turning on…","Lülitan sisse…"],
+  ["На iPhone уведомления работают, только если Corpus открыт с экрана «Домой».","On iPhone, notifications work only when Corpus is opened from the Home Screen.","iPhone’is töötavad teavitused ainult siis, kui Corpus on avatud kodukuvalt."],
+  ["Уведомления запрещены. Разрешите их: Настройки → Уведомления → Corpus.","Notifications are blocked. Allow them: Settings → Notifications → Corpus.","Teavitused on keelatud. Luba need: Seaded → Teavitused → Corpus."],
+  ["Без разрешения уведомления не придут.","Without permission no notifications can arrive.","Ilma loata teavitusi ei tule."],
+  ["Уведомления ещё не настроены на сайте.","Notifications aren’t set up on the site yet.","Teavitused pole saidil veel seadistatud."],
+  ["Не получилось включить уведомления. Проверьте соединение.","Couldn’t turn notifications on. Check your connection.","Teavitusi ei õnnestunud sisse lülitada. Kontrolli ühendust."],
+  ["Уведомления включены","Notifications are on","Teavitused on sees"],["Уведомления на этом устройстве выключены","Notifications are off on this device","Teavitused selles seadmes on väljas"],
+  ["Не получилось. Проверьте соединение.","That didn’t work. Check your connection.","Ei õnnestunud. Kontrolli ühendust."],
+  ["Отправлено — уведомление придёт через несколько секунд","Sent — the notification arrives in a few seconds","Saadetud — teavitus tuleb mõne sekundi pärast"],
+  ["Не удалось отправить. Выключите и включите уведомления снова.","Couldn’t send. Turn notifications off and on again.","Saatmine ebaõnnestus. Lülita teavitused välja ja uuesti sisse."],
+  ["Время сохранено","Time saved","Aeg salvestatud"],
+  ["О контрольной уведомление придёт в 8:00 в выбранные дни, накануне и в сам день. О повторении — в выбранное время, если есть карточки.","Test reminders arrive at 8:00 on the chosen days, the day before and on the day itself. Review reminders come at the chosen time when cards are due.","Kontrolltöö meeldetuletus tuleb kell 8:00 valitud päevadel, eelmisel päeval ja samal päeval. Kordamise meeldetuletus tuleb valitud ajal, kui on kaarte."],
+  ["Включите уведомления — Corpus напомнит о контрольной заранее","Turn on notifications — Corpus will remind you about the test in advance","Lülita teavitused sisse — Corpus tuletab kontrolltööd varem meelde"]
+);
 const I18N_PLU={
   'карточка|карточки|карточек':[['card','cards'],['kaart','kaarti']],
   'колода|колоды|колод|Колода|Колоды|Колод':[['deck','decks'],['pakk','pakki']],
@@ -957,7 +1117,14 @@ const isLetter=ch=>!!ch&&/[A-Za-zА-Яа-яЁёÕÄÖÜõäöü]/.test(ch);
 /* whole-sentence templates where word order differs; groups pass through the phrase translator */
 function i18nPatterns(l){
   const E=l==='en';
+  const cdx=(w,n)=>w==='Сегодня'?(E?'Today':'Täna'):w==='Завтра'?(E?'Tomorrow':'Homme'):(E?'In '+n+(n==='1'?' day':' days'):n+' päeva pärast');
   return [
+    [/^(Сегодня|Завтра|Через (\d+) \S+): «(.+?)»(?:\. Осталось новых карточек: (\d+))?$/,g=>cdx(g[1].split(' ')[0],g[2])+': '+(E?'“':'„')+g[3]+(E?'”':'“')+(g[4]?(E?'. New cards left: ':'. Uusi kaarte jäänud: ')+g[4]:'')],
+    [/^Через (\d+) \S+$/,g=>cdx('Через',g[1])],
+    [/^Осталось (\d+) (?:новая карточка|новые карточки|новых карточек)$/,g=>E?g[1]+' new '+(g[1]==='1'?'card':'cards')+' left':'Jäänud '+g[1]+' uut kaarti'],
+    [/^→ (\d+) в день$/,g=>E?' → '+g[1]+' a day':' → '+g[1]+' päevas'],
+    [/^Пройдено (\d+)%$/,g=>(E?'Done ':'Läbitud ')+g[1]+'%'],
+    [/^Колод: (.+)$/,g=>(E?'Decks: ':'Pakke: ')+g[1]],
     [/^Активность за (\d+) недель$/,g=>E?'Activity over the last '+g[1]+' weeks':'Aktiivsus viimase '+g[1]+' nädala jooksul'],
     [/^Фото (\d+)(.*)$/,g=>(E?'Photo ':'Foto ')+g[1]+frag(g[2])],
     [/^Экзамен (.+?) прошёл$/,g=>E?'The exam on '+g[1]+' is over':'Eksam '+g[1]+' on möödas'],
@@ -1139,7 +1306,7 @@ function confirmDialog(o){
 }
 
 /* ---------- state ---------- */
-const S={db:null,assets:null,sample:null,imgOK:false,ready:false,loadErr:false,saveErr:false,decks:[],plates:[],cards:[],stats:{},folders:[]};
+const S={db:null,assets:null,sample:null,imgOK:false,ready:false,loadErr:false,saveErr:false,decks:[],plates:[],cards:[],stats:{},folders:[],exams:[]};
 const deckById=id=>S.decks.find(d=>d.id===id);
 const plateById=id=>S.plates.find(p=>p.id===id);
 /* cards by id: a map, rebuilt lazily whenever S.cards is replaced or grows (an import looks up thousands) */
@@ -1188,12 +1355,13 @@ function normCard(c){
 
 /* ---------- persistence: serialized, coalesced per document ---------- */
 const WQ={keys:[],jobs:new Map(),busy:false,retries:new Map()};
-function getObj(coll,id){if(coll==='decks')return deckById(id);if(coll==='plates')return plateById(id);if(coll==='terms')return cardById(id);if(coll==='stats')return S.stats[id];if(coll==='meta')return META;if(coll==='folders')return folderById(id);return null;}
+function getObj(coll,id){if(coll==='decks')return deckById(id);if(coll==='plates')return plateById(id);if(coll==='terms')return cardById(id);if(coll==='stats')return S.stats[id];if(coll==='meta')return META;if(coll==='folders')return folderById(id);if(coll==='exams')return examById(id);return null;}
 function isLocalPlate(pid){const p=plateById(pid);return !!(p&&p._local);}
 function clean(o){const r={};for(const k in o){if(k==='id'||k==='url'||k[0]==='_')continue;r[k]=o[k];}return JSON.parse(JSON.stringify(r));}
 /* a name or hint typed on one photo of a linked label is the name/hint of the whole group */
 const GRP_SHARED=['term','hint','hintLeft','hintSnooze'];let GRP_BUSY=false;
 function persist(coll,id){
+  if(typeof pushSyncSoon==='function'&&coll!=='meta')pushSyncSoon();
   if(coll==='terms'&&!GRP_BUSY){const c=cardById(id);if(c&&c.grp){GRP_BUSY=true;try{grpMates(c).forEach(o=>{let ch=false;GRP_SHARED.forEach(k=>{if(o[k]!==c[k]){if(c[k]===undefined)delete o[k];else o[k]=c[k];ch=true;}});if(ch)persist('terms',o.id);});}finally{GRP_BUSY=false;}}}
   if(!S.db)return;
   if(coll==='terms'){const c=cardById(id);if(c&&c._pk){packTouch(c);return;}}
@@ -1201,7 +1369,7 @@ function persist(coll,id){
   if(coll==='terms'){const c=cardById(id);if(c&&isLocalPlate(c.plateId))return;}
   enq(coll+'/'+id,{coll:coll,id:id,op:'set'});
 }
-function removeDoc(coll,id){if(S.db)enq(coll+'/'+id,{coll:coll,id:id,op:'del'});}
+function removeDoc(coll,id){if(S.db)enq(coll+'/'+id,{coll:coll,id:id,op:'del'});if(typeof pushSyncSoon==='function')pushSyncSoon();}
 function afterWrites(fn){enq('fn/'+Math.random(),{op:'fn',fn:fn});}
 function enq(k,job){if(!WQ.jobs.has(k))WQ.keys.push(k);WQ.jobs.set(k,job);pump();}
 /* where the storage can take many documents in one request (S.db.setMany — the website), consecutive
@@ -1400,7 +1568,7 @@ const app=document.getElementById('app');
 let view={name:'loading'};
 const SCREENS={};
 /* ---------- motion ---------- */
-const DEPTH={home:0,library:0,globalStats:0,settings:0,folder:1,deck:2,study:3,editor:3,practice:3,crop:3};
+const DEPTH={home:0,library:0,calendar:0,globalStats:0,settings:0,folder:1,deck:2,study:3,editor:3,practice:3,crop:3};
 let NAV=null,LASTTAB=null;
 function RM(){if(typeof META!=='undefined'&&META.calm)return true;try{return matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}}
 function go(v){
@@ -1558,6 +1726,7 @@ function startGlobalStudy(subset){
 const TABS=[
   {k:'home',label:'Главная',icon:'home'},
   {k:'library',label:'Колоды',icon:'layers'},
+  {k:'calendar',label:'Календарь',icon:'cal'},
   {k:'globalStats',label:'Статистика',icon:'chart'},
   {k:'settings',label:'Ещё',icon:'more'}
 ];
@@ -1578,7 +1747,7 @@ SCREENS.home={
       (!S.db&&S.ready?'<div class="banner">Хранилище недоступно в этом окне — изменения не сохранятся после перезагрузки.</div>':'')+
       (S.loadErr?'<div class="banner">Не удалось загрузить сохранённые данные. Обновите страницу.</div>':'')+
       (S.decks.length?
-        '<div class="today-top"><div class="h2">Сегодня</div><div class="muted sm">'+esc(meta)+'</div></div>'+
+        homeExamHtml()+'<div class="today-top"><div class="h2">Сегодня</div><div class="muted sm">'+esc(meta)+'</div></div>'+
         '<div class="stattiles">'+
           '<div class="stattile new">'+ic('layers',18)+'<b>'+c.new+'</b><span>новых</span></div>'+
           '<div class="stattile due">'+ic('chart',18)+'<b>'+c.review+'</b><span>на повтор</span></div>'+
@@ -1925,7 +2094,7 @@ async function folderMenu(fid){
   const f=folderById(fid);if(!f)return;
   const v=await actionSheet(f.name,[
     {v:'rename',icon:'pencil',label:'Переименовать'},
-    {v:'exam',icon:'chart',label:'План к экзамену',sub:f.examDate?'Экзамен '+fmtDate(f.examDate):'Одна дата для всех колод папки'},
+    {v:'exam',icon:'cal',label:'Контрольная и план',sub:examForFolder(f)?examMenuSub(examForFolder(f)):'Дата для всех колод папки — новые карточки распределятся по дням'},
     ...(sharesApi()?[{v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:'Код или ссылка — все колоды папки появятся у другого человека'}]:[]),
     {v:'share',icon:'layers',label:'Поделиться папкой',sub:'Все колоды папки: фото, рамки и названия, без прогресса'},
     {v:'del',icon:'trash',label:'Удалить папку',danger:true}]);
@@ -1955,8 +2124,8 @@ async function deckMenu(did){
     {v:'share',icon:'layers',label:'Поделиться файлом',sub:'Фото, рамки и названия, без прогресса'},
     ...(cardsOfDeck(did).length?[{v:'cmp',icon:'list',label:'Сверить с конспектом',sub:'Лишние карточки можно удалить вместе с рамками'}]:[]),
     ...(isTextDeck(d)?[]:(()=>{const u=cardsOfDeck(did).filter(c=>!isText(c)&&!c.term&&!isArrow(c)).length;return u?[{v:'ocrAll',icon:'spark',label:'Прочитать названия рамок',sub:pl(u,'рамка','рамки','рамок')+' без названия — распознать подписи на фото'}]:[];})()),
-    {v:'exam',icon:'chart',label:'План к экзамену',sub:examOf(d)?('Экзамен '+fmtDate(examOf(d))+(d.examDate?'':' (дата папки)')):'Не задан — укажите дату, и новые карточки распределятся по дням'},
-    {v:'limit',icon:'layers',label:'Новых карточек в день',sub:planQuota(d)!=null?('Сейчас по плану экзамена: '+planQuota(d)):'Сейчас: '+(d.newPerDay==null?20:d.newPerDay)},
+    {v:'exam',icon:'cal',label:'Контрольная и план',sub:examMenuSub(examForDeck(d))},
+    {v:'limit',icon:'layers',label:'Новых карточек в день',sub:planQuota(d)!=null?('Сейчас по плану контрольной: '+planQuota(d)):'Сейчас: '+(d.newPerDay==null?20:d.newPerDay)},
     {v:'del',icon:'trash',label:'Удалить колоду',danger:true}]);
   if(v==='qr'){shareByCode('deck',did);return;}
   if(v==='share'){exportDeck(did);return;}
@@ -2045,7 +2214,7 @@ function startSession(scope,cram,subset,mode){
   const order={};plates.forEach((p,i)=>order[p.id]=i);
   const groups={};pool.filter(c=>c.type==='new').forEach(c=>(groups[c.plateId]=groups[c.plateId]||[]).push(c));
   const newOrder=Object.keys(groups).sort((a,b)=>(order[a]||0)-(order[b]||0)).reduce((acc,k)=>acc.concat(shuffle(groups[k]).map(c=>c.id)),[]);
-  SS={deckId:scope.deckId||null,deckIds:deckIds,folderId:scope.folderId||null,mode:mode,cram:!!cram,cramQueue:cram?weakOrder(uniqGrp(pool)):[],
+  SS={deckId:scope.deckId||null,deckIds:deckIds,folderId:scope.folderId||null,examId:scope.examId||null,mode:mode,cram:!!cram,cramQueue:cram?weakOrder(uniqGrp(pool)):[],
     reviewOrder:weakOrder(pool.filter(c=>c.type==='review'&&c.due<eod)),newOrder:newOrder,
     exclude:subset?new Set(S.cards.filter(c=>deckIds.indexOf(c.deckId)>=0&&pool.indexOf(c)<0).map(c=>c.id)):null,
     done:0,undo:[],zoom:(SS&&SS.zoom)||(window.innerWidth<600?1.5:1),cur:null,lastId:null};
@@ -2180,13 +2349,13 @@ function studyPanel(){
   return top+'<div class="ans">'+name+(c.note?'<div class="anote">'+esc(c.note)+'</div>':'')+'</div>'+rateHtml(c);
 }
 function doneHtml(){
-  const scope=SS.folderId?folderById(SS.folderId):deckById(SS.deckId);let next='';
+  const scope=SS.examId&&examById(SS.examId)?{name:exTitle(examById(SS.examId))}:SS.folderId?folderById(SS.folderId):deckById(SS.deckId);let next='';
   if(!SS.cram){const ids=sessionDeckIds();const l=S.cards.filter(c=>ids.indexOf(c.deckId)>=0&&!cardExcluded(c)&&(c.type==='learn'||c.type==='relearn')).sort((a,b)=>a.due-b.due)[0];if(l)next=' Следующая карточка будет готова через '+fmtDelay(l.due-Date.now())+'.';}
   return '<div class="full"><header class="bar"><button class="ibtn plain" data-act="studyExit" aria-label="Закрыть">'+ic('close')+'</button><div class="bar-title"><b data-noi18n>'+esc(scope?scope.name:'')+'</b></div>'+gearBtn(1)+'</header>'+
     (SS.limitHit?'<div class="donebox"><div class="done-mark">'+ic('check',26)+'</div><h2>Сессия завершена</h2><p class="muted">'+pl(SS.done,'ответ','ответа','ответов')+' за '+pl(Math.max(1,Math.round((Date.now()-SS.t0)/MIN)),'минуту','минуты','минут')+'. Хорошая работа — можно передохнуть или продолжить.</p>'+
     '<div class="done-btns"><button class="btn primary" data-act="sessMore">'+(SS.limit==='t10'?'Ещё 10 минут':'Ещё 20 карточек')+'</button><button class="btn line" data-act="studyExit">Закончить</button>':
     '<div class="donebox"><div class="done-mark">'+ic('check',26)+'</div><h2>'+(SS.cram?'Тренировка завершена':'На сегодня всё')+'</h2><p class="muted">'+(SS.done?'Ответов за сессию: '+SS.done+'.':'Карточек к повтору нет.')+next+'</p>'+
-    '<div class="done-btns"><button class="btn primary" data-act="studyExit">К колоде</button>')+(SS.undo.length?'<button class="btn line" data-act="studyUndo">Отменить последний ответ</button>':'')+'</div></div></div>';
+    '<div class="done-btns"><button class="btn primary" data-act="studyExit">'+(SS.examId?'К календарю':'К колоде')+'</button>')+(SS.undo.length?'<button class="btn line" data-act="studyUndo">Отменить последний ответ</button>':'')+'</div></div></div>';
 }
 SCREENS.study={
   html(){
@@ -3315,7 +3484,7 @@ async function cropApply(){
 /* ---------- backup, export, import ---------- */
 const META={id:'settings',lastBackup:0};
 const WEEK=7*86400000;
-function persistMeta(){if(S.db)enq('meta/settings',{coll:'meta',id:'settings',op:'set'});}
+function persistMeta(){if(S.db)enq('meta/settings',{coll:'meta',id:'settings',op:'set'});if(typeof pushSyncSoon==='function')pushSyncSoon();}
 function setBusy(t){const b=$('#busy .busy-in div:nth-child(2)');if(b)b.textContent=t;}
 function blobToDataURL(b){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(b);});}
 function dataURLtoBlob(u){const i=u.indexOf(',');const mime=(u.slice(5,i).split(';')[0])||'image/jpeg';const bin=atob(u.slice(i+1));const a=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)a[k]=bin.charCodeAt(k);return new Blob([a],{type:mime});}
@@ -3337,6 +3506,7 @@ async function buildExport(deckIds,full,fid,link){
   if(full){
     const fids=new Set(S.decks.filter(d=>deckIds.indexOf(d.id)>=0).map(d=>d.folderId).filter(Boolean));
     S.folders.filter(f=>fids.has(f.id)).forEach(f=>out.folders.push(Object.assign({id:f.id},clean(f))));
+    out.exams=S.exams.map(e=>Object.assign({id:e.id},clean(e)));
   }
   for(const p of ps){
     i++;const po={id:p.id,deckId:p.deckId,w:p.w||0,h:p.h||0,createdAt:p.createdAt||0};
@@ -3396,6 +3566,7 @@ function wipeAll(){
   Object.keys(S.stats).forEach(k=>{delete S.stats[k];removeDoc('stats',k);});
   S.decks.slice().forEach(d=>{S.decks=S.decks.filter(x=>x.id!==d.id);removeDoc('decks',d.id);});
   S.folders.slice().forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});
+  S.exams.slice().forEach(e=>{S.exams=S.exams.filter(x=>x.id!==e.id);removeDoc('exams',e.id);});
 }
 async function importFile(file){
   if(/\.(apkg|colpkg|anki2|anki21)$/i.test(file.name||'')){ankiImport(file);return;}
@@ -3465,6 +3636,12 @@ async function importData(data,opts){
     dmap[sd.id]=d.id;S.decks.push(d);persist('decks',d.id);
     if(full&&data.stats&&data.stats[sd.id]){S.stats[d.id]={id:d.id,days:data.stats[sd.id].days||{}};persist('stats',d.id);}
   });
+  if(full&&Array.isArray(data.exams)){
+    data.exams.forEach(se=>{if(!se||!se.date)return;const e=Object.assign({},se);e.id=newId('exams');
+      e.folderIds=(se.folderIds||[]).map(x=>fmap[x]).filter(Boolean);e.deckIds=(se.deckIds||[]).map(x=>dmap[x]).filter(Boolean);
+      S.exams.push(e);persist('exams',e.id);});
+  }
+  if(full)examMigrate();PQ.clear();
   const lastT={};const nextT=(did,t)=>(lastT[did]=Math.max(t||t0,(lastT[did]||0)+1));
   inOrder(Object.keys(pmap).map(oid=>pmap[oid].src),'createdAt').forEach(x=>{
     const sp=x.o,m=pmap[sp.id];if(!dmap[sp.deckId])return;
@@ -4780,7 +4957,7 @@ function sessLimitReached(){if(!SS||!SS.limit)return false;if(SS.limit==='t10')r
 function limTag(){if(!SS||!SS.limit)return '';if(SS.limit==='n20')return '<span class="limtag" title="Лимит сессии">'+Math.min(SS.done,SS.nEnd)+'/'+SS.nEnd+'</span>';const m=Math.max(0,Math.ceil((SS.tEnd-Date.now())/MIN));return '<span class="limtag" title="Осталось времени">'+m+' мин</span>';}
 function sessMore(){if(!SS)return;if(SS.limit==='t10')SS.tEnd=Date.now()+10*MIN;else if(SS.limit==='n20')SS.nEnd=SS.done+20;SS.limitHit=false;SS.confetti=false;SS.cur=pickNext();if(SS.cur)setupCard();render();}
 /* ---------- exam plan: spread new cards evenly until the exam date ---------- */
-function examOf(d){if(!d)return null;const f=d.folderId&&folderById(d.folderId);return d.examDate||(f&&f.examDate)||null;}
+function examOf(d){const e=examForDeck(d);return e?e.date:null;}
 function daysUntil(ds){const t=Date.parse(ds+'T00:00:00');if(!isFinite(t))return null;return Math.round((startOfDay(t)-startOfDay())/86400000);}
 function reviewDays(dl){return dl>=10?3:dl>=4?1:0;}
 const PQ=new Map();
@@ -4792,39 +4969,387 @@ function planQuota(d){
   const v=Math.ceil((n+used)/Math.max(1,dl-reviewDays(dl)));PQ.set(k,{v:v,t:Date.now()});return v;
 }
 function fmtDate(ds){const t=Date.parse(ds+'T00:00:00');if(!isFinite(t))return ds;const d=new Date(t);return d.getDate()+(LANG==='et'?'. ':' ')+MONTHS[d.getMonth()];}
-function examLineHtml(ex,newAll,quota,act,id){
-  if(!ex)return '';const dl=daysUntil(ex);
-  if(dl==null)return '';
-  if(dl<0)return '<button class="examline over" data-act="'+act+'" data-id="'+id+'">'+ic('check',16)+'<span>Экзамен '+fmtDate(ex)+' прошёл<small> · нажмите, чтобы изменить</small></span></button>';
-  const rd=reviewDays(dl);
-  const txt=dl===0?'Экзамен сегодня — удачи!':'Экзамен через '+pl(dl,'день','дня','дней')+' ('+fmtDate(ex)+')';
-  const sub=dl===0?'':(newAll?' · '+(quota||0)+' новых в день'+(rd?', последние '+pl(rd,'день','дня','дней')+' — повторение':''):' · всё выучено, только повторение');
-  return '<button class="examline" data-act="'+act+'" data-id="'+id+'">'+ic('chart',16)+'<span>'+txt+'<small>'+sub+'</small></span></button>';
+/* ---------- tests & exams calendar: dated tests linked to folders/decks. They drive the exam plan
+   (new cards spread until the date), the home countdown, a once-a-day reminder in the app and
+   an .ics file for the phone's own calendar, which does the actual notifying. ---------- */
+const examById=id=>S.exams.find(e=>e.id===id);
+const byExDate=(a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||''));
+function exDays(e){const v=daysUntil(e.date);return v==null?-9999:v;}
+function exDecks(e){
+  const ids=new Set();
+  (e.folderIds||[]).forEach(fid=>decksInFolder(fid).forEach(d=>ids.add(d.id)));
+  (e.deckIds||[]).forEach(id=>{if(deckById(id))ids.add(id);});
+  return Array.from(ids);
 }
-function deckExamLine(d){const ex=examOf(d);if(!ex)return '';const c=deckCounts(d.id);return examLineHtml(ex,c.newAll,planQuota(d),'examDeck',d.id);}
-function folderExamLine(f){if(!f.examDate)return '';let n=0,q=0;decksInFolder(f.id).forEach(d=>{const c=deckCounts(d.id);n+=c.newAll;q+=planQuota(d)||0;});return examLineHtml(f.examDate,n,q,'examFolder',f.id);}
+function exCovers(e,d){return (e.deckIds||[]).indexOf(d.id)>=0||(!!d.folderId&&(e.folderIds||[]).indexOf(d.folderId)>=0);}
+function examsUpcoming(){return S.exams.filter(e=>exDays(e)>=0).sort(byExDate);}
+function examsPast(){return S.exams.filter(e=>exDays(e)<0).sort(byExDate).reverse();}
+function examForDeck(d){if(!d)return null;return S.exams.filter(e=>exDays(e)>=0&&exCovers(e,d)).sort(byExDate)[0]||null;}
+function examForFolder(f){if(!f)return null;const ds=decksInFolder(f.id);return S.exams.filter(e=>exDays(e)>=0&&((e.folderIds||[]).indexOf(f.id)>=0||ds.some(d=>(e.deckIds||[]).indexOf(d.id)>=0))).sort(byExDate)[0]||null;}
+function exTitle(e){return e.title||'Контрольная';}
+/* old builds kept one date on a deck or folder: it becomes a test in the calendar */
+function examMigrate(){
+  const mk=(o,coll)=>{
+    if(!o.examDate)return;
+    const e={id:newId('exams'),title:o.name||'',date:o.examDate,folderIds:coll==='folders'?[o.id]:[],deckIds:coll==='decks'?[o.id]:[],createdAt:Date.now()};
+    S.exams.push(e);persist('exams',e.id);delete o.examDate;persist(coll,o.id);
+  };
+  S.folders.forEach(f=>mk(f,'folders'));S.decks.forEach(d=>mk(d,'decks'));
+}
+/* where a test stands: cards covered, how many are still new, the daily pace to finish in time */
+function exStat(e){
+  const ids=exDecks(e);let total=0,na=0,due=0,nw=0;
+  ids.forEach(id=>{const c=deckCounts(id);total+=c.total;na+=c.newAll;due+=c.learn+c.review;nw+=c.new;});
+  const dl=exDays(e);const rd=dl>0?reviewDays(dl):0;
+  const quota=dl>0&&na?Math.ceil(na/Math.max(1,dl-rd)):0;
+  return {ids:ids,total:total,newAll:na,due:due,newToday:nw,dl:dl,rd:rd,quota:quota,pct:total?Math.round((total-na)/total*100):0};
+}
+function rdText(rd){return rd===1?'последний день':'последние '+pl(rd,'день','дня','дней');}
+function cdText(dl){return dl===0?'сегодня':dl===1?'завтра':'через '+pl(dl,'день','дня','дней');}
+function wdShort(ds){const t=Date.parse(ds+'T00:00:00');if(!isFinite(t))return '';return WD_L[LANG][(new Date(t).getDay()+6)%7];}
+function exScopeNames(e){
+  const n=[];(e.folderIds||[]).forEach(id=>{const f=folderById(id);if(f)n.push(f.name);});
+  (e.deckIds||[]).forEach(id=>{const d=deckById(id);if(d)n.push(d.name);});
+  return n;
+}
+/* one line under a deck / folder overview and on the home screen */
+function exLineHtml(e,act,id){
+  if(!e)return '';const s=exStat(e);
+  const sub=s.dl===0?'Удачи!':(s.newAll?s.quota+' новых в день'+(s.rd?', '+rdText(s.rd)+' — повторение':''):'всё выучено, только повторение');
+  return '<button class="examline'+(s.dl<=3?' soon':'')+'" data-act="'+act+'"'+(id?' data-id="'+esc(id)+'"':'')+'>'+ic('cal',16)+
+    '<span><b class="exn" data-noi18n>'+esc(exTitle(e))+'</b> <em class="cd">'+cdText(s.dl)+'</em><small><span> · '+fmtDate(e.date)+(e.time?', '+esc(e.time):'')+'</span><br><span>'+sub+'</span></small></span></button>';
+}
+function deckExamLine(d){return exLineHtml(examForDeck(d),'examDeck',d.id);}
+function folderExamLine(f){return exLineHtml(examForFolder(f),'examFolder',f.id);}
+function homeExamHtml(){
+  const e=examsUpcoming()[0];if(!e||exDays(e)>30)return '';
+  return exLineHtml(e,'goCal');
+}
+/* the deck / folder menus open the test that covers it, or a new one with it already ticked */
 async function editExam(kind,id){
   const o=kind==='folder'?folderById(id):deckById(id);if(!o)return;
-  const decks=kind==='folder'?decksInFolder(id):[o];
-  const newAll=()=>decks.reduce((a,d)=>a+deckCounts(d.id).newAll,0);
-  const inherited=kind==='deck'&&!o.examDate&&examOf(o);
+  const e=kind==='folder'?examForFolder(o):examForDeck(o);
+  if(e)return editExamDlg(e.id);
+  return editExamDlg(null,kind==='folder'?{folderIds:[id]}:{deckIds:[id]});
+}
+function examMenuSub(e){return e?'«'+exTitle(e)+'», '+fmtDate(e.date):'Не задан — укажите дату, и новые карточки распределятся по дням';}
+
+/* ---------- add / edit a test ---------- */
+async function editExamDlg(id,preset){
+  const ex=id?examById(id):null;preset=preset||{};
+  const st={f:new Set(ex?ex.folderIds||[]:preset.folderIds||[]),d:new Set(ex?ex.deckIds||[]:preset.deckIds||[]),more:false};
+  /* a deck ticked inside a folder that is itself ticked is redundant */
+  const folders=S.folders.slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  const loose=S.decks.filter(d=>!d.folderId||!folderById(d.folderId)).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+  const inFolders=folders.filter(f=>decksInFolder(f.id).length);
+  if(folders.some(f=>!st.f.has(f.id)&&decksInFolder(f.id).some(d=>st.d.has(d.id))))st.more=true;
+  const chip=(kind,o,on,extra)=>'<button type="button" class="xchip'+(on?' on':'')+'" data-k="'+kind+'" data-id="'+esc(o.id)+'" aria-pressed="'+on+'"'+(extra||'')+'>'+(kind==='f'?ic('folder',15):ic('layers',15))+'<span data-noi18n>'+esc(o.name)+'</span></button>';
+  const chipsHtml=()=>{
+    let h=(folders.length||loose.length)?'<div class="xchips">'+folders.map(f=>chip('f',f,st.f.has(f.id))).join('')+loose.map(d=>chip('d',d,st.d.has(d.id))).join('')+'</div>':'<div class="plan-prev">Пока нет колод — создайте их, и контрольную можно будет привязать.</div>';
+    const rest=inFolders.filter(f=>!st.f.has(f.id));
+    if(rest.length){
+      h+='<button type="button" class="xmore'+(st.more?' open':'')+'" data-more>'+ic('fwd',15)+(st.more?'Скрыть колоды из папок':'Отдельные колоды из папок')+'</button>';
+      if(st.more)h+=rest.map(f=>'<div class="xgroup"><div class="xgt" data-noi18n>'+esc(f.name)+'</div><div class="xchips">'+decksInFolder(f.id).map(d=>chip('d',d,st.d.has(d.id))).join('')+'</div></div>').join('');
+    }
+    return h;
+  };
   const today=dayKey();
-  const html='<div class="dlg"><h3>План к экзамену</h3><p>Укажите дату экзамена — приложение само распределит новые карточки по дням, чтобы всё выучить к сроку, и оставит последние дни на повторение.'+(inherited?' Сейчас действует дата папки.':'')+'</p>'+
-    '<input type="date" id="exIn" min="'+today+'" value="'+esc(o.examDate||'')+'"><div class="plan-prev" id="exPrev"></div>'+
-    '<div class="dlg-btns">'+(o.examDate?'<button class="btn line danger" data-s="clear">Убрать</button>':'')+'<button class="btn line" data-s="0">Отмена</button><button class="btn primary" data-s="1">Сохранить</button></div></div>';
+  const html='<div class="dlg exdlg"><h3>'+(ex?'Контрольная':'Новая контрольная')+'</h3>'+
+    '<input id="exT" placeholder="Например, Коллоквиум: кости черепа" value="'+esc(ex?ex.title||'':preset.title||'')+'" autocomplete="off">'+
+    '<div class="exrow"><label><span>Дата</span><input type="date" id="exD" '+(ex?'':'min="'+today+'" ')+'value="'+esc(ex?ex.date:(preset.date||''))+'"></label>'+
+    '<label><span>Время <small>необязательно</small></span><input type="time" id="exH" value="'+esc(ex?ex.time||'':'')+'"></label></div>'+
+    '<div class="xlab">Что будет на контрольной</div><div id="exC">'+chipsHtml()+'</div>'+
+    '<div class="plan-prev" id="exP"></div>'+
+    '<div class="dlg-btns">'+(ex?'<button class="btn line danger ico" data-s="del" aria-label="Удалить">'+ic('trash',18)+'</button>':'')+'<button class="btn line" data-s="0">Отмена</button><button class="btn primary" data-s="1">Сохранить</button></div></div>';
   const v=await showOverlay(html,ov=>{
-    const inp=$('#exIn',ov),pv=$('#exPrev',ov);
-    const upd=()=>{const ds=inp.value;const n=newAll();if(!ds){pv.textContent='Новых карточек: '+n+'. Выберите дату.';return;}const dl=daysUntil(ds);
-      if(dl==null||dl<1){pv.textContent='Выберите дату в будущем.';return;}const rd=reviewDays(dl),ld=Math.max(1,dl-rd);
-      pv.innerHTML='До экзамена <b>'+pl(dl,'день','дня','дней')+'</b>. Новых карточек: <b>'+n+'</b> → примерно <b>'+Math.ceil(n/ld)+' в день</b>'+(rd?', последние '+pl(rd,'день','дня','дней')+' — только повторение':'')+'.';};
-    inp.addEventListener('input',upd);upd();
-    $$('[data-s]',ov).forEach(b=>b.onclick=()=>dismissOverlay(b.dataset.s==='1'?{date:inp.value}:b.dataset.s==='clear'?{clear:true}:null));
+    const tI=$('#exT',ov),dI=$('#exD',ov),hI=$('#exH',ov),box=$('#exC',ov),pv=$('#exP',ov);
+    const upd=()=>{
+      const tmp={folderIds:Array.from(st.f),deckIds:Array.from(st.d),date:dI.value};
+      const ids=exDecks(tmp);let n=0;ids.forEach(id=>{n+=deckCounts(id).newAll;});
+      if(!ids.length){pv.textContent='Отметьте папки или колоды — тогда новые карточки из них распределятся по дням до контрольной.';return;}
+      if(!dI.value){pv.innerHTML='Колод: <b>'+ids.length+'</b>, новых карточек: <b>'+n+'</b>. Выберите дату.';return;}
+      const dl=daysUntil(dI.value);
+      if(dl==null||dl<0){pv.textContent='Эта дата уже прошла — контрольная попадёт в прошедшие.';return;}
+      if(dl===0){pv.innerHTML='Контрольная сегодня. Новых карточек: <b>'+n+'</b>.';return;}
+      const rd=reviewDays(dl),ld=Math.max(1,dl-rd);
+      pv.innerHTML='До контрольной <b>'+pl(dl,'день','дня','дней')+'</b>. Новых карточек: <b>'+n+'</b>'+(n?' → примерно <b>'+Math.ceil(n/ld)+' в день</b>'+(rd?', '+rdText(rd)+' — только повторение':''):' — осталось только повторение')+'.';
+    };
+    box.addEventListener('click',e=>{
+      const m=e.target.closest('[data-more]');if(m){st.more=!st.more;box.innerHTML=chipsHtml();if(I18N)i18nTree(box);return;}
+      const b=e.target.closest('.xchip');if(!b)return;
+      const set=b.dataset.k==='f'?st.f:st.d;const id=b.dataset.id;
+      if(set.has(id))set.delete(id);else set.add(id);
+      if(b.dataset.k==='f'&&st.f.has(id))decksInFolder(id).forEach(d=>st.d.delete(d.id));
+      box.innerHTML=chipsHtml();if(I18N)i18nTree(box);upd();
+    });
+    dI.addEventListener('input',upd);upd();
+    if(!ex&&!tI.value)setTimeout(()=>{try{tI.focus();}catch(e){}},80);
+    $$('[data-s]',ov).forEach(b=>b.onclick=()=>{
+      const s=b.dataset.s;
+      if(s==='1')dismissOverlay({save:true,title:tI.value.trim(),date:dI.value,time:hI.value||''});
+      else if(s==='del')dismissOverlay({del:true});
+      else dismissOverlay(null);
+    });
   });
   if(!v)return;
-  if(v.clear){delete o.examDate;toast('План к экзамену убран');}
-  else{if(!v.date||(daysUntil(v.date)||0)<1){toast('Выберите дату в будущем');return;}o.examDate=v.date;toast('План сохранён');}
-  PQ.clear();persist(kind==='folder'?'folders':'decks',o.id);render();
+  if(v.del){
+    if(!(await confirmDialog({title:'Удалить контрольную?',text:'Колоды и прогресс останутся — уберётся только дата и план к ней.'})))return;
+    S.exams=S.exams.filter(e=>e.id!==id);removeDoc('exams',id);PQ.clear();toast('Контрольная удалена');render();return;
+  }
+  if(!v.date||daysUntil(v.date)==null){toast('Выберите дату контрольной');return;}
+  if(!ex&&daysUntil(v.date)<0){toast('Выберите дату в будущем');return;}
+  const o=ex||{id:newId('exams'),createdAt:Date.now()};
+  o.folderIds=Array.from(st.f).filter(fid=>folderById(fid));
+  o.deckIds=Array.from(st.d).filter(did=>deckById(did)&&!(deckById(did).folderId&&st.f.has(deckById(did).folderId)));
+  o.title=v.title||exScopeNames(o).join(', ')||'Контрольная';
+  o.date=v.date;if(v.time)o.time=v.time;else delete o.time;
+  if(!ex)S.exams.push(o);
+  persist('exams',o.id);PQ.clear();
+  CAL.sel=o.date;const t=new Date(Date.parse(o.date+'T00:00:00'));CAL.y=t.getFullYear();CAL.m=t.getMonth();
+  toast(ex?'Контрольная сохранена':'Контрольная добавлена');render();
+  if(!ex&&WEBPUSH()&&!META.pushOn&&!META.pushNudge){META.pushNudge=1;persistMeta();setTimeout(()=>featTip('pushNudge','Включите уведомления — Corpus напомнит о контрольной заранее',['Включить',()=>pushEnable()],8000),1400);}
+  else if(!ex&&!WEBPUSH()&&!META.remNudge&&S.downloads){META.remNudge=1;persistMeta();setTimeout(()=>featTip('icsNudge','Чтобы телефон напомнил заранее, добавьте контрольные в его календарь',['Добавить',()=>exportIcs()],8000),1400);}
 }
+
+/* ---------- the calendar tab ---------- */
+const CAL={y:null,m:null,sel:null,past:false};
+const MONTHS_FULL_L={ru:['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'],
+  en:['January','February','March','April','May','June','July','August','September','October','November','December'],
+  et:['Jaanuar','Veebruar','Märts','Aprill','Mai','Juuni','Juuli','August','September','Oktoober','November','Detsember']};
+const WD_L={ru:['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],en:['Mo','Tu','We','Th','Fr','Sa','Su'],et:['E','T','K','N','R','L','P']};
+/* scheduled reviews per day (overdue and learning cards count today) */
+function dueByDay(){
+  const m={};const t0=startOfDay(),eod=addDays(t0,1);
+  for(const c of uniqGrp(S.cards)){
+    if(c.type==='new'||cardExcluded(c))continue;
+    const k=c.due<eod?dayKey(t0):dayKey(c.due);m[k]=(m[k]||0)+1;
+  }
+  return m;
+}
+function calInit(){
+  if(CAL.y==null){const t=new Date();CAL.y=t.getFullYear();CAL.m=t.getMonth();CAL.sel=dayKey();}
+}
+function exCardHtml(e){
+  const s=exStat(e);const names=exScopeNames(e);
+  let meta;
+  if(!s.ids.length)meta='<span class="warn">Не привязаны папки — нажмите, чтобы выбрать</span>';
+  else if(s.dl<0)meta='<span>Пройдено '+s.pct+'%</span>';
+  else if(s.dl===0)meta='<span>Сегодня — удачи!</span>';
+  else if(s.newAll)meta='<span>Осталось '+pl(s.newAll,'новая карточка','новые карточки','новых карточек')+'</span><span> → '+s.quota+' в день</span>';
+  else meta='<span>Все карточки пройдены — только повторение</span>';
+  const can=s.ids.length&&s.dl>=0;
+  return '<div class="excard'+(s.dl<0?' past':s.dl<=3?' soon':'')+'">'+
+    '<button class="exmain" data-act="exOpen" data-id="'+esc(e.id)+'">'+
+      '<span class="exdate"><b>'+new Date(Date.parse(e.date+'T00:00:00')).getDate()+'</b><small data-noi18n>'+esc(MONTHS[new Date(Date.parse(e.date+'T00:00:00')).getMonth()])+'</small></span>'+
+      '<span class="exbody"><b class="exn" data-noi18n>'+esc(exTitle(e))+'</b>'+
+        '<span class="exsub">'+(s.dl>=0?'<em class="cd">'+cdText(s.dl)+'</em>':'')+'<span data-noi18n>'+(s.dl>=0?' · ':'')+esc(wdShort(e.date))+(e.time?', '+esc(e.time):'')+'</span></span>'+
+        (names.length&&!(names.length===1&&names[0]===exTitle(e))?'<span class="extags" data-noi18n>'+names.map(n=>'<i>'+esc(n)+'</i>').join('')+'</span>':'')+
+        (s.total?'<span class="exprog"><span class="dprog"><i style="width:'+s.pct+'%"></i></span><span class="dpct">'+s.pct+'%</span></span>':'')+
+        '<span class="exmeta">'+meta+'</span>'+
+      '</span></button>'+
+    (can?'<button class="btn primary sm exgo" data-act="exStudy" data-id="'+esc(e.id)+'">'+ic('play',16)+(s.due+s.newToday?'Готовиться':'Тренировка')+(s.due+s.newToday?'<small>'+(s.due+s.newToday)+'</small>':'')+'</button>':'')+
+  '</div>';
+}
+function calGridHtml(){
+  const y=CAL.y,m=CAL.m;const first=new Date(y,m,1);const lead=(first.getDay()+6)%7;
+  const dim=new Date(y,m+1,0).getDate();const today=dayKey();
+  const byDay={};S.exams.forEach(e=>{(byDay[e.date]=byDay[e.date]||[]).push(e);});
+  const due=dueByDay();
+  let cells='';
+  for(let i=0;i<lead;i++)cells+='<span class="cday out"></span>';
+  for(let d=1;d<=dim;d++){
+    const k=y+'-'+pad2(m+1)+'-'+pad2(d);const ex=byDay[k]||[];
+    const cls=['cday'];if(k===today)cls.push('ctd');if(k===CAL.sel)cls.push('sel');if(k<today)cls.push('past');if(ex.length)cls.push('has');
+    const load=k>=today&&due[k]?(due[k]>=60?3:due[k]>=25?2:1):0;
+    cells+='<button class="'+cls.join(' ')+'" data-act="calDay" data-v="'+k+'" aria-label="'+d+' '+esc(MONTHS[m])+(ex.length?' — '+esc(ex.map(exTitle).join(', ')):'')+'" data-noi18n>'+
+      '<span class="cn">'+d+'</span>'+(ex.length?'<span class="cdots">'+ex.slice(0,3).map(()=>'<i></i>').join('')+'</span>':'<span class="cmark">'+(load?'<span class="cload l'+load+'"></span>':'')+'</span>')+'</button>';
+  }
+  return '<div class="calhead"><button class="ibtn plain sm" data-act="calNav" data-d="-1" aria-label="Предыдущий месяц">'+ic('back',18)+'</button>'+
+    '<button class="calttl" data-act="calToday" data-noi18n>'+esc(MONTHS_FULL_L[LANG][m])+' '+y+'</button>'+
+    '<button class="ibtn plain sm" data-act="calNav" data-d="1" aria-label="Следующий месяц">'+ic('fwd',18)+'</button></div>'+
+    '<div class="cgrid" data-noi18n>'+WD_L[LANG].map((w,i)=>'<span class="cwd'+(i>4?' we':'')+'">'+w+'</span>').join('')+cells+'</div>';
+}
+function calDayHtml(){
+  const k=CAL.sel;if(!k)return '';
+  const today=dayKey();const ex=S.exams.filter(e=>e.date===k).sort(byExDate);
+  const due=k>=today?(dueByDay()[k]||0):null;
+  const head='<div class="cdayhead"><b data-noi18n>'+esc(wdShort(k))+', '+esc(fmtDate(k))+'</b>'+(k===today?'<span class="muted"> · сегодня</span>':'')+'</div>';
+  return '<div class="cdaybox">'+head+
+    (due!=null?'<div class="cdue">'+ic('chart',15)+'<span>'+(k===today?'К повторению сегодня: ':'Повторений по расписанию: ')+'<b>'+due+'</b></span></div>':'')+
+    ex.map(exCardHtml).join('')+
+    (k>=today?'<button class="btn line block sm" data-act="calAdd" data-v="'+k+'">'+ic('plus',16)+'Контрольная на этот день</button>':'')+
+    '</div>';
+}
+const WEBPUSH=()=>!!(window.CORPUS_WEB&&window.CORPUS_WEB.push);
+function remindHtml(){
+  const days=META.remDays||[7,3,1];
+  const opts=[[14,'2 недели'],[7,'7 дней'],[3,'3 дня'],[1,'1 день']];
+  const web=WEBPUSH();
+  return '<div class="sec-head" style="margin-top:22px"><div class="h2">Напоминания</div></div>'+
+    '<div class="sbox remind">'+
+      (web?'<div class="pushbox" id="pushBox"><span class="pushic">'+ic('bell',20)+'</span><span class="pusht"><b>Уведомления на этом устройстве</b><small id="pushSt">Проверяю…</small></span><span class="pushbtns" id="pushBtns"></span></div>':
+        '<p class="muted sm" style="margin:0 0 10px">Corpus пока не умеет сам присылать уведомления. Добавьте контрольные в календарь телефона — он напомнит заранее. А в приложении напоминание появится, когда вы его откроете.</p>')+
+      '<div class="remrow"><span>Напомнить за</span><div class="sesslim" role="group" aria-label="Напомнить за">'+opts.map(o=>'<button aria-pressed="'+(days.indexOf(o[0])>=0)+'" class="'+(days.indexOf(o[0])>=0?'on':'')+'" data-act="remDay" data-v="'+o[0]+'">'+o[1]+'</button>').join('')+'</div></div>'+
+      '<label class="remrow"><span>Каждый день напоминать о повторении</span><span class="remtime"><input type="time" id="remTime" value="'+esc(META.remTime||'')+'" aria-label="Время напоминания"></span></label>'+
+      (web?'<p class="muted sm" style="margin:6px 2px 4px">О контрольной уведомление придёт в 8:00 в выбранные дни, накануне и в сам день. О повторении — в выбранное время, если есть карточки.</p>':'')+
+      '<button class="btn '+(web?'line':'primary')+' block" data-act="icsAll" style="margin-top:10px"'+(S.downloads?'':' disabled')+'>'+ic('cal',18)+'Добавить в календарь телефона</button>'+
+      '<p class="muted sm" style="margin:8px 2px 0">Файл .ics откроется в «Календаре». Если поменяете даты, удалите старые события и добавьте файл снова.</p>'+
+    '</div>';
+}
+/* ---------- push (the website only): this device's state, on / off / test ---------- */
+const PUSH_ST={on:'Включены — напоминания придут, даже если Corpus закрыт',off:'Выключены',denied:'Запрещены в настройках телефона: Настройки → Уведомления → Corpus',
+  install:'На iPhone и iPad: «Поделиться» → «На экран „Домой“», откройте Corpus оттуда и включите здесь',unsupported:'Этот браузер не умеет показывать уведомления'};
+async function pushPaint(){
+  if(!WEBPUSH()||!$('#pushSt'))return;
+  let st='unsupported';try{st=await window.CORPUS_WEB.push.state();}catch(e){}
+  const t=$('#pushSt'),b=$('#pushBtns'),box=$('#pushBox');if(!t||!b)return;
+  t.textContent=PUSH_ST[st]||'';box.dataset.st=st;
+  b.innerHTML=st==='on'?'<button class="btn line sm" data-act="pushTest">Проверить</button><button class="btn quiet sm" data-act="pushOff">Выключить</button>':st==='off'?'<button class="btn primary sm" data-act="pushOn">'+ic('bell',16)+'Включить</button>':'';
+  if(I18N)i18nTree(box);
+  if(st==='on'&&!META.pushOn){META.pushOn=true;persistMeta();}
+}
+function pushErr(c){return ({install:'На iPhone уведомления работают, только если Corpus открыт с экрана «Домой».',unsupported:'Этот браузер не умеет показывать уведомления',
+  denied:'Уведомления запрещены. Разрешите их: Настройки → Уведомления → Corpus.',declined:'Без разрешения уведомления не придут.',
+  not_set_up:'Уведомления ещё не настроены на сайте.'})[c]||'Не получилось включить уведомления. Проверьте соединение.';}
+/* straight from a tap: the permission prompt needs the tap */
+function pushEnable(){
+  if(!WEBPUSH())return;
+  const p=window.CORPUS_WEB.push.enable();
+  const t=$('#pushSt');if(t)t.textContent='Включаю…';
+  p.then(async()=>{META.pushOn=true;if(!META.remTime)META.remTime='19:00';persistMeta();await pushSync();toast('Уведомления включены');if(view.name==='calendar')render();})
+   .catch(e=>{toast(pushErr(e&&e.code),5000);pushPaint();});
+}
+let PUSH_T=null;
+function pushSyncSoon(ms){if(!WEBPUSH()||!META.pushOn||!S.db||!S.ready)return;clearTimeout(PUSH_T);PUSH_T=setTimeout(()=>{PUSH_T=null;pushSync();},ms==null?20000:ms);}
+/* what the reminder service needs to know, kept short: no cards, no photos */
+function pushSummary(){
+  const t0=startOfDay(),N=14;const cnt=new Array(N).fill(0);
+  for(const c of uniqGrp(S.cards)){if(c.type==='new'||cardExcluded(c))continue;const i=Math.max(0,Math.round((startOfDay(c.due)-t0)/86400000));if(i<N)cnt[i]++;}
+  const due={};let run=0;for(let i=0;i<N;i++){run+=cnt[i];due[dayKey(addDays(t0,i))]=run;}
+  let newPer=0;S.decks.forEach(d=>{const q=planQuota(d);const per=q!=null?q:(d.newPerDay==null?20:d.newPerDay);newPer+=Math.min(per,deckCounts(d.id).newAll);});
+  let tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'';}catch(e){}
+  return {v:1,tz:tz,lang:LANG,daily:META.remTime||'',remDays:(META.remDays||[7,3,1]).slice(),day:dayKey(t0),due:due,newToday:globalCounts().new,newPer:newPer,
+    exams:examsUpcoming().slice(0,20).map(e=>({id:e.id,title:exTitle(e),date:e.date,time:e.time||'',newAll:exStat(e).newAll})),at:Date.now()};
+}
+async function pushSync(){if(!WEBPUSH()||!S.db)return;try{await S.db.collection('meta').doc('notify').set(pushSummary());}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&PUSH_T){clearTimeout(PUSH_T);PUSH_T=null;pushSync();}});
+SCREENS.calendar={
+  html(){
+    calInit();
+    const up=examsUpcoming(),past=examsPast();
+    return '<div class="page tabbed cal"><header class="hhead"><div class="h1t">Календарь</div><button class="ibtn" data-act="calAdd" aria-label="Новая контрольная">'+ic('plus')+'</button></header>'+
+      '<section class="calbox">'+calGridHtml()+calDayHtml()+'</section>'+
+      '<div class="sec-head" style="margin-top:22px"><div class="h2">Ближайшие контрольные</div></div>'+
+      (up.length?up.filter(e=>e.date!==CAL.sel).map(exCardHtml).join('')+(up.every(e=>e.date===CAL.sel)?'<p class="muted sm" style="margin:0 2px">Все ближайшие — в выбранном дне выше.</p>':''):
+        '<div class="empty" style="padding:22px 18px">'+ic('cal',26)+'<p style="margin:8px auto 0;max-width:360px;line-height:1.55">Добавьте дату контрольной или коллоквиума и привяжите папки — Corpus распределит новые карточки по дням до неё и покажет обратный отсчёт.</p><button class="btn primary" data-act="calAdd">'+ic('plus',18)+'Добавить контрольную</button></div>')+
+      (past.length?'<button class="btn quiet block" data-act="exPast" style="margin-top:8px">'+(CAL.past?'Скрыть прошедшие':'Прошедшие')+' · '+past.length+'</button>'+(CAL.past?past.map(exCardHtml).join(''):''):'')+
+      remindHtml()+
+    '</div>';
+  },
+  mount(){
+    const ti=$('#remTime');
+    if(ti)ti.addEventListener('change',()=>{META.remTime=ti.value||'';persistMeta();toast(!ti.value?'Ежедневное напоминание выключено':(WEBPUSH()&&META.pushOn)?'Время сохранено':'Время сохранено — добавьте файл в календарь, чтобы телефон напоминал');});
+    pushPaint();
+  }
+};
+async function exOpen(id){
+  const e=examById(id);if(!e)return;const s=exStat(e);
+  const items=[{v:'edit',icon:'pencil',label:'Изменить',sub:'Название, дата, папки'}];
+  if(s.ids.length&&s.total)items.push({v:'cram',icon:'layers',label:'Свободная тренировка',sub:'Все карточки контрольной, не влияет на расписание'});
+  if(S.downloads&&exDays(e)>=0)items.push({v:'ics',icon:'cal',label:'В календарь телефона',sub:'Только эта контрольная, с напоминаниями'});
+  items.push({v:'del',icon:'trash',label:'Удалить',danger:true});
+  const v=await actionSheet(exTitle(e),items);
+  if(v==='edit')editExamDlg(id);
+  else if(v==='cram')exCram(e);
+  else if(v==='ics')exportIcs([e]);
+  else if(v==='del'){if(await confirmDialog({title:'Удалить контрольную?',text:'Колоды и прогресс останутся — уберётся только дата и план к ней.'})){S.exams=S.exams.filter(x=>x.id!==id);removeDoc('exams',id);PQ.clear();toast('Контрольная удалена');render();}}
+}
+function exStudy(id){
+  const e=examById(id);if(!e)return;const s=exStat(e);
+  if(!s.ids.length){editExamDlg(id);return;}
+  if(!(s.due+s.newToday)){exCram(e);return;}
+  startSession({deckIds:s.ids,examId:e.id},false,null,META.mode||'hideAll');
+}
+async function exCram(e){
+  const ids=exDecks(e);const cs=S.cards.filter(c=>ids.indexOf(c.deckId)>=0&&!cardExcluded(c));
+  if(!cs.length){toast('В колоде пока нет карточек');return;}
+  const seen=cs.filter(c=>c.type!=='new');
+  const v=await actionSheet('Свободная тренировка',[
+    {v:'all',icon:'layers',label:'Все карточки',sub:pl(cs.length,'карточка','карточки','карточек')},
+    {v:'seen',icon:'check',label:'Только пройденные',sub:seen.length?pl(seen.length,'карточка','карточки','карточек'):'таких пока нет'},
+    {v:'weak',icon:'eye',label:'Трудные',sub:'Где чаще всего ошибались'}]);
+  if(!v)return;
+  let sub=cs;
+  if(v==='seen'){if(!seen.length){toast('Таких карточек пока нет');return;}sub=seen;}
+  if(v==='weak'){sub=uniqGrp(seen).filter(c=>(c.lapses||0)+(c.miss||0)>0).sort((a,b)=>weakness(b)-weakness(a)).slice(0,30);if(!sub.length){toast('Таких карточек пока нет');return;}}
+  startSession({deckIds:ids,examId:e.id},true,sub,META.mode||'hideAll');
+}
+
+/* ---------- in-app reminder: once a day, when a test is close ---------- */
+function examNudge(){
+  if(!S.exams.length)return;
+  const k=dayKey();if(META.remShown===k)return;
+  const days=META.remDays||[7,3,1];
+  const e=examsUpcoming().find(x=>{const d=exDays(x);return d<=1||days.indexOf(d)>=0;});
+  if(!e)return;
+  META.remShown=k;persistMeta();
+  const s=exStat(e);const cd=s.dl===0?'Сегодня':s.dl===1?'Завтра':'Через '+pl(s.dl,'день','дня','дней');
+  toast(cd+': «'+exTitle(e)+'»'+(s.dl>0&&s.newAll?'. Осталось новых карточек: '+s.newAll:''),6000);
+}
+
+/* ---------- .ics for the phone's calendar: the phone's own reminders do the notifying ---------- */
+function icsEsc(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/\r?\n/g,'\\n').replace(/([,;])/g,'\\$1');}
+/* lines are folded at 75 octets, never inside a UTF-8 character */
+function icsFold(line){
+  const enc=new TextEncoder();if(enc.encode(line).length<=75)return line;
+  const out=[];let cur='',n=0,lim=75;
+  for(const ch of line){const b=enc.encode(ch).length;if(n+b>lim){out.push(cur);cur=' ';n=1;lim=75;}cur+=ch;n+=b;}
+  out.push(cur);return out.join('\r\n');
+}
+function icsDate(ds){return ds.replace(/-/g,'');}
+function icsNext(ds){return dayKey(addDays(Date.parse(ds+'T00:00:00'),1)).replace(/-/g,'');}
+function buildIcs(list,daily){
+  const now=new Date();const stamp=now.toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+  const days=(META.remDays||[7,3,1]).slice().sort((a,b)=>b-a);
+  const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Corpus//Calendar//'+LANG.toUpperCase(),'CALSCALE:GREGORIAN','METHOD:PUBLISH'];
+  list.forEach(e=>{
+    const s=exStat(e);const names=exScopeNames(e);
+    const desc=[names.length?tr('Темы:')+' '+names.join(', '):'',s.newAll?tr('Новых карточек:')+' '+s.newAll:'',tr('Повторяйте в Corpus')].filter(Boolean).join('\n');
+    L.push('BEGIN:VEVENT','UID:corpus-exam-'+e.id+'@corpus.app','DTSTAMP:'+stamp);
+    if(e.time){L.push('DTSTART:'+icsDate(e.date)+'T'+e.time.replace(':','')+'00','DURATION:PT1H30M');}
+    else L.push('DTSTART;VALUE=DATE:'+icsDate(e.date),'DTEND;VALUE=DATE:'+icsNext(e.date),'TRANSP:TRANSPARENT');
+    L.push('SUMMARY:'+icsEsc(exTitle(e)),'DESCRIPTION:'+icsEsc(desc));
+    days.forEach(n=>{
+      if(n>0&&exDays(e)<n)return;
+      /* all-day: at 9:00, n days before; timed: n days before at the same time */
+      const trig=e.time?'-P'+n+'D':(n===1?'-PT15H':'-P'+(n-1)+'DT15H');
+      const what=n===1?tr('Завтра')+': '+exTitle(e):tr('Через '+pl(n,'день','дня','дней'))+': '+exTitle(e);
+      L.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+icsEsc(what),'TRIGGER:'+trig,'END:VALARM');
+    });
+    L.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+icsEsc(exTitle(e)),'TRIGGER:'+(e.time?'-PT1H':'PT8H'),'END:VALARM');
+    L.push('END:VEVENT');
+  });
+  if(daily&&/^\d\d:\d\d$/.test(daily)){
+    const sum=tr('Corpus — повторить карточки');
+    L.push('BEGIN:VEVENT','UID:corpus-daily-review@corpus.app','DTSTAMP:'+stamp,'DTSTART:'+icsDate(dayKey())+'T'+daily.replace(':','')+'00','DURATION:PT15M',
+      'RRULE:FREQ=DAILY','SUMMARY:'+icsEsc(sum),'DESCRIPTION:'+icsEsc(tr('Несколько минут повторения в Corpus')),'TRANSP:TRANSPARENT',
+      'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+icsEsc(sum),'TRIGGER:PT0M','END:VALARM','END:VEVENT');
+  }
+  L.push('END:VCALENDAR');
+  return L.map(icsFold).join('\r\n')+'\r\n';
+}
+async function exportIcs(list){
+  if(!S.downloads){toast('Сохранение файлов недоступно в этом окне.');return;}
+  const one=!!list;list=list||examsUpcoming();
+  const daily=one?'':(META.remTime||'');
+  if(!list.length&&!daily){toast('Нет будущих контрольных — добавьте дату или включите ежедневное напоминание');return;}
+  const name=one?'corpus-'+safeName(exTitle(list[0]))+'.ics':'corpus-kalender.ics';
+  try{
+    await S.downloads.save({filename:name,data:new Blob([buildIcs(list,daily)],{type:'text/calendar'})});
+    toast(one?'Файл сохранён — откройте его, чтобы добавить в календарь':'Файл сохранён — откройте его и нажмите «Добавить всё»',5000);
+  }catch(e){const c=e&&e.code;if(c==='declined')return;toast(c==='rate_limited'?'Подождите немного и попробуйте снова.':'Не удалось сохранить файл.');}
+}
+
 /* ---------- pronunciation (device voice; Italian reads Latin closest) ---------- */
 const TTS_OK=typeof window!=='undefined'&&'speechSynthesis' in window&&typeof SpeechSynthesisUtterance!=='undefined';
 const LAT_ABBR={'lig':'ligamentum','ligg':'ligamenta','m':'musculus','mm':'musculi','a':'arteria','aa':'arteriae','v':'vena','vv':'venae','n':'nervus','nn':'nervi','r':'ramus','rr':'rami','proc':'processus','for':'foramen','tub':'tuberculum','art':'articulatio','gl':'glandula','lnn':'lymphonodi','ln':'lymphonodus','sut':'sutura','inc':'incisura'};
@@ -5035,6 +5560,19 @@ const A={
   deckMenu:()=>deckMenu(view.deckId),
   deckBack:()=>{const d=deckById(view.deckId);go(d&&d.folderId?{name:'folder',folderId:d.folderId}:{name:'library'});},
   openFolder:el=>go({name:'folder',folderId:el.dataset.id}),
+  goCal:()=>{CAL.y=null;go({name:'calendar'});},
+  calNav:el=>{const d=+el.dataset.d;let m=CAL.m+d,y=CAL.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}CAL.m=m;CAL.y=y;render();},
+  calToday:()=>{const t=new Date();CAL.y=t.getFullYear();CAL.m=t.getMonth();CAL.sel=dayKey();render();},
+  calDay:el=>{CAL.sel=el.dataset.v;render();},
+  calAdd:el=>editExamDlg(null,el.dataset.v?{date:el.dataset.v}:{}),
+  exOpen:el=>exOpen(el.dataset.id),
+  exStudy:el=>exStudy(el.dataset.id),
+  exPast:()=>{CAL.past=!CAL.past;render();},
+  remDay:el=>{const v=+el.dataset.v;const a=(META.remDays||[7,3,1]).slice();const i=a.indexOf(v);if(i>=0)a.splice(i,1);else a.push(v);META.remDays=a.sort((x,y)=>y-x);persistMeta();$$('.remind [data-act=remDay]').forEach(b=>{const on=META.remDays.indexOf(+b.dataset.v)>=0;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on);});},
+  icsAll:()=>exportIcs(),
+  pushOn:()=>pushEnable(),
+  pushOff:()=>{if(!WEBPUSH())return;window.CORPUS_WEB.push.disable().then(()=>{toast('Уведомления на этом устройстве выключены');pushPaint();},()=>{toast('Не получилось. Проверьте соединение.');pushPaint();});},
+  pushTest:()=>{if(!WEBPUSH())return;pushSync();window.CORPUS_WEB.push.test(LANG).then(r=>toast(r&&r.sent?'Отправлено — уведомление придёт через несколько секунд':'Не удалось отправить. Выключите и включите уведомления снова.',5000),e=>toast(pushErr(e&&e.code),5000));},
   folderMenu:()=>folderMenu(view.folderId),
   newDeckInFolder:()=>newDeck(view.folderId),
   folderMode:el=>{const f=folderById(view.folderId);if(!f)return;f.mode=el.dataset.v;persist('folders',f.id);$$('.mode').forEach(b=>{const on=b.dataset.v===f.mode;b.classList.toggle('on',on);b.setAttribute('aria-checked',on);});},
@@ -5050,7 +5588,7 @@ const A={
   openCard:el=>{const c=cardById(el.dataset.id);if(c)openEditor(c.plateId,c.id,{name:'deck',deckId:view.deckId,tab:'cards',q:view.q});},
   zoomIn:()=>{const z=setZoom(zoomStep(1));if(SS&&view.name==='study'){SS.zoom=z;focusTarget();}},
   zoomOut:()=>{const z=setZoom(zoomStep(-1));if(SS&&view.name==='study')SS.zoom=z;},
-  studyExit:()=>{const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
+  studyExit:()=>{const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
   studyUndo:()=>undoStudy(),
   studyMenu:()=>studyMenu(),
   reveal:()=>doReveal(),
@@ -5171,19 +5709,26 @@ async function boot(){
 async function bootData(){
   if(S.db){
     try{
-      const g=await Promise.all(['decks','plates','terms','stats','folders','packs'].map(n=>S.db.collection(n).get()));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
+      const g=await Promise.all(['decks','plates','terms','stats','folders','packs','exams'].map(n=>S.db.collection(n).get().catch(e=>{if(n==='exams')return {docs:[]};throw e;})));
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
       S.decks=g[0].docs.map(x=>Object.assign({},x.data(),{id:x.id,newToday:x.data()&&x.data().newToday?Object.assign({},x.data().newToday):undefined}));
       S.plates=g[1].docs.map(x=>Object.assign({},x.data(),{id:x.id}));
       S.cards=g[2].docs.map(x=>normCard(Object.assign({},x.data(),{id:x.id})));
       g[3].docs.forEach(x=>{const raw=x.data()||{};const days={};Object.keys(raw.days||{}).forEach(k=>{days[k]=Object.assign({n:0,ok:0},raw.days[k]);});S.stats[x.id]={id:x.id,days:days};});
       S.folders=g[4].docs.map(x=>Object.assign({},x.data(),{id:x.id}));
       packLoad(g[5].docs);
+      S.exams=g[6].docs.map(x=>{const o=Object.assign({},x.data(),{id:x.id});o.folderIds=(o.folderIds||[]).slice();o.deckIds=(o.deckIds||[]).slice();return o;}).filter(e=>e.date);
       S.decks.forEach(d=>{if(d.newPerDay==null)d.newPerDay=20;if(!d.createdAt)d.createdAt=0;});
       S.folders.forEach(f=>{if(!f.createdAt)f.createdAt=0;});
     }catch(e){S.loadErr=true;}
   }
+  if(S.db&&!S.loadErr)examMigrate();
   S.ready=true;NAV='enter-tab';view={name:'home'};render();
+  {const W0=window.CORPUS_WEB;if(W0){W0.onOpenView=v=>{if(S.ready&&SCREENS[v]&&!layer.firstChild&&view.name!=='study'&&view.name!=='editor'){CAL.y=null;go({name:v});}};
+    if(W0.startView&&SCREENS[W0.startView]&&!S.loadErr){const v=W0.startView;W0.clearStartView();CAL.y=null;go({name:v});}}}
+  if(META.pushOn)pushSyncSoon(4000);
+  if(!S.loadErr)setTimeout(()=>{if(!window.__TEST__||window.__NUDGE_TEST__)examNudge();},1200);
+  if(S.decks.length&&!S.exams.length&&META.tourSeen&&!window.__TEST__)setTimeout(()=>{if(!layer.firstChild&&view.name==='home')featTip('calTip','Новое: календарь контрольных — укажите дату, и Corpus распределит карточки до неё',['Открыть',()=>go({name:'calendar'})],8000);},4500);
   S.cards.filter(c=>c._mig).forEach(c=>{delete c._mig;persist('terms',c.id);});
   const W=window.CORPUS_WEB;
   const sharing=!!(W&&W.shareCode&&sharesApi());
@@ -5199,7 +5744,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'ED',{get:()=>ED});
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
-  window.S=S;
+  window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
   window.newId=newId;window.persist=persist;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;

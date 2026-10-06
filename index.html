@@ -425,6 +425,22 @@ button:disabled{cursor:default;opacity:.38}
 .sitem.on{color:var(--primary);font-weight:600}
 .sitem.cancel{justify-content:center;color:var(--ink2);font-weight:600;margin-top:4px}
 .sitem small{display:block;font-size:12.5px;color:var(--ink2);font-weight:400}
+.tour{position:relative;padding:4px 8px 4px;text-align:center}
+.tour-skip{display:flex;justify-content:flex-end;min-height:36px}
+.tour-ic{width:64px;height:64px;border-radius:20px;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
+.tour h3{margin:0 0 6px;font:600 calc(22px*var(--fs))/1.2 'Source Serif 4',Georgia,serif}
+.tour-p{margin:0 0 12px;color:var(--ink2);line-height:1.5}
+.tour ul{list-style:none;margin:0 0 14px;padding:0;text-align:left;display:grid;gap:8px}
+.tour li{display:flex;gap:10px;align-items:flex-start;background:var(--surface2);border-radius:12px;padding:10px 12px;line-height:1.4;font-size:calc(14.5px*var(--fs))}
+.tour li .i{flex:none;color:var(--primary);margin-top:1px}
+.tour .seg{margin:0 0 14px}
+.tour .btn.line.block{margin:0 0 14px}
+.tour-dots{display:flex;gap:6px;justify-content:center;margin:2px 0 14px}
+.tour-dots i{width:7px;height:7px;border-radius:4px;background:var(--line);transition:width .25s,background .25s}
+.tour-dots i.on{width:20px;background:var(--primary)}
+.tour-nav{display:flex;gap:8px}
+.tour-nav .btn{flex:1}
+.hbtns{display:flex;align-items:center;gap:2px}
 .dlg{padding:14px 10px 4px}
 .dlg h3{margin:0 0 6px;font-size:18px}
 .dlg p{margin:0 0 14px;color:var(--ink2)}
@@ -824,6 +840,7 @@ const ICONS={
   chat:'<path d="M21 12a8 8 0 01-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1121 12z"/><path d="M9 10.5h6M9 13.5h4"/>',
   volume:'<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
   send:'<path d="M5 12h13M13 6l6 6-6 6"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.4 9.4a2.7 2.7 0 015.2 1c0 1.8-2.6 2.2-2.6 3.9"/><circle cx="12" cy="17.4" r=".9" fill="currentColor" stroke="none"/>',
   link:'<path d="M10 14a4.5 4.5 0 006.4 0l3-3a4.5 4.5 0 00-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 00-6.4 0l-3 3a4.5 4.5 0 006.4 6.4l1-1"/>'
 };
 function ic(n,s){s=s||20;return '<svg class="i" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICONS[n]||'')+'</svg>';}
@@ -908,6 +925,7 @@ I18N_DICT.push(["Поделиться по QR-коду","Share by QR code","Jaga
   ["Код колоды","Deck code","Paki kood"],["Буквы и цифры под QR-кодом у того, кто делится.","The letters and digits under the QR code of the person sharing.","Tähed ja numbrid jagaja QR-koodi all."],["например, k7mnp2qxyz","e.g. k7mnp2qxyz","nt k7mnp2qxyz"],["Получить","Get","Hangi"],["Получить по коду","Get by code","Hangi koodiga"],["Отправитель:","Shared by:","Jagaja:"],["Расставляю рамки…","Placing the frames…","Paigutan raame…"],
   ["Поделиться можно колодой или целой папкой: откройте её и выберите в меню «Поделиться по QR-коду» или «Поделиться файлом». По коду колода приходит сразу; файл импортируйте здесь. Фото, рамки и названия появятся, прогресс начнётся с нуля.","You can share a deck or a whole folder: open it and choose “Share by QR code” or “Share as file” in its menu. By code the deck arrives right away; a file is imported here. Photos, frames and names come along, progress starts from zero.","Jagada saab pakki või tervet kausta: ava see ja vali menüüst „Jaga QR-koodiga“ või „Jaga failina“. Koodiga jõuab pakk kohale kohe; fail impordi siin. Fotod, raamid ja nimetused tulevad kaasa, edenemine algab nullist."],
   ["Вам передали колоду Corpus. Войдите или создайте аккаунт — колода появится у вас.","Someone passed you a Corpus deck. Sign in or create an account and the deck will appear in your Corpus.","Sulle edastati Corpuse pakk. Logi sisse või loo konto — pakk ilmub sinu Corpusesse."]);
+I18N_DICT.push(["Фото → карточки", "Photo → cards", "Foto → kaardid"],["Сфотографируйте страницу атласа и закройте подписи рамками — каждая рамка станет карточкой.", "Photograph an atlas page and cover the labels with frames — each frame becomes a card.", "Pildista atlase lehekülg ja kata nimetused raamidega — iga raam muutub kaardiks."],["Текст подписи читается сам, прямо на устройстве — фото никуда не уходит", "Label text is read automatically, right on your device — the photo never leaves it", "Nimetuse tekst loetakse automaatselt otse seadmes — foto ei lahku sealt"],["Латинские слова сверяются со словарём анатомии", "Latin words are checked against an anatomy dictionary", "Ladina sõnu kontrollitakse anatoomiasõnastikuga"],["Учитесь по-разному", "Study in different ways", "Õpi eri viisidel"],["Скрыть все, Выбор, Ввод, Найти на рисунке — режим выбирается на главной и прямо во время учёбы", "Hide all, Choice, Typing, Find on the picture — pick a mode on Home or while studying", "Peida kõik, Valik, Sisestus, Leia pildilt — režiimi saab valida avalehel ja õppimise ajal"],["Повторения сами подбирают время (FSRS, как в современном Anki)", "Reviews schedule themselves (FSRS, as in modern Anki)", "Kordused planeeruvad ise (FSRS, nagu tänapäeva Ankis)"],["Трудные карточки собираются в «Статистике» — их можно потренировать отдельно", "Hard cards are collected in “Statistics” — you can drill them separately", "Rasked kaardid kogutakse „Statistikasse“ — neid saab eraldi harjutada"],["Claude под рукой", "Claude at hand", "Claude käepärast"],["Придумает подсказку-ассоциацию для трудного термина", "Comes up with a mnemonic hint for a hard term", "Mõtleb raske termini jaoks välja mäluvihje"],["Чат по карточке — кнопка с облачком вверху во время учёбы", "Chat about a card — the speech-bubble button at the top while studying", "Vestlus kaardi kohta — jutumulli nupp üleval õppimise ajal"],["Прочитает подписи на фото и сверит колоду с вашим конспектом", "Reads labels from a photo and compares the deck with your notes", "Loeb fotolt nimetused ja võrdleb pakki sinu konspektiga"],["Латынь вслух, три языка", "Latin aloud, three languages", "Ladina keel valjusti, kolm keelt"],["Динамик у латинского термина произносит его вслух", "The speaker button next to a Latin term says it aloud", "Kõlarinupp ladinakeelse termini juures ütleb selle valjusti"],["Включить озвучку", "Turn on speech", "Lülita hääldus sisse"],["Озвучка включена", "Speech is on", "Hääldus on sees"],["Интерфейс на русском, English и eesti — язык можно сменить в любой момент", "The interface speaks Russian, English and Estonian — switch any time", "Liides on vene, inglise ja eesti keeles — keelt saab igal ajal vahetada"],["Светлая, тёмная и бумажная темы, крупный текст и спокойный режим — всё в «Ещё»", "Light, dark and paper themes, larger text and a calm mode — all in “More”", "Hele, tume ja paberteema, suurem tekst ja rahulik režiim — kõik menüüs „Veel“"],["Делитесь колодами", "Share your decks", "Jaga oma pakke"],["Колоду или папку можно передать по QR-коду или ссылке — фото, рамки и названия приедут вместе", "Send a deck or folder by QR code or link — photos, frames and names come along", "Paki või kausta saab saata QR-koodi või lingiga — fotod, raamid ja nimetused tulevad kaasa"],["Принять: «Ещё → Получить по коду» или просто навести камеру на QR", "To receive: “More → Get by code”, or just point a camera at the QR", "Vastuvõtmiseks: „Veel → Võta koodiga“ või suuna kaamera QR-koodile"],["Колоду или папку можно передать файлом: меню колоды → «Поделиться файлом»", "Send a deck or folder as a file: deck menu → “Share as file”", "Paki või kausta saab saata failina: paki menüü → „Jaga failina“"],["Колоды из Anki (.apkg) тоже можно импортировать — в «Ещё»", "Anki decks (.apkg) can be imported too — in “More”", "Anki pakke (.apkg) saab samuti importida — menüüs „Veel“"],["Дальше", "Next", "Edasi"],["Начать", "Get started", "Alusta"],["Пропустить", "Skip", "Jäta vahele"],["Что умеет Corpus", "What Corpus can do", "Mida Corpus oskab"],["Что умеет Corpus?", "What can Corpus do?", "Mida Corpus oskab?"],["Обзор возможностей", "Feature tour", "Võimaluste ülevaade"],["Короткая обучалка: фото и рамки, распознавание текста, ИИ, озвучка латыни, обмен по QR и многое другое.", "A short walkthrough: photos and frames, text recognition, AI, Latin speech, QR sharing and more.", "Lühike ülevaade: fotod ja raamid, tekstituvastus, tehisintellekt, ladina keele hääldus, QR-jagamine ja palju muud."],["Показать обзор", "Show the tour", "Näita ülevaadet"],["Новое: короткий обзор возможностей Corpus", "New: a quick tour of what Corpus can do", "Uus: lühike ülevaade Corpuse võimalustest"]);
 const I18N_PLU={
   'карточка|карточки|карточек':[['card','cards'],['kaart','kaarti']],
   'колода|колоды|колод|Колода|Колоды|Колод':[['deck','decks'],['pakk','pakki']],
@@ -1031,8 +1049,8 @@ function setLang(l,save){
   if(save){try{localStorage.setItem('corpus.lang',l);}catch(e){}}
 }
 function langRowHtml(){return '<div class="segrow"><span data-noi18n>Язык · Language · Keel</span><div class="seg" role="radiogroup" data-noi18n>'+LANGS.map(o=>'<button role="radio" aria-checked="'+(o[0]===LANG)+'" class="'+(o[0]===LANG?'on':'')+'" data-act="setLang" data-v="'+o[0]+'">'+o[1]+'</button>').join('')+'</div></div>';}
-function switchLang(l){
-  setLang(l,true);dismissOverlay(null);const ch=$('#chat');if(ch){ch.remove();if(CH.open){CH.open=false;document.body.classList.remove('chat-open');}}
+function switchLang(l,keep){
+  setLang(l,true);if(!keep)dismissOverlay(null);const ch=$('#chat');if(ch){ch.remove();if(CH.open){CH.open=false;document.body.classList.remove('chat-open');}}
   render();qsRebuild();if(I18N)i18nTree(document.body);
 }
 function chatInstr(){
@@ -1550,7 +1568,7 @@ SCREENS.home={
     const due=c.new+c.learn+c.review;const mins=Math.max(1,Math.round(due*12/60));
     const mode=META.mode||'hideAll';
     return '<div class="page tabbed">'+
-      '<header class="hhead"><div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><b></b></span>Corpus</div><button class="ibtn" data-act="settings" aria-label="Настройки и резервная копия">'+ic('gear')+'</button></header>'+
+      '<header class="hhead"><div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><b></b></span>Corpus</div><div class="hbtns"><button class="ibtn" data-act="tour" aria-label="Что умеет Corpus" title="Что умеет Corpus">'+ic('help')+'</button><button class="ibtn" data-act="settings" aria-label="Настройки и резервная копия">'+ic('gear')+'</button></div></header>'+
       (S.cards.length&&S.downloads&&(!META.lastBackup||Date.now()-META.lastBackup>WEEK)?'<button class="banner" data-act="backup" style="display:block;width:100%;text-align:left;border:none">'+(META.lastBackup?'Резервной копии не было больше недели.':'Сделайте резервную копию, чтобы не потерять прогресс.')+' <b>Скачать копию</b></button>':'')+
       (!S.db&&S.ready?'<div class="banner">Хранилище недоступно в этом окне — изменения не сохранятся после перезагрузки.</div>':'')+
       (S.loadErr?'<div class="banner">Не удалось загрузить сохранённые данные. Обновите страницу.</div>':'')+
@@ -1567,7 +1585,7 @@ SCREENS.home={
       :
         '<div class="empty"><div class="demo" aria-hidden="true"><span class="demo-line"></span><span class="demo-mask">?</span></div>'+
         '<div class="h2" style="color:var(--ink)">Учите анатомию по рисункам</div><p style="margin:6px auto 0;max-width:360px;line-height:1.55">Создайте колоду, сфотографируйте страницу атласа и закройте подписи рамками. Каждая рамка станет карточкой.</p>'+
-        '<button class="btn primary" data-act="newDeck">'+ic('plus',18)+'Создать колоду</button><br><button class="btn line" data-act="ankiPick" style="margin-top:8px">'+ic('import',18)+'Импорт из Anki</button><br><button class="btn quiet" data-act="settings" style="margin-top:6px">Импортировать или восстановить из файла</button></div>')+
+        '<button class="btn primary" data-act="newDeck">'+ic('plus',18)+'Создать колоду</button><br><button class="btn line" data-act="ankiPick" style="margin-top:8px">'+ic('import',18)+'Импорт из Anki</button><br><button class="btn quiet" data-act="settings" style="margin-top:6px">Импортировать или восстановить из файла</button><br><button class="btn quiet" data-act="tour">Что умеет Corpus?</button></div>')+
       '</div>';
   },
   mount(){mountImgFallbacks();}
@@ -4374,7 +4392,9 @@ function accountSectionHtml(){
 function settingsBody(){
   const np=S.plates.length,nc=S.cards.length;
   const old=S.cards.length&&(!META.lastBackup||Date.now()-META.lastBackup>WEEK);
-  return accountSectionHtml()+lookSectionHtml()+markSectionHtml()+
+  return accountSectionHtml()+
+      '<section class="overview"><div class="h2">Обзор возможностей</div><p class="muted" style="margin:4px 0 12px;line-height:1.5">Короткая обучалка: фото и рамки, распознавание текста, ИИ, озвучка латыни, обмен по QR и многое другое.</p><button class="btn line block" data-act="tour">'+ic('help',18)+'Показать обзор</button></section>'+
+      lookSectionHtml()+markSectionHtml()+
       '<section class="overview"><div class="h2">Резервная копия</div><p class="muted" style="margin:4px 0 12px;line-height:1.5">Один файл со всеми колодами, фото и прогрессом. Храните его в «Файлах», облаке или Telegram — из него можно восстановить всё.</p>'+
       '<div class="sm" style="margin-bottom:12px;color:'+(old?'var(--learn)':'var(--ink2)')+'">'+esc(backupAgeText())+'</div>'+
       '<button class="btn primary block" data-act="backup">'+ic('check',18)+'Скачать копию</button>'+
@@ -4928,8 +4948,51 @@ function lookSectionHtml(){
     '<p class="muted sm" style="margin:10px 0 0;line-height:1.5">С клавиатурой: пробел — показать ответ, стрелки ← ↓ → ↑ — Снова / Трудно / Хорошо / Легко, Z — отменить ответ'+(META.speakOn&&TTS_OK?', P — произнести термин':'')+'.</p></section>';
 }
 
+/* ---------- feature tour: a short, skippable walkthrough of what the app can do ----------
+   Opens by itself once for a brand-new account (no decks yet); everyone else gets it from the "?" on Home,
+   from Settings, or from a one-off tip. Slides for AI / speech / QR only appear when that feature exists here. */
+function tourSlides(){
+  const L=[{ic:'image',t:'Фото → карточки',p:'Сфотографируйте страницу атласа и закройте подписи рамками — каждая рамка станет карточкой.',
+    li:[['search','Текст подписи читается сам, прямо на устройстве — фото никуда не уходит'],['check','Латинские слова сверяются со словарём анатомии']],lang:1},
+  {ic:'play',t:'Учитесь по-разному',p:'',
+    li:[['eyeoff','Скрыть все, Выбор, Ввод, Найти на рисунке — режим выбирается на главной и прямо во время учёбы'],['rotate','Повторения сами подбирают время (FSRS, как в современном Anki)'],['chart','Трудные карточки собираются в «Статистике» — их можно потренировать отдельно']]}];
+  if(S.sample)L.push({ic:'spark',t:'Claude под рукой',p:'',
+    li:[['spark','Придумает подсказку-ассоциацию для трудного термина'],['chat','Чат по карточке — кнопка с облачком вверху во время учёбы'],['image','Прочитает подписи на фото и сверит колоду с вашим конспектом']]});
+  L.push({ic:'volume',t:TTS_OK?'Латынь вслух, три языка':'Три языка и темы',p:'',speak:TTS_OK,
+    li:(TTS_OK?[['volume','Динамик у латинского термина произносит его вслух']]:[]).concat([['tag','Интерфейс на русском, English и eesti — язык можно сменить в любой момент'],['gear','Светлая, тёмная и бумажная темы, крупный текст и спокойный режим — всё в «Ещё»']])});
+  L.push({ic:'qr',t:'Делитесь колодами',p:'',
+    li:(sharesApi()?[['qr','Колоду или папку можно передать по QR-коду или ссылке — фото, рамки и названия приедут вместе'],['link','Принять: «Ещё → Получить по коду» или просто навести камеру на QR']]:[['link','Колоду или папку можно передать файлом: меню колоды → «Поделиться файлом»']]).concat([['import','Колоды из Anki (.apkg) тоже можно импортировать — в «Ещё»']])});
+  return L;
+}
+function openTour(){
+  let i=0;
+  const done=()=>{if(!META.tourSeen){META.tourSeen=1;persistMeta();}};
+  return showOverlay('',ov=>{
+    const sh=$('.sheet',ov);
+    const draw=()=>{
+      const L=tourSlides(),s=L[i],last=i===L.length-1;
+      sh.innerHTML='<div class="tour"><div class="tour-skip">'+(last?'':'<button class="btn quiet sm" data-tour="skip">Пропустить</button>')+'</div>'+
+        '<div class="tour-ic" aria-hidden="true">'+ic(s.ic,30)+'</div><h3>'+esc(s.t)+'</h3>'+(s.p?'<p class="tour-p">'+esc(s.p)+'</p>':'')+
+        '<ul>'+s.li.map(x=>'<li>'+ic(x[0],18)+'<span>'+esc(x[1])+'</span></li>').join('')+'</ul>'+
+        (s.lang?'<div class="seg" role="radiogroup" data-noi18n>'+LANGS.map(o=>'<button role="radio" aria-checked="'+(o[0]===LANG)+'" class="'+(o[0]===LANG?'on':'')+'" data-tl="'+o[0]+'">'+o[1]+'</button>').join('')+'</div>':'')+
+        (s.speak?'<button class="btn line block" data-tour="speak">'+ic(metaOn('speakOn')?'check':'volume',18)+(metaOn('speakOn')?'Озвучка включена':'Включить озвучку')+'</button>':'')+
+        '<div class="tour-dots" aria-hidden="true">'+L.map((_,k)=>'<i'+(k===i?' class="on"':'')+'></i>').join('')+'</div>'+
+        '<div class="tour-nav">'+(i?'<button class="btn line" data-tour="back" aria-label="Назад">'+ic('back',18)+'</button>':'')+'<button class="btn primary" data-tour="'+(last?'end':'next')+'">'+(last?'Начать':'Дальше')+'</button></div></div>';
+      $$('[data-tour]',sh).forEach(b=>b.onclick=()=>{
+        const a=b.dataset.tour;
+        if(a==='next'){i++;draw();}else if(a==='back'){i--;draw();}
+        else if(a==='speak'){setFeat('speakOn',!metaOn('speakOn'));draw();}
+        else dismissOverlay(null);
+      });
+      $$('[data-tl]',sh).forEach(b=>b.onclick=()=>{if(b.dataset.tl===LANG)return;switchLang(b.dataset.tl,true);draw();});
+    };
+    draw();
+  }).then(done);
+}
+
 /* ---------- actions ---------- */
 const A={
+  tour:()=>openTour(),
   signOut:async()=>{if(!window.CORPUS_WEB)return;
     if(!(await confirmDialog({title:'Выйти из аккаунта?',text:'Колоды и прогресс останутся в аккаунте — войдите снова, чтобы продолжить.',ok:'Выйти',danger:false})))return;
     window.CORPUS_WEB.signOut();},
@@ -5105,7 +5168,7 @@ async function bootData(){
   if(S.db){
     try{
       const g=await Promise.all(['decks','plates','terms','stats','folders','packs'].map(n=>S.db.collection(n).get()));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
       S.decks=g[0].docs.map(x=>Object.assign({},x.data(),{id:x.id,newToday:x.data()&&x.data().newToday?Object.assign({},x.data().newToday):undefined}));
       S.plates=g[1].docs.map(x=>Object.assign({},x.data(),{id:x.id}));
       S.cards=g[2].docs.map(x=>normCard(Object.assign({},x.data(),{id:x.id})));
@@ -5119,7 +5182,13 @@ async function bootData(){
   S.ready=true;NAV='enter-tab';view={name:'home'};render();
   S.cards.filter(c=>c._mig).forEach(c=>{delete c._mig;persist('terms',c.id);});
   const W=window.CORPUS_WEB;
-  if(W&&W.shareCode&&sharesApi()){const code=W.shareCode;if(W.clearShareCode)W.clearShareCode();setTimeout(()=>openShareCode(code),400);}
+  const sharing=!!(W&&W.shareCode&&sharesApi());
+  if(sharing){const code=W.shareCode;if(W.clearShareCode)W.clearShareCode();setTimeout(()=>openShareCode(code),400);}
+  else if(!META.tourSeen&&!S.loadErr){
+    if(window.__TEST__&&!window.__TOUR_TEST__){}
+    else if(!S.decks.length)setTimeout(()=>{if(!layer.firstChild&&!META.tourSeen&&view.name==='home')openTour();},900);
+    else setTimeout(()=>featTip('tour','Новое: короткий обзор возможностей Corpus',['Показать',()=>openTour()]),1500);
+  }
 }
 if(window.__TEST__){
   Object.defineProperty(window,'SS',{get:()=>SS});

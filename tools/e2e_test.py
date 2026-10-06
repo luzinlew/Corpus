@@ -61,6 +61,28 @@ def folder_file(path):
     pathlib.Path(path).write_text(json.dumps(doc))
 
 
+def order_file(path):
+    """Decks and photos listed in a scrambled order in the file; their createdAt says the real order.
+    Two photos share a createdAt: the file order decides between them."""
+    from PIL import Image
+    def img(w):
+        buf = io.BytesIO(); Image.new('RGB', (w, 300), (230, 230, 230)).save(buf, 'JPEG'); return 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+    t = 1_700_000_000_000
+    decks = [{'id': 'd3', 'name': 'Kolju 3', 'createdAt': t + 3000, 'folderId': 'f1'},
+             {'id': 'd1', 'name': 'Kolju 1', 'createdAt': t + 1000, 'folderId': 'f1'},
+             {'id': 'd2', 'name': 'Kolju 2', 'createdAt': t + 2000, 'folderId': 'f1'}]
+    plates = [{'id': 'p13', 'deckId': 'd1', 'w': 413, 'h': 300, 'createdAt': t + 30},
+              {'id': 'p11', 'deckId': 'd1', 'w': 411, 'h': 300, 'createdAt': t + 10},
+              {'id': 'p12a', 'deckId': 'd1', 'w': 412, 'h': 300, 'createdAt': t + 20},
+              {'id': 'p12b', 'deckId': 'd1', 'w': 414, 'h': 300, 'createdAt': t + 20},
+              {'id': 'p21', 'deckId': 'd2', 'w': 421, 'h': 300, 'createdAt': t + 5}]
+    for p in plates: p['image'] = img(p['w'])
+    cards = [{'id': 'c' + p['id'], 'deckId': p['deckId'], 'plateId': p['id'], 'term': 'term ' + p['id'], 'x': 10, 'y': 10, 'w': 14, 'h': 4, 'createdAt': p['createdAt']} for p in plates]
+    doc = {'app': 'corpus', 'kind': 'folder', 'version': 1, 'folders': [{'id': 'f1', 'name': 'Järjekord', 'mode': 'hideAll'}],
+           'decks': [dict(d, newPerDay=20, mode='hideAll') for d in decks], 'plates': plates, 'cards': cards, 'stats': {}}
+    pathlib.Path(path).write_text(json.dumps(doc))
+
+
 async def main():
     from playwright.async_api import async_playwright
     tmp = pathlib.Path(tempfile.mkdtemp())
@@ -68,6 +90,7 @@ async def main():
     shutil.copytree(ROOT, site, ignore=shutil.ignore_patterns('.git', 'tools', 'src', 'supabase', '*.md'))
     (site / 'config.js').write_text(f"self.CORPUS_CONFIG={{url:'{API}',key:'test-publishable-key',bucket:'plates'}};")
     folder_file(tmp / 'corpus-folder-Kolju.json')
+    order_file(tmp / 'corpus-folder-order.json')
     procs = [subprocess.Popen(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], stdout=subprocess.DEVNULL),
              subprocess.Popen([sys.executable, '-m', 'http.server', str(SITE_PORT), '--directory', str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
     wait_port(API_PORT); wait_port(SITE_PORT)
@@ -93,9 +116,10 @@ async def main():
                 pg.on('console', lambda m: m.type == 'error' and 'Failed to load resource' not in m.text and errs.append('console: ' + m.text))
                 # network problems other than web fonts (the test sandbox has no internet) and
                 # HTTP errors other than the ones a test provokes on purpose (wrong password, missing invite)
-                # (/logout is answered 204 and supabase-js never reads that empty body; the reload right after
-                #  sign-out makes Chrome report it as aborted even though the server handled it)
-                pg.on('requestfailed', lambda r: 'fonts.g' not in r.url and '/auth/v1/logout' not in r.url and errs.append('failed: ' + r.url + ' (' + str(r.failure) + ')'))
+                # (/logout is answered 204 and supabase-js never reads that empty body, so the reload right after
+                #  sign-out makes Chrome report it as aborted even though the server handled it; likewise any
+                #  ERR_ABORTED is a request cut short by the test's own reloads, not a failure)
+                pg.on('requestfailed', lambda r: 'fonts.g' not in r.url and 'ERR_ABORTED' not in str(r.failure) and errs.append('failed: ' + r.url + ' (' + str(r.failure) + ')'))
                 pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url) and errs.append(f'http {r.status}: {r.url}'))
                 return ctx, pg, errs
 
@@ -178,6 +202,33 @@ async def main():
                   f"kind={exp['kind']} cards={len(exp['cards'])}")
             check('exported file carries no progress', all('reps' not in c and 'ivl' not in c for c in exp['cards']))
 
+            # order: decks and photos come back in the order they were added, also after a reload
+            await pg.evaluate("go({name:'settings'})")
+            async with pg.expect_file_chooser() as fc:
+                await pg.click('[data-act=importPick] >> nth=0')
+            await (await fc.value).set_files(str(tmp / 'corpus-folder-order.json'))
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function("S.folders.some(f=>f.name==='Järjekord') && S.plates.length===6", timeout=20000)
+            await state_when(lambda st: sum(1 for d in st['docs'] if d['coll'] == 'plates') == 6)
+            q = """(()=>{const f=S.folders.find(f=>f.name==='Järjekord');const ds=decksInFolder(f.id);
+                     return {decks:ds.map(d=>d.name),photos:platesOf(ds[0].id).map(p=>p.w)};})()"""
+            want = {'decks': ['Kolju 1', 'Kolju 2', 'Kolju 3'], 'photos': [411, 412, 414, 413]}
+            got = await pg.evaluate(q)
+            check('import keeps the order decks and photos were added', got == want, json.dumps(got))
+            await pg.reload()
+            await app_ready(pg)
+            got = await pg.evaluate(q)
+            check('…and keeps it after a reload', got == want, json.dumps(got))
+            fid2 = await pg.evaluate("S.folders.find(f=>f.name==='Järjekord').id")
+            await pg.evaluate(f"go({{name:'folder',folderId:'{fid2}'}})")
+            await pg.click('[data-act=folderMenu]')
+            async with pg.expect_download() as dl:
+                await pg.click('#layer [data-s="share"]')
+            exp2 = json.loads(pathlib.Path(await (await dl.value).path()).read_text())
+            check('a re-shared folder lists decks and photos in that order',
+                  [d['name'] for d in exp2['decks']] == want['decks'] and [p['w'] for p in exp2['plates'] if p['deckId'] == exp2['decks'][0]['id']] == want['photos'],
+                  json.dumps([d['name'] for d in exp2['decks']]))
+
             # account section and sign out
             await pg.evaluate("go({name:'settings'})")
             acc = await pg.inner_text('.page')
@@ -194,7 +245,7 @@ async def main():
             await pg.fill('input[name=password]', 'anatoomia1')
             await pg.click('.cw-go')
             await app_ready(pg)
-            check('signed back in: data is there', await pg.evaluate('S.cards.length===2 && S.plates.length===1'))
+            check('signed back in: data is there', await pg.evaluate('S.cards.length===7 && S.plates.length===6 && S.folders.length===2'))
             errs_a = [e for e in errs if 'favicon' not in e]
             await ctx.close()
 
@@ -246,7 +297,10 @@ async def main():
             await import_folder(pg)
             ph = await photo_check(pg)
             check('fallback: photo loads and stays canvas-readable', ph['status'] == 200 and ph['w'] == 640 and ph['readable'], json.dumps(ph))
-            check("Lev's photo is still only Lev's (friend has own copy)", len([o for o in state()['objects']]) == 2)
+            me = await pg.evaluate('CORPUS_WEB.uid')
+            objs = state()['objects']
+            check("friend's import made the friend's own photo copy; Lev's photos untouched",
+                  sum(o['owner'] == me for o in objs) == 1 and sum(o['owner'] != me for o in objs) == 6, json.dumps([o['owner'][:8] for o in objs]))
             await ctx.close()
 
             check('no script errors or failed requests in the browser', not errs_a and not errs_b and not errs_c, '; '.join(errs_a + errs_b + errs_c)[:600])

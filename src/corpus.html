@@ -3226,9 +3226,10 @@ async function buildExport(deckIds,full,fid){
   const out={app:'corpus',kind:full?'backup':'deck',version:1,exportedAt:new Date().toISOString(),decks:[],plates:[],cards:[],stats:{},folders:[]};
   const sf=!full&&fid?folderById(fid):null;
   if(sf){out.kind='folder';out.folders.push({id:sf.id,name:sf.name,mode:sf.mode||'hideAll'});}
-  const ps=S.plates.filter(p=>deckIds.indexOf(p.deckId)>=0);let i=0,miss=0;
-  for(const d of S.decks.filter(d=>deckIds.indexOf(d.id)>=0)){
-    out.decks.push(full?Object.assign({id:d.id},clean(d)):Object.assign({id:d.id,name:d.name,newPerDay:d.newPerDay==null?20:d.newPerDay,mode:d.mode||'hideAll'},d.kind?{kind:d.kind}:{},sf?{folderId:sf.id}:{}));
+  const dl=deckIds.map(deckById).filter(Boolean);
+  const ps=[];dl.forEach(d=>platesOf(d.id).forEach(p=>ps.push(p)));let i=0,miss=0;
+  for(const d of dl){
+    out.decks.push(full?Object.assign({id:d.id},clean(d)):Object.assign({id:d.id,name:d.name,newPerDay:d.newPerDay==null?20:d.newPerDay,mode:d.mode||'hideAll',createdAt:d.createdAt||0},d.kind?{kind:d.kind}:{},sf?{folderId:sf.id}:{}));
     if(full&&S.stats[d.id])out.stats[d.id]={days:S.stats[d.id].days||{}};
   }
   if(full){
@@ -3327,36 +3328,40 @@ async function importFile(file){
     const f={id:newId('folders'),name:fname,mode:sf.mode||'hideAll',createdAt:Date.now()};
     newFid=f.id;fmap[sf.id]=f.id;S.folders.push(f);persist('folders',f.id);
   }
+  const t0=Date.now();
+  const inOrder=(arr,key)=>(arr||[]).map((o,k)=>({o:o,k:k,t:+(o&&o[key])||0})).sort((a,b)=>(a.t-b.t)||(a.k-b.k));
   if(full&&Array.isArray(data.folders)){
-    data.folders.forEach(sf=>{
-      const f=Object.assign({},sf);f.id=newId('folders');f.createdAt=Date.now();
+    data.folders.forEach((sf,k)=>{
+      const f=Object.assign({},sf);f.id=newId('folders');f.createdAt=sf.createdAt||(t0+k);
       fmap[sf.id]=f.id;S.folders.push(f);persist('folders',f.id);
     });
   }
   const dmap={};const taken=new Set(S.decks.map(d=>d.name));
-  data.decks.forEach(sd=>{
+  inOrder(data.decks,'createdAt').map(x=>x.o).forEach((sd,k)=>{
     let name=String(sd.name||'Колода');if(!replace&&!isFolder&&taken.has(name))name+=' (импорт)';
     const d=full?Object.assign({},sd):{name:name,newPerDay:sd.newPerDay==null?20:sd.newPerDay,mode:sd.mode||'hideAll'};if(!full&&sd.kind==='text')d.kind='text';
-    d.name=name;d.id=newId('decks');d.createdAt=Date.now();if(!full)delete d.newToday;
+    d.name=name;d.id=newId('decks');d.createdAt=(full&&sd.createdAt)?sd.createdAt:t0+k;if(!full)delete d.newToday;
     if(full&&d.folderId)d.folderId=fmap[d.folderId]||null;if(isFolder)d.folderId=fmap[sd.folderId]||newFid;if(d.folderId==null)delete d.folderId;
     dmap[sd.id]=d.id;S.decks.push(d);persist('decks',d.id);
     if(full&&data.stats&&data.stats[sd.id]){S.stats[d.id]={id:d.id,days:data.stats[sd.id].days||{}};persist('stats',d.id);}
   });
-  Object.keys(pmap).forEach(oid=>{
-    const m=pmap[oid],sp=m.src;if(!dmap[sp.deckId])return;
-    const p={id:newId('plates'),deckId:dmap[sp.deckId],assetId:m.assetId,w:sp.w||0,h:sp.h||0,createdAt:sp.createdAt||Date.now()};
+  const lastT={};const nextT=(did,t)=>(lastT[did]=Math.max(t||t0,(lastT[did]||0)+1));
+  inOrder(Object.keys(pmap).map(oid=>pmap[oid].src),'createdAt').forEach(x=>{
+    const sp=x.o,m=pmap[sp.id];if(!dmap[sp.deckId])return;
+    const p={id:newId('plates'),deckId:dmap[sp.deckId],assetId:m.assetId,w:sp.w||0,h:sp.h||0,createdAt:nextT('p'+dmap[sp.deckId],x.t)};
     if(full&&sp.excluded)p.excluded=true;
     m.nid=p.id;S.plates.push(p);persist('plates',p.id);
   });
   let n=0;
   const nmap={},restored=[];
-  (data.cards||[]).forEach(sc=>{
+  inOrder(data.cards,'createdAt').map(x=>x.o).forEach(sc=>{
     if(sc&&sc.kind==='text'){
       if(!dmap[sc.deckId]||!sc.front||!sc.back)return;
       const base={};TEXT_KEYS.forEach(k=>{if(sc[k]!=null)base[k]=sc[k];});
       const c=full?Object.assign({},sc,base):Object.assign(base,{type:'new'});
       c.id=newId('terms');c.deckId=dmap[sc.deckId];const ok=sc.noteId||sc.id;c.noteId=nmap[ok]||(nmap[ok]=newId('terms'));
       const rp=sc.refPlateId&&pmap[sc.refPlateId]&&pmap[sc.refPlateId].nid;if(rp)c.refPlateId=rp;else delete c.refPlateId;
+      c.createdAt=nextT('n'+c.deckId,+sc.createdAt||0);   // notes keep their order even when the source had equal times
       delete c.plateId;delete c._pk;restored.push(normCard(c));n++;return;
     }
     const m=pmap[sc.plateId];if(!m||!m.nid||!dmap[sc.deckId])return;

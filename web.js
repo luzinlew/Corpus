@@ -18,7 +18,7 @@
   var PUBLIC = configured ? CFG.url.replace(/\/+$/, '') + '/storage/v1/object/public/' + BUCKET + '/' : '';
   var FN = configured ? CFG.url.replace(/\/+$/, '') + '/functions/v1/corpus-ai' : '';
 
-  var W = { blobBase: BASE + '_blob/', email: '', uid: '', signOut: signOut };
+  var W = { blobBase: BASE + '_blob/', email: '', uid: '', admin: false, signOut: signOut, siteStats: siteStats };
   window.CORPUS_WEB = W;
 
   /* the invite code arrives in the link (?i=...) and is kept for the sign-up form. It stays in the
@@ -71,6 +71,7 @@
     aiP.then(function (st) { if (st) W.ai = st; try { localStorage.setItem('corpus.ai', st ? '1' : '0'); } catch (e) {} });
     var aiOn = aiKnown || !!(await Promise.race([aiP, new Promise(function (r) { setTimeout(function () { r(null); }, 2500); })]));
     try { localStorage.setItem('corpus.known', '1'); } catch (e) {}
+    ping();
     /* signed out elsewhere (or the session was revoked): start over at the sign-in screen */
     sb.auth.onAuthStateChange(function (ev) { if (ev === 'SIGNED_OUT' && !leaving) setTimeout(function () { location.reload(); }, 0); });
     return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user), sample: aiOn ? mkSample() : null };
@@ -82,6 +83,22 @@
       return (ns && ns[name]) || null;
     }
   });
+
+  /* ---------- activity: one mark per person per day (supabase/stats.sql); tells whether this is an admin ---------- */
+  var pingDay = '';
+  function today() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function ping() {
+    pingDay = today();
+    sb.rpc('corpus_ping').then(function (r) { if (r && r.data && r.data.admin) W.admin = true; }, function () {});
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && W.uid && pingDay && pingDay !== today()) ping();   // the app was left open overnight
+  });
+  async function siteStats(days) {
+    var r = await sb.rpc('corpus_site_stats', { p_days: days || 14 });
+    if (r.error) throw { code: 'unavailable', message: r.error.message };
+    return r.data;
+  }
 
   var leaving = false;
   async function signOut() {

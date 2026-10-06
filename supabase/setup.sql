@@ -94,3 +94,4 @@ create trigger corpus_check_invite before insert on auth.users
   for each row execute function private.corpus_check_invite();
 
 -- 4. AI plans and daily limits: run supabase/ai.sql as well.
+-- 5. Site statistics for admins: run supabase/stats.sql as well.

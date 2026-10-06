@@ -14,6 +14,7 @@ Corpus — карточки по анатомии из фото атласа: р
 | `config.js` | URL проекта Supabase и publishable key (оба публичные) |
 | `index.html` | Собирается из `src/corpus.html` командой `python3 build.py`. Руками не править |
 | `supabase/setup.sql` | Разовая настройка базы: таблица `docs` с RLS, бакет `plates`, проверка кода приглашения |
+| `supabase/stats.sql` | Статистика для админов: отметка «заходил сегодня» (`activity`), `corpus_site_stats` |
 | `supabase/ai.sql` | Тарифы и дневные лимиты ИИ: `ai_plans`, `ai_usage`, функция `corpus_ai_take` |
 | `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
 | `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js |
@@ -77,6 +78,14 @@ select email, created_at, last_sign_in_at from auth.users order by created_at;
 Удалить пользователя: Authentication → Users → Delete user. Его колоды удалятся вместе с ним, фото останутся в бакете `plates`.
 
 Пользователей, созданных кнопкой «Add user» в панели Supabase, блокирует проверка приглашения: у них нет кода. Друзья регистрируются сами по ссылке.
+
+## Статистика сайта
+
+Админы (email через запятую в `private.settings`, ключ `admins`) видят в приложении «Veel → Saidi statistika»: сколько людей зарегистрировано и заходило сегодня, за 7 и 30 дней, сколько ответов и ИИ-запросов, график по дням и список людей с последним заходом. Считаются только вошедшие пользователи: сайт раз в день отмечает, что человек его открывал. Сторонних счётчиков и cookies нет.
+
+```sql
+update private.settings set value = 'you@example.com, other@example.com' where key = 'admins';
+```
 
 ## Ограничения бесплатного Supabase
 

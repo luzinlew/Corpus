@@ -97,7 +97,7 @@ async def main():
     order_file(tmp / 'corpus-folder-order.json')
     deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
     fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key')
-    api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT))
+    api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT), FAKE_ADMINS='lev@test.ee')
     procs = [subprocess.Popen(deno + ['run', '--allow-net', '--allow-env', '--allow-read', '--allow-sys', str(ROOT / 'supabase' / 'functions' / 'corpus-ai' / 'index.ts')],
                               env=fn_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
              subprocess.Popen(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], env=api_env, stdout=subprocess.DEVNULL),
@@ -257,6 +257,9 @@ async def main():
             acc = await pg.inner_text('.page')
             check('settings show the account', 'lev@test.ee' in acc and 'Konto' in acc)
             check("settings show today's AI allowance", f'TI täna: {AI_LIMIT} / {AI_LIMIT}' in acc, [l for l in acc.split('\n') if 'TI' in l][:1])
+            await pg.wait_for_selector('#siteStats .stat-grid', timeout=10000)
+            st = await pg.inner_text('#siteStats')
+            check('admin sees site statistics', 'Saidi statistika' in st and 'kasutajat' in st and 'lev@test.ee' in st and 'viimati täna' in st, st.replace('\n', ' | ')[:200])
             await pg.click('[data-act=signOut]')
             await pg.click('#layer [data-s="1"]')
             await pg.wait_for_selector('.cw-auth .cw-tabs .on', timeout=15000)
@@ -294,6 +297,9 @@ async def main():
             await app_ready(pg)
             check("friend signed up and sees an empty Corpus, not Lev's", await pg.evaluate('S.decks.length===0 && S.cards.length===0 && S.folders.length===0'))
             check('no AI function deployed → AI features hidden', await pg.evaluate('S.sample===null'))
+            await pg.evaluate("go({name:'settings'})")
+            await pg.wait_for_timeout(800)
+            check('a friend does not see site statistics', await pg.evaluate("!document.querySelector('#siteStats')"))
             urllib.request.urlopen(API + '/__fn?off=0')
             errs_b = list(errs)
             await ctx.close()

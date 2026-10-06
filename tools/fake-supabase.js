@@ -17,6 +17,8 @@ const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
 const FN_URL0 = FN_URL;
 const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
+const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
+const activity = new Map();   // uid -> Map(day -> {opens, last})
 const log = [];
 
 const b64u = (s) => Buffer.from(s).toString('base64url');
@@ -174,6 +176,32 @@ http.createServer(async (req, res) => {
     const k = uid + '|' + new Date().toISOString().slice(0, 10), used = aiUsed.get(k) || 0;
     if (used + n > AI_LIMIT) { send(res, 200, { ok: false, plan: 'free', limit: AI_LIMIT, used }); return; }
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: AI_LIMIT, used: used + n }); return;
+  }
+
+  /* ---------- rpc: corpus_ping / corpus_site_stats (as in supabase/stats.sql) ---------- */
+  const isAdmin = (uid) => { const u = byId(uid); return !!u && ADMINS.includes(u.email.toLowerCase()); };
+  const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
+  if (p === '/rest/v1/rpc/corpus_ping' && req.method === 'POST') {
+    const uid = uidOf(req);
+    if (!uid) { send(res, 200, { admin: false }); return; }
+    const m = activity.get(uid) || new Map(); activity.set(uid, m);
+    const d = dayOf(Date.now()), e = m.get(d) || { opens: 0 }; e.opens++; e.last = new Date().toISOString(); m.set(d, e);
+    send(res, 200, { admin: isAdmin(uid) }); return;
+  }
+  if (p === '/rest/v1/rpc/corpus_site_stats' && req.method === 'POST') {
+    const uid = uidOf(req);
+    if (!uid || !isAdmin(uid)) { send(res, 403, { code: '42501', message: 'not_admin' }); return; }
+    const today = dayOf(Date.now()), back = (n) => dayOf(Date.now() - n * 86400000);
+    const rev = [];   // {owner, day, n}
+    for (const r of docs.values()) if (r.coll === 'stats' && r.data && r.data.days) for (const [day, e] of Object.entries(r.data.days)) rev.push({ owner: r.owner, day, n: (e && e.n) || 0 });
+    const sum = (f) => rev.filter(f).reduce((a, r) => a + r.n, 0);
+    const act = (f) => { let n = 0; for (const [, m] of activity) for (const d of m.keys()) if (f(d)) { n++; break; } return n; };
+    const days = []; for (let i = 13; i >= 0; i--) { const d = back(i); days.push({ day: d, active: act((x) => x === d), reviews: sum((r) => r.day === d), signups: 0 }); }
+    let ai7 = 0; for (const [k, v] of aiUsed) if (k.split('|')[1] > back(7)) ai7 += v;
+    const people = Array.from(users.values()).map((u) => { const m = activity.get(u.id) || new Map(); const last = Array.from(m.values()).map((e) => e.last).sort().pop() || null;
+      return { email: u.email, joined: u.created.slice(0, 10), last_seen: last, days30: m.size, reviews7: sum((r) => r.owner === u.id && r.day > back(7)) }; });
+    send(res, 200, { users: users.size, new7: users.size, active_today: act((d) => d === today), active7: act((d) => d > back(7)), active30: act((d) => d > back(30)),
+      reviews_today: sum((r) => r.day === today), reviews7: sum((r) => r.day > back(7)), ai7, days, people }); return;
   }
 
   /* ---------- a stand-in for the Claude Messages API ---------- */

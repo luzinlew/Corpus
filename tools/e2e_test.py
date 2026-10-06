@@ -242,7 +242,7 @@ async def main():
             check('tour: Estonian text', (await pg.inner_text('.tour h3')).strip() == 'Foto → kaardid')
             for _ in range(4):
                 await pg.click('.tour [data-tour=next]')
-            check('tour: last slide is about sharing', 'QR' in await pg.inner_text('.tour'))
+            check('tour: last slide is about sharing by QR', (await pg.inner_text('.tour h3')).strip() == 'Jaga QR-koodiga' and (await pg.inner_text('.tour')).count('QR') >= 3)
             await pg.click('.tour [data-tour=end]')
             await pg.wait_for_function("!document.querySelector('#layer .tour')")
             check('tour closes and is remembered', await pg.evaluate('META.tourSeen===1'))

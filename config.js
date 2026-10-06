@@ -2,7 +2,7 @@
    browsers, and every user's data is protected by row-level security (see supabase/setup.sql).
    Never put the secret / service_role key here. */
 self.CORPUS_CONFIG = {
-  url: '',      // https://<project-ref>.supabase.co
-  key: '',      // sb_publishable_...
+  url: 'https://iymempapqvbwcaclwnvk.supabase.co',
+  key: 'sb_publishable_zvG5uH19haeN6xTUkP6hSQ_siHwoc8E',
   bucket: 'plates'
 };

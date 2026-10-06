@@ -26,13 +26,13 @@ Corpus — карточки по анатомии из фото атласа: р
 1. Изменить `src/corpus.html` (и при необходимости `web.js` / `web.css` / `sw.js`).
 2. `python3 build.py`, чтобы пересобрать `index.html` (у скриптов меняется `?v=`, и браузеры сразу берут новую версию).
 3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase. Нужен `pip install playwright && python3 -m playwright install chromium`.
-4. Закоммитить и запушить в `main`. GitHub Pages обновит сайт за минуту-две.
+4. Закоммитить и запушить: `git push origin main main:gh-pages`. Сайт публикуется из ветки `gh-pages`, GitHub Pages обновит его за минуту-две.
 
 Чтобы обновить и артефакт в claude.ai, опубликуйте туда `src/corpus.html` вместе с `ocr/*` и `anki/*`.
 
 ## Администрирование (Supabase → SQL Editor)
 
-Ссылка для друзей: `https://<логин>.github.io/corpus/?i=<код>`. Код из ссылки сохраняется на устройстве и подставляется при регистрации.
+Сайт: https://luzinlew.github.io/Corpus/ (адрес чувствителен к регистру: `Corpus`). Ссылка для друзей: `https://luzinlew.github.io/Corpus/?i=<код>`. Код из ссылки сохраняется на устройстве и подставляется при регистрации.
 
 ```sql
 -- сменить код приглашения (старые ссылки перестанут работать для новых регистраций)

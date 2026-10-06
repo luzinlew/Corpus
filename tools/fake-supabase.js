@@ -1,5 +1,5 @@
 /* A small stand-in for the parts of Supabase the site uses (Auth, PostgREST on public.docs + the
-   corpus_doc_update RPC, Storage on the 'plates' bucket), for local browser tests only.
+   corpus_doc_update RPC, public.shares + the share RPCs, Storage on the 'plates' bucket), for local browser tests only.
    It enforces the same rules as supabase/setup.sql: the invite code, owner-only rows and photos.
    Usage: node tools/fake-supabase.js [port] [invite] */
 const http = require('http');
@@ -12,6 +12,7 @@ const access = new Map();     // access token -> uid
 const refresh = new Map();    // refresh token -> uid
 const docs = new Map();       // owner|coll|id -> row
 const objects = new Map();    // name -> {owner,type,buf}
+const shares = new Map();     // owner|src -> row (public.shares)
 const aiUsed = new Map();     // uid|day -> units used today (public.ai_usage)
 const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
@@ -101,7 +102,7 @@ http.createServer(async (req, res) => {
   log.push(req.method + ' ' + p);
 
   /* ---------- test helpers ---------- */
-  if (p === '/__state') { send(res, 200, { users: users.size, docs: Array.from(docs.values()), objects: Array.from(objects.entries()).map(([k, v]) => ({ name: k, owner: v.owner, type: v.type, size: v.buf.length })) }); return; }
+  if (p === '/__state') { send(res, 200, { users: users.size, docs: Array.from(docs.values()), objects: Array.from(objects.entries()).map(([k, v]) => ({ name: k, owner: v.owner, type: v.type, size: v.buf.length })), shares: Array.from(shares.values()) }); return; }
   if (p === '/__log') { send(res, 200, log.splice(0)); return; }
   if (p === '/__fn') { FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; send(res, 200, { fn: FN_URL }); return; }
 
@@ -158,6 +159,43 @@ http.createServer(async (req, res) => {
       send(res, 201); return;
     }
     if (req.method === 'DELETE') { rows().forEach((r) => docs.delete(r.owner + '|' + r.coll + '|' + r.id)); send(res, 204); return; }
+  }
+  /* ---------- rest: public.shares (owner-only rows) + the share RPCs (as in supabase/share.sql) ---------- */
+  if (p === '/rest/v1/shares') {
+    const uid = uidOf(req);
+    const f = {};
+    for (const [k, v] of u.searchParams) if (/^(owner|src|code)$/.test(k) && v.startsWith('eq.')) f[k] = v.slice(3);
+    const rows = () => Array.from(shares.values()).filter((r) => r.owner === uid && Object.keys(f).every((k) => r[k] === f[k]));
+    if (req.method === 'GET') {
+      const cols = (u.searchParams.get('select') || '*').split(',');
+      send(res, 200, rows().map((r) => (cols[0] === '*' ? r : Object.fromEntries(cols.map((c) => [c, r[c]]))))); return;
+    }
+    if (req.method === 'DELETE') { rows().forEach((r) => shares.delete(r.owner + '|' + r.src)); send(res, 204); return; }
+  }
+  if (p === '/rest/v1/rpc/corpus_share_put' && req.method === 'POST') {
+    const uid = uidOf(req);
+    if (!uid) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_share_put' }); return; }
+    if (!body.p_src || !/^(deck|folder)$/.test(body.p_kind)) { send(res, 400, { code: '22023', message: 'share_bad_request' }); return; }
+    if (JSON.stringify(body.p_data).length > 6 * 1024 * 1024) { send(res, 400, { code: '54000', message: 'share_too_large' }); return; }
+    const k = uid + '|' + body.p_src;
+    let row = shares.get(k);
+    const now = new Date().toISOString();
+    if (!row) {
+      const a = '23456789abcdefghjkmnpqrstuvwxyz', b = crypto.randomBytes(10); let code = '';
+      for (let i = 0; i < 10; i++) code += a[b[i] % 31];
+      row = { owner: uid, src: body.p_src, code, kind: body.p_kind, name: String(body.p_name || '').slice(0, 200), data: body.p_data, created_at: now, updated_at: now, opens: 0 };
+      shares.set(k, row);
+    } else { Object.assign(row, { kind: body.p_kind, name: String(body.p_name || '').slice(0, 200), data: body.p_data, updated_at: now }); }
+    send(res, 200, { code: row.code, createdAt: row.created_at }); return;
+  }
+  if (p === '/rest/v1/rpc/corpus_share_open' && req.method === 'POST') {
+    const uid = uidOf(req);
+    if (!uid) { send(res, 401, { code: '42501', message: 'share_sign_in' }); return; }
+    const code = String(body.p_code || '').trim().toLowerCase();
+    const row = Array.from(shares.values()).find((r) => r.code === code);
+    if (!row) { send(res, 404, { code: 'P0002', message: 'share_not_found', details: null, hint: null }); return; }
+    row.opens++;
+    send(res, 200, { kind: row.kind, name: row.name, data: row.data, createdAt: row.created_at, updatedAt: row.updated_at, from: byId(row.owner).email, mine: row.owner === uid }); return;
   }
   if (p === '/rest/v1/rpc/corpus_doc_update' && req.method === 'POST') {
     const uid = uidOf(req);

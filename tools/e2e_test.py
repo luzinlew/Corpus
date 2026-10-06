@@ -10,9 +10,11 @@ talking to the fake backend and to a fake Claude API inside it.
 Covers: invite sign-up, sign in / out, AI through the function (text, JSON, images, daily limit,
 hidden when the function is not deployed), importing a folder file (photos to Storage, cards to packs),
 progress saved through the merge RPC and restored after reload, photos served by the service worker
-and readable on a canvas, exporting a folder, isolation between two accounts, and the no-service-worker
-fallback. Prints one line per check and exits non-zero on the first failure."""
-import asyncio, base64, io, json, os, pathlib, shutil, socket, subprocess, sys, tempfile, time, urllib.request
+and readable on a canvas, exporting a folder, importing an Anki .apkg (pictures read from the zip by
+offset, uploaded in parallel, documents written in batches), sharing a folder by code / QR and receiving
+it in another account, isolation between two accounts, and the no-service-worker fallback.
+Prints one line per check and exits non-zero on the first failure."""
+import asyncio, base64, io, json, os, pathlib, re, shutil, socket, sqlite3, subprocess, sys, tempfile, time, urllib.request, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SITE_PORT, API_PORT, FN_PORT, INVITE, AI_LIMIT = 8765, 54321, 8000, 'p8wyzmtw', 6
@@ -87,6 +89,60 @@ def order_file(path):
     pathlib.Path(path).write_text(json.dumps(doc))
 
 
+def anki_file(path):
+    """A small Anki 2.1 package (schema 11): deck 'Kolju' with 3 image-occlusion notes (one picture each,
+    two masks on the first) and 3 Basic notes, one of them with a picture inside the answer."""
+    from PIL import Image, ImageDraw
+    def jpeg(w, h, color):
+        im = Image.new('RGB', (w, h), color); d = ImageDraw.Draw(im); d.rectangle([w * .1, h * .2, w * .3, h * .3], outline=(0, 0, 0), width=4)
+        buf = io.BytesIO(); im.save(buf, 'JPEG', quality=80); return buf.getvalue()
+    media = {'skull1.jpg': jpeg(800, 600, (240, 230, 220)), 'skull2.jpg': jpeg(640, 480, (230, 240, 220)),
+             'skull3.jpg': jpeg(700, 500, (220, 230, 240)), 'small.png': None}
+    im = Image.new('RGB', (60, 40), (200, 100, 100)); buf = io.BytesIO(); im.save(buf, 'PNG'); media['small.png'] = buf.getvalue()
+    db_path = pathlib.Path(path).with_suffix('.sqlite')
+    if db_path.exists(): db_path.unlink()
+    db = sqlite3.connect(db_path)
+    db.executescript('''
+      create table col (id integer primary key, crt integer, mod integer, scm integer, ver integer, dty integer, usn integer, ls integer,
+                        conf text, models text, decks text, dconf text, tags text);
+      create table notes (id integer primary key, guid text, mid integer, mod integer, usn integer, tags text, flds text, sfld text, csum integer, flags integer, data text);
+      create table cards (id integer primary key, nid integer, did integer, ord integer, mod integer, usn integer, type integer, queue integer, due integer,
+                          ivl integer, factor integer, reps integer, lapses integer, left integer, odue integer, odid integer, flags integer, data text);
+      create table graves (usn integer, oid integer, type integer);''')
+    MID_IO, MID_B, DID = 1700000000001, 1700000000002, 1700000000003
+    models = {
+        str(MID_IO): {'id': MID_IO, 'name': 'Image Occlusion', 'type': 1,
+                      'flds': [{'name': n, 'ord': i} for i, n in enumerate(['Occlusion', 'Image', 'Header', 'Back Extra', 'Comments'])],
+                      'tmpls': [{'name': 'Image Occlusion', 'ord': 0, 'qfmt': '{{#Header}}<div>{{Header}}</div>{{/Header}}<div style="display:none">{{cloze:Occlusion}}</div><div id=container>{{Image}}</div>',
+                                 'afmt': '{{#Header}}<div>{{Header}}</div>{{/Header}}<div style="display:none">{{cloze:Occlusion}}</div><div id=container>{{Image}}</div><div>{{Back Extra}}</div>'}]},
+        str(MID_B): {'id': MID_B, 'name': 'Basic', 'type': 0, 'flds': [{'name': 'Front', 'ord': 0}, {'name': 'Back', 'ord': 1}],
+                     'tmpls': [{'name': 'Card 1', 'ord': 0, 'qfmt': '{{Front}}', 'afmt': '{{FrontSide}}<hr id=answer>{{Back}}'}]}}
+    decks = {'1': {'id': 1, 'name': 'Default'}, str(DID): {'id': DID, 'name': 'Kolju'}}
+    db.execute('insert into col values (1, 1600000000, 0, 0, 11, 0, 0, 0, ?, ?, ?, ?, ?)', ('{}', json.dumps(models), json.dumps(decks), '{}', '{}'))
+    sep = '\x1f'
+    notes = [
+        (1, MID_IO, sep.join(['{{c1::image-occlusion:rect:left=.1:top=.2:width=.2:height=.1:oi=1}} {{c2::image-occlusion:rect:left=.5:top=.5:width=.1:height=.1:oi=1}}', '<img src="skull1.jpg">', 'Os frontale', '', ''])),
+        (2, MID_IO, sep.join(['{{c1::image-occlusion:rect:left=.2:top=.3:width=.2:height=.1:oi=1}}', '<img src="skull2.jpg">', '', '', ''])),
+        (3, MID_IO, sep.join(['{{c1::image-occlusion:rect:left=.3:top=.4:width=.2:height=.1:oi=1}}', '<img src="skull3.jpg">', '', '', ''])),
+        (4, MID_B, sep.join(['os frontale', 'otsmikuluu'])),
+        (5, MID_B, sep.join(['maxilla', 'ülalõualuu <img src="small.png">'])),
+        (6, MID_B, sep.join(['mandibula', 'alalõualuu']))]
+    cid = 100
+    for nid, mid, flds in notes:
+        db.execute('insert into notes values (?, ?, ?, 0, 0, "", ?, "", 0, 0, "")', (nid, str(nid), mid, flds))
+        for ord_ in ([0, 1] if nid == 1 else [0]):
+            cid += 1
+            db.execute('insert into cards values (?, ?, ?, ?, 0, 0, 0, 0, ?, 0, 2500, 0, 0, 0, 0, 0, 0, "")', (cid, nid, DID, ord_, cid))
+    db.commit(); db.close()
+    names = list(media.keys())
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('collection.anki2', db_path.read_bytes())
+        z.writestr('media', json.dumps({str(i): n for i, n in enumerate(names)}))
+        for i, n in enumerate(names):
+            z.writestr(str(i), media[n])
+    db_path.unlink()
+
+
 async def main():
     from playwright.async_api import async_playwright
     tmp = pathlib.Path(tempfile.mkdtemp())
@@ -95,6 +151,7 @@ async def main():
     (site / 'config.js').write_text(f"self.CORPUS_CONFIG={{url:'{API}',key:'test-publishable-key',bucket:'plates'}};")
     folder_file(tmp / 'corpus-folder-Kolju.json')
     order_file(tmp / 'corpus-folder-order.json')
+    anki_file(tmp / 'Kolju.apkg')
     deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
     fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key')
     api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT), FAKE_ADMINS='lev@test.ee')
@@ -131,6 +188,7 @@ async def main():
                 pg.on('requestfailed', lambda r: 'fonts.g' not in r.url and 'ERR_ABORTED' not in str(r.failure) and errs.append('failed: ' + r.url + ' (' + str(r.failure) + ')'))
                 pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url)
                       and not ('/functions/v1/corpus-ai' in r.url and r.status in (404, 429))   # provoked: function off, daily limit
+                      and not ('/rpc/corpus_share_open' in r.url and r.status == 404)             # provoked: a wrong share code
                       and errs.append(f'http {r.status}: {r.url}'))
                 return ctx, pg, errs
 
@@ -138,12 +196,13 @@ async def main():
                 await pg.wait_for_function('window.S && S.ready && !document.querySelector(".cw-auth")', timeout=20000)
 
             async def import_folder(pg):
+                before = await pg.evaluate('[S.plates.length, S.cards.length, S.folders.length]')
                 await pg.evaluate("go({name:'settings'})")
                 async with pg.expect_file_chooser() as fc:
                     await pg.click('[data-act=importPick] >> nth=0')
                 await (await fc.value).set_files(str(tmp / 'corpus-folder-Kolju.json'))
                 await pg.click('#layer [data-s="1"]')
-                await pg.wait_for_function('S.plates.length===1 && S.cards.length===2 && S.folders.length===1', timeout=20000)
+                await pg.wait_for_function(f'S.plates.length==={before[0] + 1} && S.cards.length==={before[1] + 2} && S.folders.length==={before[2] + 1}', timeout=20000)
 
             async def photo_check(pg):
                 return await pg.evaluate("""async()=>{
@@ -252,6 +311,58 @@ async def main():
                   [d['name'] for d in exp2['decks']] == want['decks'] and [p['w'] for p in exp2['plates'] if p['deckId'] == exp2['decks'][0]['id']] == want['photos'],
                   json.dumps([d['name'] for d in exp2['decks']]))
 
+            # share the folder by code / QR
+            await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
+            await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="qr"]')
+            await pg.wait_for_selector('#shareCode', timeout=15000)
+            code = await pg.get_attribute('#shareCode', 'data-code') or ''
+            qr = await pg.evaluate("(()=>{const p=document.querySelector('.dlg.share .qr svg path');return p?p.getAttribute('d').length:0;})()")
+            check('folder shared by code: a 10-letter code and a QR code are shown', re.fullmatch(r'[23456789abcdefghjkmnpqrstuvwxyz]{10}', code) is not None and qr > 500, f'code={code} qr={qr}')
+            shown = (await pg.inner_text('#shareCode')).replace(' ', '')
+            check('the code on screen matches', shown == code, shown)
+            sdlg = await pg.inner_text('#layer .dlg.share')
+            check('share dialog is translated', 'Kogu kaust: 1 foto, 2 kaarti. Ilma edenemiseta.' in sdlg and 'Tühista' in sdlg and 'Saada link' in sdlg, sdlg.replace('\n', ' ')[:160])
+            sh = state()['shares']
+            check('the share holds photo ids, not pictures, and no progress',
+                  len(sh) == 1 and sh[0]['kind'] == 'folder' and sh[0]['data']['plates'][0].get('asset') and 'image' not in sh[0]['data']['plates'][0]
+                  and all('reps' not in c for c in sh[0]['data']['cards']), json.dumps(sh)[:200])
+            await pg.click('#layer [data-s="ok"]')
+            await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="qr"]')
+            await pg.wait_for_selector('#shareCode', timeout=15000)
+            check('sharing again keeps the same code (the snapshot is refreshed)', (await pg.get_attribute('#shareCode', 'data-code')) == code and len(state()['shares']) == 1)
+            await pg.click('#layer [data-s="ok"]')
+
+            # Anki: a .apkg with image-occlusion and Basic notes
+            urllib.request.urlopen(API + '/__log')                 # clear the request log
+            await pg.evaluate("go({name:'settings'})")
+            async with pg.expect_file_chooser() as fc:
+                await pg.click('[data-act=ankiPick] >> nth=0')
+            await (await fc.value).set_files(str(tmp / 'Kolju.apkg'))
+            await pg.wait_for_selector('#akGo', timeout=20000)
+            summ = await pg.inner_text('#akSum')
+            check('Anki picker counts the cards: 4 frames on 3 photos, 3 text cards', '4' in summ and '3' in summ, summ.replace('\n', ' '))
+            await pg.click('#akGo')
+            await pg.wait_for_function('S.plates.length===9 && S.cards.length===14', timeout=40000)
+            await pg.wait_for_selector('#layer .dlg', timeout=10000)   # "read the labels under the frames?"
+            await pg.click('#layer [data-s="0"]')
+            st = await state_when(lambda st: sum(1 for d in st['docs'] if d['coll'] == 'plates') == 9 and sum(1 for o in st['objects']) == 10)
+            log = json.loads(urllib.request.urlopen(API + '/__log').read())
+            posts = [l for l in log if l == 'POST /rest/v1/docs']
+            check('Anki import: 3 photos + 1 picture inside a text card uploaded', sum(1 for o in st['objects']) == 10)
+            check('Anki import: documents written in batches, not one request per document', 0 < len(posts) <= 3, f'{len(posts)} POST /rest/v1/docs')
+            anki = await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.ad);const ph=ds.find(d=>!d.kind),tx=ds.find(d=>d.kind==='text');
+                const cs=cardsOfDeck(ph.id).sort((a,b)=>a.createdAt-b.createdAt);const c0=cs[0];const t=cardsOfDeck(tx.id).map(c=>c.front+'|'+c.back);
+                return {names:ds.map(d=>d.name),frames:cs.length,photos:platesOf(ph.id).map(p=>[p.w,p.h]),rect:[c0.x,c0.y,c0.w,c0.h],note:c0.note,extra:(c0.extra||[]).length,text:t,img:/_blob\\//.test(cardsOfDeck(tx.id).find(c=>c.front==='maxilla').bh)};})()""")
+            check('Anki import: one photo deck and one text deck', anki['names'] == ['Kolju', 'Kolju — текст'], json.dumps(anki['names']))
+            check('Anki import: masks became frames in percent of the photo', anki['frames'] == 4 and anki['rect'] == [10, 20, 20, 10] and anki['extra'] == 0 and anki['note'] == 'Os frontale', json.dumps(anki))
+            check('Anki import: photos kept their size and order', anki['photos'] == [[800, 600], [640, 480], [700, 500]], json.dumps(anki['photos']))
+            check('Anki import: text cards with the picture moved into storage', sorted(anki['text']) == ['mandibula|alalõualuu', 'maxilla|ülalõualuu', 'os frontale|otsmikuluu'] and anki['img'], json.dumps(anki))
+            await pg.reload()
+            await app_ready(pg)
+            check('Anki import: everything is there after a reload', await pg.evaluate('S.plates.length===9 && S.cards.length===14 && S.decks.filter(d=>d.ad).length===2'))
+
             # account section and sign out
             await pg.evaluate("go({name:'settings'})")
             acc = await pg.inner_text('.page')
@@ -272,7 +383,7 @@ async def main():
             await pg.fill('input[name=password]', 'anatoomia1')
             await pg.click('.cw-go')
             await app_ready(pg)
-            check('signed back in: data is there', await pg.evaluate('S.cards.length===7 && S.plates.length===6 && S.folders.length===2'))
+            check('signed back in: data is there', await pg.evaluate('S.cards.length===14 && S.plates.length===9 && S.folders.length===2'))
             errs_a = [e for e in errs if 'favicon' not in e]
             await ctx.close()
 
@@ -296,6 +407,33 @@ async def main():
             await pg.click('.cw-go')
             await app_ready(pg)
             check("friend signed up and sees an empty Corpus, not Lev's", await pg.evaluate('S.decks.length===0 && S.cards.length===0 && S.folders.length===0'))
+
+            # the friend opens Lev's share link (as if the QR were scanned): the folder is offered and copied
+            await pg.goto(SITE + '?s=' + code)
+            await app_ready(pg)
+            await pg.wait_for_selector('#layer .dlg', timeout=15000)
+            dlg = await pg.inner_text('#layer .dlg')
+            check('share link: the folder is offered with its contents and the sender', 'Kolju' in dlg and 'lev@test.ee' in dlg and 'Jagaja' in dlg, dlg.replace('\n', ' ')[:200])
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function('S.plates.length===1 && S.cards.length===2 && S.folders.length===1', timeout=20000)
+            check('share link: folder, photo and cards copied', (await pg.evaluate('view.name')) == 'folder')
+            check('share link: the code is removed from the address', 's=' not in pg.url, pg.url)
+            me = await pg.evaluate('CORPUS_WEB.uid')
+            st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == 1)
+            check("share link: the photo is the friend's own copy", sum(1 for o in st['objects'] if o['owner'] == me) == 1 and
+                  any(d['coll'] == 'plates' and d['owner'] == me for d in st['docs']))
+            ph = await photo_check(pg)
+            check('share link: the copied photo loads', ph['status'] == 200 and ph['w'] == 640 and ph['readable'], json.dumps(ph))
+            check('share link: opening was counted', state()['shares'][0]['opens'] == 1)
+            # by code, typed in: a wrong code is refused clearly
+            await pg.evaluate("go({name:'settings'})")
+            await pg.click('[data-act=shareCode]')
+            await pg.fill('#dlgIn', 'zzzzz zzzzz')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function("Array.from(document.querySelectorAll('.toast')).some(t=>/Koodi ei leitud/.test(t.textContent))", timeout=10000)
+            check('a wrong code: clear message', True)
+            acc = await pg.inner_text('.page')
+            check('settings offer "get by code" (translated)', 'Hangi koodiga' in acc and 'Jaga QR-koodiga' in acc, [l for l in acc.split('\n') if 'kood' in l][:2])
             check('no AI function deployed → AI features hidden', await pg.evaluate('S.sample===null'))
             await pg.evaluate("go({name:'settings'})")
             await pg.wait_for_timeout(800)
@@ -333,7 +471,7 @@ async def main():
             me = await pg.evaluate('CORPUS_WEB.uid')
             objs = state()['objects']
             check("friend's import made the friend's own photo copy; Lev's photos untouched",
-                  sum(o['owner'] == me for o in objs) == 1 and sum(o['owner'] != me for o in objs) == 6, json.dumps([o['owner'][:8] for o in objs]))
+                  sum(o['owner'] == me for o in objs) == 2 and sum(o['owner'] != me for o in objs) == 10, json.dumps([o['owner'][:8] for o in objs]))
             await ctx.close()
 
             check('no script errors or failed requests in the browser', not errs_a and not errs_b and not errs_c, '; '.join(errs_a + errs_b + errs_c)[:600])

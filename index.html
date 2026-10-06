@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="web.css?v=189aa54a8c">
 <script src="config.js?v=6bc1b13838"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=186f1da7ac"></script>
+<script src="web.js?v=f5157a15b7"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -769,6 +769,11 @@ label.cmp-row{cursor:pointer}
 .ak-row .ak-c{flex:none;font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
 .ak-sum{font-size:13.5px;color:var(--ink2);line-height:1.5;margin:0 0 12px}
 .ak-sum b{color:var(--ink);font-weight:600}
+/* ---------- share by code / QR ---------- */
+.dlg.share .qr{width:min(64vw,240px);margin:2px auto 12px;padding:12px;background:#fff;border-radius:14px;border:1px solid var(--line)}
+.dlg.share .qr svg{display:block;width:100%;height:auto}
+.share-code{text-align:center;font-size:24px;font-weight:600;letter-spacing:.14em;font-variant-numeric:tabular-nums;margin:0 0 10px;user-select:all;-webkit-user-select:all}
+.dlg.share .muted.sm{margin:0 0 14px;line-height:1.5}
 .dlg .chk input{margin:0;flex:none}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
@@ -786,6 +791,7 @@ label.cmp-row{cursor:pointer}
 const ICONS={
   fwd:'<path d="M9 18l6-6-6-6"/>',
   import:'<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M5 19h14"/>',
+  qr:'<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M13.5 13.5h3v3h-3zM17.5 17.5h3v3h-3zM20.5 13.5v1M13.5 20.5h1"/>',
   back:'<path d="M15 18l-6-6 6-6"/>',
   close:'<path d="M6 6l12 12M18 6L6 18"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -893,6 +899,15 @@ I18N_DICT.push(["Читаю текст в рамке…", "Reading the text in t
 I18N_DICT.push(["Исправлено по словарю, прочитано:", "Corrected by the dictionary, OCR read:", "Sõnastiku järgi parandatud, tuvastati:"],["Вернуть", "Restore", "Taasta"],["Неуверенно прочитанные слова исправляются по словарю латыни. Выключить можно в «Ещё» → «Разметка фото».", "Words read with low confidence are corrected using the Latin dictionary. You can turn this off in More → Photo labeling.", "Ebakindlalt loetud sõnad parandatakse ladina sõnastiku järgi. Välja saab selle lülitada: Veel → Fotode märgistamine."],["Словарь латыни выключен. Включить снова — «Ещё» → «Разметка фото».", "The Latin dictionary is off. Turn it back on in More → Photo labeling.", "Ladina sõnastik on välja lülitatud. Uuesti sisse: Veel → Fotode märgistamine."],["Возвращено как прочитано. Словарь можно выключить в «Ещё» → «Разметка фото».", "Restored as read. The dictionary can be turned off in More → Photo labeling.", "Taastatud nii, nagu loeti. Sõnastiku saab välja lülitada: Veel → Fotode märgistamine."],["Сверять со словарём латыни", "Check against the Latin dictionary", "Kontrolli ladina sõnastiku järgi"],["Слова, прочитанные неуверенно, исправляются по словарю анатомической латыни (около 7 800 словоформ, включая старые написания атласов). Уверенно прочитанное не меняется", "Words read with low confidence are corrected using a dictionary of anatomical Latin (about 7,800 word forms, including older atlas spellings). Confidently read words are left as they are.", "Ebakindlalt loetud sõnad parandatakse anatoomilise ladina sõnastiku järgi (umbes 7800 sõnavormi, sh atlaste vanemad kirjaviisid). Kindlalt loetud sõnu ei muudeta."],["Название, которое вы вписали сами, автоматически не заменяется — новое прочтение появится над полем с кнопкой «Заменить». Если словарь исправил слово неудачно, там же будет кнопка «Вернуть».", "A name you typed yourself is never replaced automatically — the new reading appears above the field with a «Replace» button. If the dictionary corrected a word badly, a «Restore» button appears there too.", "Ise kirjutatud nimetust automaatselt ei asendata — uus lugemine ilmub välja kohale koos nupuga «Asenda». Kui sõnastik parandas sõna valesti, on seal ka nupp «Taasta»."],["Словарь: собственный список анатомической латыни и латинские синонимы онтологии UBERON (CC BY 3.0).", "Dictionary: our own list of anatomical Latin plus Latin synonyms from the UBERON ontology (CC BY 3.0).", "Sõnastik: oma anatoomilise ladina loend ja UBERON-i ontoloogia ladinakeelsed sünonüümid (CC BY 3.0)."]);
 I18N_DICT.push(["Отвязать", "Unlink", "Eralda"],["Рамка отвязана от других фото — теперь это отдельная карточка", "The frame is unlinked from the other photos — it is a separate card now", "Raam on teistest fotodest eraldatud — nüüd on see eraldi kaart"]);
 /* ---------- i18n: Russian source, English / Estonian translations applied to rendered text ---------- */
+I18N_DICT.push(["Поделиться по QR-коду","Share by QR code","Jaga QR-koodiga"],["Код или ссылка — колода появится у другого человека","A code or a link: the deck appears in the other person’s Corpus","Kood või link — pakk ilmub teise inimese Corpusesse"],["Код или ссылка — все колоды папки появятся у другого человека","A code or a link: all decks of the folder appear in the other person’s Corpus","Kood või link — kõik kausta pakid ilmuvad teise inimese Corpusesse"],
+  ["Готовлю код…","Preparing the code…","Valmistan koodi ette…"],["Не удалось подготовить колоду.","Couldn’t prepare the deck.","Pakki ei õnnestunud ette valmistada."],["Обмен по коду ещё не настроен на сайте.","Sharing by code isn’t set up on this site yet.","Koodiga jagamine pole saidil veel seadistatud."],["Колода слишком большая для передачи по коду — поделитесь файлом.","The deck is too big to pass by code — share it as a file.","Pakk on koodiga edastamiseks liiga suur — jaga failina."],["Не удалось создать код. Проверьте соединение.","Couldn’t create the code. Check your connection.","Koodi ei õnnestunud luua. Kontrolli ühendust."],
+  ["Папка целиком:","Whole folder:","Kogu kaust:"],["Без прогресса.","Progress isn’t included.","Ilma edenemiseta."],["Без файла:","Missing file:","Failita:"],["QR-код","QR code","QR-kood"],
+  ["Другой человек наводит камеру телефона на код или вводит буквы в Corpus: Ещё → Получить по коду. Код действует, пока вы его не отзовёте. Откройте это окно снова, чтобы передать свежую версию колоды.","The other person points their phone camera at the code or types the letters in Corpus: More → Get by code. The code works until you revoke it. Open this window again to pass on the latest version of the deck.","Teine inimene suunab telefoni kaamera koodile või sisestab tähed Corpuses: Veel → Hangi koodiga. Kood kehtib, kuni sa selle tühistad. Ava see aken uuesti, et edastada paki värske versioon."],
+  ["Отозвать","Revoke","Tühista"],["Отправить ссылку","Send link","Saada link"],["Ссылка скопирована","Link copied","Link kopeeritud"],["Отозвать код?","Revoke the code?","Tühistada kood?"],["Ссылка и QR-код перестанут работать. У тех, кто уже импортировал колоду, она останется.","The link and the QR code will stop working. Those who already imported the deck keep it.","Link ja QR-kood lakkavad töötamast. Neil, kes paki juba importisid, jääb see alles."],["Код отозван","Code revoked","Kood tühistatud"],["Не удалось отозвать код. Проверьте соединение.","Couldn’t revoke the code. Check your connection.","Koodi ei õnnestunud tühistada. Kontrolli ühendust."],
+  ["Получаю колоду…","Fetching the deck…","Laen pakki…"],["Код не найден. Возможно, его отозвали.","Code not found. It may have been revoked.","Koodi ei leitud. Võib-olla on see tühistatud."],["Не удалось получить колоду. Проверьте соединение.","Couldn’t fetch the deck. Check your connection.","Pakki ei õnnestunud laadida. Kontrolli ühendust."],["По этому коду нет колоды.","There is no deck under this code.","Selle koodi all pole pakki."],
+  ["Код колоды","Deck code","Paki kood"],["Буквы и цифры под QR-кодом у того, кто делится.","The letters and digits under the QR code of the person sharing.","Tähed ja numbrid jagaja QR-koodi all."],["например, k7mnp2qxyz","e.g. k7mnp2qxyz","nt k7mnp2qxyz"],["Получить","Get","Hangi"],["Получить по коду","Get by code","Hangi koodiga"],["Отправитель:","Shared by:","Jagaja:"],["Расставляю рамки…","Placing the frames…","Paigutan raame…"],
+  ["Поделиться можно колодой или целой папкой: откройте её и выберите в меню «Поделиться по QR-коду» или «Поделиться файлом». По коду колода приходит сразу; файл импортируйте здесь. Фото, рамки и названия появятся, прогресс начнётся с нуля.","You can share a deck or a whole folder: open it and choose “Share by QR code” or “Share as file” in its menu. By code the deck arrives right away; a file is imported here. Photos, frames and names come along, progress starts from zero.","Jagada saab pakki või tervet kausta: ava see ja vali menüüst „Jaga QR-koodiga“ või „Jaga failina“. Koodiga jõuab pakk kohale kohe; fail impordi siin. Fotod, raamid ja nimetused tulevad kaasa, edenemine algab nullist."],
+  ["Вам передали колоду Corpus. Войдите или создайте аккаунт — колода появится у вас.","Someone passed you a Corpus deck. Sign in or create an account and the deck will appear in your Corpus.","Sulle edastati Corpuse pakk. Logi sisse või loo konto — pakk ilmub sinu Corpusesse."]);
 const I18N_PLU={
   'карточка|карточки|карточек':[['card','cards'],['kaart','kaarti']],
   'колода|колоды|колод|Колода|Колоды|Колод':[['deck','decks'],['pakk','pakki']],
@@ -933,6 +948,7 @@ function i18nPatterns(l){
     [/^Файл сохранён, но (\d+) фото не удалось прочитать\.$/,g=>E?'File saved, but '+g[1]+(g[1]==='1'?' photo':' photos')+' couldn’t be read.':'Fail salvestati, kuid '+g[1]+(g[1]==='1'?' fotot':' fotot')+' ei õnnestunud lugeda.'],
     [/^(\d+) (?:новых в день)$/,g=>E?g[1]+' new per day':g[1]+' uut päevas'],
     [/^Ещё (\d+) (?:рамка|рамки|рамок) в этой карточке( — каждая станет отдельной)?$/,g=>E?g[1]+' more '+(g[1]==='1'?'frame':'frames')+' in this card'+(g[2]?' — each will become a separate card':''):'Veel '+g[1]+' '+(g[1]==='1'?'raam':'raami')+' selles kaardis'+(g[2]?' — igaüks muutub eraldi kaardiks':'')],
+    [/^Не удалось загрузить фото: (\d+)\.$/,g=>E?'Couldn’t load '+g[1]+(g[1]==='1'?' photo.':' photos.'):g[1]+' fotot ei õnnestunud laadida.'],
     [/^Будет добавлено: (.+)\.$/,g=>(E?'Will be added: ':'Lisatakse: ')+frag(g[1])+'.'],
     [/^Включая приостановленные \((\d+)\)$/,g=>E?'Including suspended ('+g[1]+')':'Koos peatatutega ('+g[1]+')'],
     [/^Изучавшиеся: (\d+)\.$/,g=>E?'Studied before: '+g[1]+'.':'Varem õpitud: '+g[1]+'.'],
@@ -1103,7 +1119,13 @@ function confirmDialog(o){
 const S={db:null,assets:null,sample:null,imgOK:false,ready:false,loadErr:false,saveErr:false,decks:[],plates:[],cards:[],stats:{},folders:[]};
 const deckById=id=>S.decks.find(d=>d.id===id);
 const plateById=id=>S.plates.find(p=>p.id===id);
-const cardById=id=>S.cards.find(c=>c.id===id);
+/* cards by id: a map, rebuilt lazily whenever S.cards is replaced or grows (an import looks up thousands) */
+const CARD_IX={arr:null,n:-1,map:null};
+function cardById(id){
+  const a=S.cards;
+  if(CARD_IX.arr!==a||CARD_IX.n!==a.length){const m=new Map();for(let i=0;i<a.length;i++)m.set(a[i].id,a[i]);CARD_IX.arr=a;CARD_IX.n=a.length;CARD_IX.map=m;}
+  return CARD_IX.map.get(id);
+}
 const folderById=id=>S.folders.find(f=>f.id===id);
 const decksInFolder=fid=>S.decks.filter(d=>d.folderId===fid).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
 function plateExcluded(p){return !!(p&&p.excluded);}
@@ -1159,10 +1181,21 @@ function persist(coll,id){
 function removeDoc(coll,id){if(S.db)enq(coll+'/'+id,{coll:coll,id:id,op:'del'});}
 function afterWrites(fn){enq('fn/'+Math.random(),{op:'fn',fn:fn});}
 function enq(k,job){if(!WQ.jobs.has(k))WQ.keys.push(k);WQ.jobs.set(k,job);pump();}
+/* where the storage can take many documents in one request (S.db.setMany — the website), consecutive
+   writes of whole documents go out together: an import saves hundreds of photos and packs in a few
+   round trips instead of one per document. Partial pack updates and deletions keep going one by one. */
+const BATCH_MAX=100,BATCH_BYTES=1500000;
+function batchable(job){
+  if(!job)return false;
+  if(job.op==='set')return true;
+  if(job.op==='pset'){const P=PACKS.get(job.id);return !!(P&&!P.saved);}
+  return false;
+}
 async function pump(){
   if(WQ.busy)return;WQ.busy=true;
   while(WQ.keys.length){
     const k=WQ.keys.shift();const job=WQ.jobs.get(k);WQ.jobs.delete(k);if(!job)continue;
+    if(S.db&&S.db.setMany&&!job.single&&batchable(job)&&batchable(WQ.jobs.get(WQ.keys[0]))){await pumpBatch(k,job);continue;}
     try{
       if(job.op==='fn'){await job.fn();continue;}
       if(job.op==='pset'){await packWrite(job.id);WQ.retries.delete(k);continue;}
@@ -1170,13 +1203,39 @@ async function pump(){
       if(job.op==='del')await ref.delete();
       else{const o=getObj(job.coll,job.id);if(o)await ref.set(clean(o));}
       WQ.retries.delete(k);
-    }catch(e){
-      const code=e&&e.code;const n=WQ.retries.get(k)||0;
-      if(code==='unavailable'&&n<2){WQ.retries.set(k,n+1);setTimeout(()=>{if(!WQ.jobs.has(k))enq(k,job);},700+Math.random()*900);}
-      else saveFailed(code);
-    }
+    }catch(e){pumpFail(k,job,e);}
   }
   WQ.busy=false;
+}
+function pumpFail(k,job,e){
+  const code=e&&e.code;const n=WQ.retries.get(k)||0;
+  if(code==='unavailable'&&n<2){WQ.retries.set(k,n+1);setTimeout(()=>{if(!WQ.jobs.has(k))enq(k,job);},700+Math.random()*900);}
+  else saveFailed(code);
+}
+async function pumpBatch(k0,job0){
+  const items=[],after=[],taken=[];let bytes=0;
+  const add=(k,job)=>{
+    taken.push([k,job]);
+    if(job.op==='pset'){
+      const P=PACKS.get(job.id);const body=packBody(job.id);if(!P||!body)return;
+      P.dirty.clear();P.del.clear();   /* what changes during the request stays dirty for the next write */
+      items.push({coll:'packs',id:job.id,data:body});bytes+=JSON.stringify(body).length;
+      after.push(()=>{P.saved=true;P.kset=new Map(Object.keys(body.c).map(id=>[id,Object.keys(body.c[id])]));});return;
+    }
+    const o=getObj(job.coll,job.id);if(!o)return;const d=clean(o);items.push({coll:job.coll,id:job.id,data:d});bytes+=JSON.stringify(d).length;
+  };
+  add(k0,job0);
+  while(WQ.keys.length&&items.length<BATCH_MAX&&bytes<BATCH_BYTES){
+    const k=WQ.keys[0];const job=WQ.jobs.get(k);if(!job||job.single||!batchable(job))break;
+    WQ.keys.shift();WQ.jobs.delete(k);add(k,job);
+  }
+  if(!items.length)return;
+  try{await S.db.setMany(items);after.forEach(f=>f());taken.forEach(t=>WQ.retries.delete(t[0]));}
+  catch(e){
+    if(e&&e.code==='unavailable'){taken.forEach(t=>pumpFail(t[0],t[1],e));return;}
+    /* the batch was refused as a whole: write these one by one, so each document's own error is seen */
+    taken.slice().reverse().forEach(t=>{t[1].single=true;if(!WQ.jobs.has(t[0])){WQ.keys.unshift(t[0]);WQ.jobs.set(t[0],t[1]);}});
+  }
 }
 function saveFailed(code){
   if(code==='quota_exceeded'){toast('Хранилище заполнено — удалите ненужные фото или карточки.');return;}
@@ -1844,8 +1903,10 @@ async function folderMenu(fid){
   const v=await actionSheet(f.name,[
     {v:'rename',icon:'pencil',label:'Переименовать'},
     {v:'exam',icon:'chart',label:'План к экзамену',sub:f.examDate?'Экзамен '+fmtDate(f.examDate):'Одна дата для всех колод папки'},
+    ...(sharesApi()?[{v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:'Код или ссылка — все колоды папки появятся у другого человека'}]:[]),
     {v:'share',icon:'layers',label:'Поделиться папкой',sub:'Все колоды папки: фото, рамки и названия, без прогресса'},
     {v:'del',icon:'trash',label:'Удалить папку',danger:true}]);
+  if(v==='qr'){shareByCode('folder',fid);return;}
   if(v==='share'){exportFolder(fid);return;}
   if(v==='exam'){editExam('folder',fid);return;}
   if(v==='rename'){const n=await promptDialog({title:'Название папки',value:f.name});if(n){f.name=n;persist('folders',f.id);render();}}
@@ -1867,12 +1928,14 @@ async function deckMenu(did){
   const v=await actionSheet(d.name,[
     {v:'rename',icon:'pencil',label:'Переименовать'},
     {v:'folder',icon:'folder',label:'Переместить в папку',sub:d.folderId?(folderById(d.folderId)?folderById(d.folderId).name:''):'Сейчас без папки'},
+    ...(sharesApi()?[{v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:'Код или ссылка — колода появится у другого человека'}]:[]),
     {v:'share',icon:'layers',label:'Поделиться файлом',sub:'Фото, рамки и названия, без прогресса'},
     ...(cardsOfDeck(did).length?[{v:'cmp',icon:'list',label:'Сверить с конспектом',sub:'Лишние карточки можно удалить вместе с рамками'}]:[]),
     ...(isTextDeck(d)?[]:(()=>{const u=cardsOfDeck(did).filter(c=>!isText(c)&&!c.term&&!isArrow(c)).length;return u?[{v:'ocrAll',icon:'spark',label:'Прочитать названия рамок',sub:pl(u,'рамка','рамки','рамок')+' без названия — распознать подписи на фото'}]:[];})()),
     {v:'exam',icon:'chart',label:'План к экзамену',sub:examOf(d)?('Экзамен '+fmtDate(examOf(d))+(d.examDate?'':' (дата папки)')):'Не задан — укажите дату, и новые карточки распределятся по дням'},
     {v:'limit',icon:'layers',label:'Новых карточек в день',sub:planQuota(d)!=null?('Сейчас по плану экзамена: '+planQuota(d)):'Сейчас: '+(d.newPerDay==null?20:d.newPerDay)},
     {v:'del',icon:'trash',label:'Удалить колоду',danger:true}]);
+  if(v==='qr'){shareByCode('deck',did);return;}
   if(v==='share'){exportDeck(did);return;}
   if(v==='ocrAll'){readNamesDecks([did]);return;}
   if(v==='cmp'){cmpNotes(did);return;}
@@ -3237,7 +3300,8 @@ const CONTENT_KEYS=['deckId','plateId','term','x','y','w','h','extra','shape','a
 const TEXT_KEYS=['deckId','kind','front','back','dir','noteId','refPlateId','hint','createdAt'];
 function safeName(s){return String(s||'deck').replace(/[\\/:*?"<>|\s]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60)||'deck';}
 function backupAgeText(){if(!META.lastBackup)return 'Копий ещё не было';const d=Math.floor((Date.now()-META.lastBackup)/86400000);return 'Последняя копия: '+(d<1?'сегодня':d===1?'вчера':pl(d,'день','дня','дней')+' назад');}
-async function buildExport(deckIds,full,fid){
+/* link: for sharing by code — plates carry the photo's storage id (`asset`) instead of the picture itself */
+async function buildExport(deckIds,full,fid,link){
   const out={app:'corpus',kind:full?'backup':'deck',version:1,exportedAt:new Date().toISOString(),decks:[],plates:[],cards:[],stats:{},folders:[]};
   const sf=!full&&fid?folderById(fid):null;
   if(sf){out.kind='folder';out.folders.push({id:sf.id,name:sf.name,mode:sf.mode||'hideAll'});}
@@ -3252,10 +3316,14 @@ async function buildExport(deckIds,full,fid){
     S.folders.filter(f=>fids.has(f.id)).forEach(f=>out.folders.push(Object.assign({id:f.id},clean(f))));
   }
   for(const p of ps){
-    i++;setBusy('Готовлю файл… фото '+i+' из '+ps.length);
-    let img=null;const u=plateUrl(p);if(u){try{img=await blobToDataURL(await (await fetch(u)).blob());}catch(e){}}
-    if(!img){miss++;continue;}
-    const po={id:p.id,deckId:p.deckId,w:p.w||0,h:p.h||0,createdAt:p.createdAt||0,image:img};
+    i++;const po={id:p.id,deckId:p.deckId,w:p.w||0,h:p.h||0,createdAt:p.createdAt||0};
+    if(link){if(!p.assetId){miss++;continue;}po.asset=p.assetId;}
+    else{
+      setBusy('Готовлю файл… фото '+i+' из '+ps.length);
+      let img=null;const u=plateUrl(p);if(u){try{img=await blobToDataURL(await (await fetch(u)).blob());}catch(e){}}
+      if(!img){miss++;continue;}
+      po.image=img;
+    }
     if(full&&p.excluded)po.excluded=true;
     out.plates.push(po);
     for(const c of cardsOfPlate(p.id)){
@@ -3311,8 +3379,14 @@ async function importFile(file){
   let data;
   try{data=JSON.parse(await file.text());}catch(e){toast('Это не файл Corpus.');return;}
   if(!data||data.app!=='corpus'||!Array.isArray(data.decks)||!Array.isArray(data.plates)){toast('Это не файл Corpus.');return;}
+  await importData(data,null);
+}
+/* data: an export file, or a share received by code (opts.from — who shared it) */
+async function importData(data,opts){
+  opts=opts||{};
   if(!S.assets&&data.plates.length){toast('В этом окне нельзя загружать фото — откройте приложение по своей ссылке.');return;}
-  const full=data.kind==='backup';const nc=(data.cards||[]).length;
+  const full=data.kind==='backup'&&!opts.share;const nc=(data.cards||[]).length;
+  const who=opts.from?' Отправитель: '+opts.from+'.':'';
   const isFolder=!full&&data.kind==='folder'&&Array.isArray(data.folders)&&!!data.folders[0];
   let replace=false;
   if(full){
@@ -3323,18 +3397,26 @@ async function importFile(file){
     if(!v)return;replace=v==='replace';
     if(replace&&S.decks.length&&!(await confirmDialog({title:'Заменить все данные?',text:'Текущие колоды, фото и прогресс будут удалены и заменены содержимым копии.',ok:'Заменить'})))return;
   }else if(isFolder){
-    if(!(await confirmDialog({title:'Импортировать папку?',text:'«'+String(data.folders[0].name||'Папка')+'»: '+pl(data.decks.length,'колода','колоды','колод')+', '+pl(data.plates.length,'фото','фото','фото')+', '+pl(nc,'карточка','карточки','карточек')+'. Прогресс начнётся с нуля.',ok:'Импортировать',danger:false})))return;
+    if(!(await confirmDialog({title:'Импортировать папку?',text:'«'+String(data.folders[0].name||'Папка')+'»: '+pl(data.decks.length,'колода','колоды','колод')+', '+pl(data.plates.length,'фото','фото','фото')+', '+pl(nc,'карточка','карточки','карточек')+'. Прогресс начнётся с нуля.'+who,ok:'Импортировать',danger:false})))return;
   }else{
-    if(!(await confirmDialog({title:'Импортировать колоду?',text:(data.decks[0]?'«'+data.decks[0].name+'»: ':'')+pl(data.plates.length,'фото','фото','фото')+', '+pl(nc,'карточка','карточки','карточек')+'. Прогресс начнётся с нуля.',ok:'Импортировать',danger:false})))return;
+    if(!(await confirmDialog({title:'Импортировать колоду?',text:(data.decks[0]?'«'+data.decks[0].name+'»: ':'')+pl(data.plates.length,'фото','фото','фото')+', '+pl(nc,'карточка','карточки','карточек')+'. Прогресс начнётся с нуля.'+who,ok:'Импортировать',danger:false})))return;
   }
   busy('Загружаю фото…');
-  const pmap={},uploaded=[];let i=0;
+  const pmap={},uploaded=[];let missP=0;
+  /* the picture itself (a file) or a copy of the sharer's photo from storage (a share) */
+  const srcBlob=async p=>{
+    if(typeof p.image==='string'&&p.image.indexOf('data:')===0)return dataURLtoBlob(p.image);
+    if(typeof p.asset==='string'&&/^[A-Za-z0-9_-]{6,80}$/.test(p.asset)){const r=await fetch(blobUrl(p.asset));if(!r.ok)throw {code:'missing'};return await r.blob();}
+    return null;
+  };
   try{
-    for(const p of data.plates){
-      i++;setBusy('Загружаю фото '+i+' из '+data.plates.length+'…');
-      if(!p||typeof p.image!=='string'||p.image.indexOf('data:')!==0)continue;
-      const r=await S.assets.upload(dataURLtoBlob(p.image));uploaded.push(r.id);pmap[p.id]={assetId:r.id,src:p};
-    }
+    if(data.plates.length)setBusy('Загружаю фото 1 из '+data.plates.length+'…');
+    await parallel(data.plates,AK_PAR,async p=>{
+      if(!p)return;let b;
+      try{b=await srcBlob(p);}catch(e){if(e&&e.code==='missing'){missP++;return;}throw e;}
+      if(!b)return;
+      const r=await akUpload(b);uploaded.push(r.id);pmap[p.id]={assetId:r.id,src:p};
+    },(d,n)=>{if(d<n)setBusy('Загружаю фото '+(d+1)+' из '+n+'…');});
   }catch(e){hideBusy();uploaded.forEach(a=>S.assets.delete(a).catch(()=>{}));toast(uploadErrText(e)+' Импорт отменён.');return;}
   if(replace)wipeAll();
   const fmap={};let newFid=null;
@@ -3388,7 +3470,68 @@ async function importFile(file){
   packAdd(restored);
   hideBusy();
   toast(full?'Восстановлено: '+pl(n,'карточка','карточки','карточек'):isFolder?'Папка импортирована: '+pl(n,'карточка','карточки','карточек'):'Колода импортирована: '+pl(n,'карточка','карточки','карточек'));
+  if(missP)setTimeout(()=>toast('Не удалось загрузить фото: '+missP+'.',5000),3200);
   go(isFolder&&newFid?{name:'folder',folderId:newFid}:{name:'library'});
+}
+
+/* ---------- sharing by code / QR (the website): a snapshot of the deck goes to the site's database under a
+   short code; the other person's Corpus copies it — photos included — on import. Not on claude.ai. ---------- */
+function sharesApi(){const W=window.CORPUS_WEB;return W&&W.shares?W.shares:null;}
+function shareCodeText(c){return String(c||'').replace(/(.{5})(?=.)/g,'$1 ');}
+async function qrSvg(text){
+  if(!window.qrcode)await loadScript(window.CORPUS_WEB.qrScript);
+  const q=window.qrcode(0,'M');q.addData(text);q.make();
+  return q.createSvgTag({cellSize:4,margin:0,scalable:true});
+}
+async function shareByCode(kind,id){
+  const api=sharesApi();if(!api)return;
+  const obj=kind==='deck'?deckById(id):folderById(id);if(!obj)return;
+  const ids=kind==='deck'?[id]:decksInFolder(id).map(d=>d.id);
+  if(!ids.length){toast('В папке пока нет колод');return;}
+  const src=kind+':'+id;
+  busy('Готовлю код…');
+  let res,sh;
+  try{res=await buildExport(ids,false,kind==='folder'?id:null,true);}catch(e){hideBusy();toast('Не удалось подготовить колоду.');return;}
+  try{sh=await api.put(src,kind,obj.name,res.out);}
+  catch(e){hideBusy();const c=e&&e.code;toast(c==='not_set_up'?'Обмен по коду ещё не настроен на сайте.':c==='too_large'?'Колода слишком большая для передачи по коду — поделитесь файлом.':'Не удалось создать код. Проверьте соединение.',5000);return;}
+  let svg='';try{svg=await qrSvg(sh.url);}catch(e){}
+  hideBusy();
+  const n=res.out.cards.length,np=res.out.plates.length;
+  const html='<div class="dlg share"><h3 data-noi18n>'+esc(obj.name)+'</h3>'+
+    '<p>'+(kind==='folder'?'Папка целиком: ':'')+esc(pl(np,'фото','фото','фото')+', '+pl(n,'карточка','карточки','карточек'))+'. Без прогресса.'+(res.miss?' Без файла: '+res.miss+'.':'')+'</p>'+
+    (svg?'<div class="qr" role="img" aria-label="QR-код">'+svg+'</div>':'')+
+    '<div class="share-code" id="shareCode" data-code="'+esc(sh.code)+'" data-noi18n>'+esc(shareCodeText(sh.code))+'</div>'+
+    '<p class="muted sm">Другой человек наводит камеру телефона на код или вводит буквы в Corpus: Ещё → Получить по коду. Код действует, пока вы его не отзовёте. Откройте это окно снова, чтобы передать свежую версию колоды.</p>'+
+    '<div class="dlg-btns"><button class="btn line" data-s="revoke">Отозвать</button><button class="btn line" data-s="send">Отправить ссылку</button><button class="btn primary" data-s="ok">Готово</button></div></div>';
+  const send=()=>{   /* inside the tap: the share sheet needs a fresh user gesture */
+    const title=obj.name+' — Corpus';
+    if(navigator.share){navigator.share({title:title,text:title,url:sh.url}).catch(()=>{});return;}
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(sh.url).then(()=>toast('Ссылка скопирована'),()=>toast(sh.url,6000));return;}
+    toast(sh.url,6000);
+  };
+  const v=await showOverlay(html,ov=>{$$('[data-s]',ov).forEach(b=>b.onclick=()=>{if(b.dataset.s==='send')send();else dismissOverlay(b.dataset.s);});});
+  if(v==='revoke'){
+    if(await confirmDialog({title:'Отозвать код?',text:'Ссылка и QR-код перестанут работать. У тех, кто уже импортировал колоду, она останется.',ok:'Отозвать'})){
+      try{await api.drop(src);toast('Код отозван');}catch(e){toast('Не удалось отозвать код. Проверьте соединение.');}
+    }
+  }
+}
+async function openShareCode(code){
+  const api=sharesApi();if(!api)return;
+  code=String(code||'').toLowerCase().replace(/[^a-z0-9]+/g,'');
+  if(!code)return;
+  busy('Получаю колоду…');
+  let sh;
+  try{sh=await api.open(code);}
+  catch(e){hideBusy();const c=e&&e.code;toast(c==='not_found'?'Код не найден. Возможно, его отозвали.':c==='not_set_up'?'Обмен по коду ещё не настроен на сайте.':'Не удалось получить колоду. Проверьте соединение.',5000);return;}
+  hideBusy();
+  const data=sh&&sh.data;
+  if(!data||data.app!=='corpus'||!Array.isArray(data.decks)||!Array.isArray(data.plates)){toast('По этому коду нет колоды.');return;}
+  await importData(data,{from:sh.from,share:true});
+}
+async function askShareCode(){
+  const v=await promptDialog({title:'Код колоды',text:'Буквы и цифры под QR-кодом у того, кто делится.',placeholder:'например, k7mnp2qxyz',ok:'Получить'});
+  if(v)openShareCode(v);
 }
 
 
@@ -3555,29 +3698,73 @@ const pbS=v=>v instanceof Uint8Array?akTD.decode(v):'';
 const akZ=u=>(u&&u.length>3&&u[0]===0x28&&u[1]===0xb5&&u[2]===0x2f&&u[3]===0xfd)?window.fzstd.decompress(u):u;
 function akQ(db,sql){const r=[];const st=db.prepare(sql);try{while(st.step())r.push(st.get());}finally{st.free();}return r;}
 
+/* ---------- a zip read straight from the file: the table of contents once, each entry by offset ----------
+   An .apkg with thousands of pictures is never held in memory whole: only the collection and the pictures
+   being imported are read, each with one slice of the file. Supports zip64 (packages over 4 GB). */
+async function zipOpen(file){
+  const size=file.size;
+  const rd=async(a,b)=>new Uint8Array(await file.slice(Math.max(0,a),Math.min(size,b)).arrayBuffer());
+  const dvOf=u=>new DataView(u.buffer,u.byteOffset,u.byteLength);
+  const tail=await rd(size-65577,size);const tv=dvOf(tail);
+  let e=-1;for(let i=tail.length-22;i>=0;i--)if(tv.getUint32(i,true)===0x06054b50){e=i;break;}
+  if(e<0)throw {code:'format'};
+  let count=tv.getUint16(e+10,true),cdSize=tv.getUint32(e+12,true),cdOff=tv.getUint32(e+16,true);
+  if(count===0xffff||cdSize===0xffffffff||cdOff===0xffffffff){
+    const l=e-20;
+    if(l>=0&&tv.getUint32(l,true)===0x07064b50){
+      const off=Number(tv.getBigUint64(l+8,true));const r=dvOf(await rd(off,off+56));
+      if(r.getUint32(0,true)!==0x06064b50)throw {code:'format'};
+      count=Number(r.getBigUint64(32,true));cdSize=Number(r.getBigUint64(40,true));cdOff=Number(r.getBigUint64(48,true));
+    }
+  }
+  const cd=await rd(cdOff,cdOff+cdSize);const dv=dvOf(cd);
+  const entries=new Map();let q=0;
+  while(q+46<=cd.length&&dv.getUint32(q,true)===0x02014b50){
+    const method=dv.getUint16(q+10,true);let csz=dv.getUint32(q+20,true),usz=dv.getUint32(q+24,true);
+    const nl=dv.getUint16(q+28,true),xl=dv.getUint16(q+30,true),cl=dv.getUint16(q+32,true);let off=dv.getUint32(q+42,true);
+    const name=akTD.decode(cd.subarray(q+46,q+46+nl));
+    if(usz===0xffffffff||csz===0xffffffff||off===0xffffffff){
+      let x=q+46+nl;const xe=x+xl;
+      while(x+4<=xe){const id=dv.getUint16(x,true),sz=dv.getUint16(x+2,true);
+        if(id===1){let r=x+4;if(usz===0xffffffff){usz=Number(dv.getBigUint64(r,true));r+=8;}if(csz===0xffffffff){csz=Number(dv.getBigUint64(r,true));r+=8;}if(off===0xffffffff)off=Number(dv.getBigUint64(r,true));break;}
+        x+=4+sz;}
+    }
+    entries.set(name,{method:method,csz:csz,usz:usz,off:off});
+    q+=46+nl+xl+cl;
+  }
+  const get=async name=>{
+    const en=entries.get(name);if(!en)return null;
+    const h=dvOf(await rd(en.off,en.off+30));
+    if(h.getUint32(0,true)!==0x04034b50)throw {code:'format'};
+    const start=en.off+30+h.getUint16(26,true)+h.getUint16(28,true);
+    const raw=await rd(start,start+en.csz);
+    if(en.method===0)return raw;
+    if(en.method===8)return window.fflate.inflateSync(raw,en.usz?{out:new Uint8Array(en.usz)}:undefined);
+    throw new Error('zip method '+en.method);
+  };
+  return {has:n=>entries.has(n),get:get,count:entries.size};
+}
 /* open the package: SQLite collection + media index (legacy JSON map or zstd protobuf) */
 async function akOpen(file){
   const SQL=await akLibs();
-  const buf=new Uint8Array(await file.arrayBuffer());
-  const zip=buf[0]===0x50&&buf[1]===0x4b;
-  const sqlite=akTD.decode(buf.subarray(0,15))==='SQLite format 3';
+  const head=new Uint8Array(await file.slice(0,16).arrayBuffer());
+  const zip=head[0]===0x50&&head[1]===0x4b;
+  const sqlite=akTD.decode(head.subarray(0,15))==='SQLite format 3';
   if(!zip&&!sqlite)throw {code:'format'};
-  const names=new Set();
-  if(zip)window.fflate.unzipSync(buf,{filter:f=>{names.add(f.name);return false;}});
-  const get=n=>{if(!zip||!names.has(n))return null;const r=window.fflate.unzipSync(buf,{filter:f=>f.name===n});return r[n]||null;};
-  let col=null;
-  if(sqlite)col=buf;else for(const n of ['collection.anki21b','collection.anki21','collection.anki2'])if(names.has(n)){col=akZ(get(n));break;}
+  let z=null,col=null;
+  if(sqlite)col=new Uint8Array(await file.arrayBuffer());
+  else{z=await zipOpen(file);for(const n of ['collection.anki21b','collection.anki21','collection.anki2'])if(z.has(n)){col=akZ(await z.get(n));break;}}
   if(!col)throw {code:'nocol'};
   const db=new SQL.Database(col);
-  const media=new Map();const mb=get('media');
+  const media=new Map();const mb=z?await z.get('media'):null;
   if(mb&&mb.length){
     if(mb[0]===0x7b){try{const j=JSON.parse(akTD.decode(mb));for(const k in j)media.set(String(j[k]),k);}catch(e){}}
     else{let i=0;for(const e of pbRead(akZ(mb))){if(e[0]!==1||!(e[1] instanceof Uint8Array))continue;let nm='',lz=null;for(const s of pbRead(e[1])){if(s[0]===1)nm=pbS(s[1]);else if(s[0]===255&&typeof s[1]==='number')lz=s[1];}if(nm)media.set(nm,String(lz!=null?lz:i));i++;}}
   }
   const has=n=>media.has(n)||(()=>{try{return media.has(decodeURIComponent(n));}catch(e){return false;}})();
   const key=n=>media.has(n)?n:(()=>{try{const d=decodeURIComponent(n);return media.has(d)?d:null;}catch(e){return null;}})();
-  return {db:db,name:file.name||'Anki',size:buf.length,hasMedia:has,
-    getMedia:n=>{const k=key(n);if(k==null)return null;const b=get(media.get(k));return b?akZ(b):null;}};
+  return {db:db,name:file.name||'Anki',size:file.size,hasMedia:has,
+    getMedia:async n=>{const k=key(n);if(k==null||!z)return null;const b=await z.get(media.get(k));return b?akZ(b):null;}};
 }
 /* note types, decks and creation time — schema 11 (JSON in col) and schema 18 (own tables, protobuf configs) */
 function akMeta(db){
@@ -3972,20 +4159,35 @@ function akMime(n,b){
   if(b&&b.length>4){if(b[0]===0xff&&b[1]===0xd8)return 'image/jpeg';if(b[0]===0x89&&b[1]===0x50)return 'image/png';if(b[0]===0x47&&b[1]===0x49)return 'image/gif';if(b[0]===0x52&&b[1]===0x49&&b[8]===0x57)return 'image/webp';}
   return AK_MIME[(String(n).split('.').pop()||'').toLowerCase()]||'';
 }
+/* decode a picture: createImageBitmap works off the main thread; <img> is the fallback (and the way for SVG) */
+async function akDecode(blob,mime){
+  if(window.createImageBitmap&&mime!=='image/svg+xml'){try{return {img:await createImageBitmap(blob),url:''};}catch(e){}}
+  const url=URL.createObjectURL(blob);
+  try{return {img:await loadImage(url),url:url};}catch(e){URL.revokeObjectURL(url);throw e;}
+}
 async function akPrepImage(bytes,name,max){
   const mime=akMime(name,bytes)||'image/jpeg';const raw=new Blob([bytes],{type:mime});
   if(mime==='image/svg+xml'&&bytes.length<=2e6&&max<0)return {blob:raw,w:0,h:0,nw:0,nh:0};
-  const u=URL.createObjectURL(raw);
+  const d=await akDecode(raw,mime);const img=d.img;
   try{
-    const img=await loadImage(u);const nw=img.naturalWidth,nh=img.naturalHeight;if(!nw||!nh)throw new Error('img');
+    const nw=img.naturalWidth||img.width,nh=img.naturalHeight||img.height;if(!nw||!nh)throw new Error('img');
     const M=Math.abs(max);
     if(/^image\/(jpeg|png|webp|gif)$/.test(mime)&&Math.max(nw,nh)<=M&&bytes.length<=3e6)return {blob:raw,w:nw,h:nh,nw:nw,nh:nh};
     const s=Math.min(1,M/Math.max(nw,nh));const w=Math.max(1,Math.round(nw*s)),h=Math.max(1,Math.round(nh*s));
     const cv=document.createElement('canvas');cv.width=w;cv.height=h;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);
     const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.86));if(!blob)throw new Error('enc');
     return {blob:blob,w:w,h:h,nw:nw,nh:nh};
-  }finally{URL.revokeObjectURL(u);}
+  }finally{if(d.url)URL.revokeObjectURL(d.url);if(img.close)img.close();}
 }
+/* fn over every item, up to `limit` at a time; onDone(done, total) after each. Stops at the first error. */
+async function parallel(items,limit,fn,onDone){
+  const arr=Array.from(items);let i=0,done=0,stop=false;
+  const worker=async()=>{while(!stop&&i<arr.length){const k=i++;try{await fn(arr[k],k);}catch(e){stop=true;throw e;}done++;if(onDone)onDone(done,arr.length);}};
+  await Promise.all(Array.from({length:Math.max(1,Math.min(limit,arr.length))},worker));
+}
+const AK_PAR=4;   /* pictures prepared and uploaded at once */
+/* yield to the page every ~60 ms of work, so the progress text and the Cancel button stay alive */
+function akYielder(){let t=performance.now();return async()=>{if(performance.now()-t>60){await new Promise(r=>setTimeout(r,0));t=performance.now();}};}
 const akR2=v=>Math.round(v*100)/100;
 function akRect(b,sx,sy){const x=clamp(b.x*sx,0,100),y=clamp(b.y*sy,0,100);return {x:akR2(x),y:akR2(y),w:akR2(clamp(b.w*sx,0.3,100-x)),h:akR2(clamp(b.h*sy,0.3,100-y))};}
 function akNote(parts){return parts.map(s=>akSan(s,null).text).filter(Boolean).join(' · ').slice(0,240);}
@@ -4018,15 +4220,15 @@ async function akImport(an,pick){
     if(!folder)folder={id:newId('folders'),name:pre.length?pre[pre.length-1]:base,ad:fad,createdAt:now,_new:true};}
   fresh.forEach((g,i)=>{const d={id:newId('decks'),name:uniq(g.name),newPerDay:20,mode:'hideAll',createdAt:now+i,ad:g.ad,_new:true};if(g.kind==='text')d.kind='text';if(folder)d.folderId=folder.id;g.deck=d;});
   /* 2. storage check */
-  const imgNeed=new Map();
-  G.filter(g=>g.kind==='photo').forEach(g=>g.cards.forEach(c=>{const n=an.notes.get(c.nid);const fi=akIOImageField(meta.models[n.mid],n);const src=fi>=0?akImgSrc(n.f[fi]):'';if(src&&!platesOf(g.deck.id).some(p=>p.ai===src))imgNeed.set(g.deck.id+'|'+src,{deck:g.deck,src:src});}));
+  const imgNeed=new Map();const haveAi=new Set(S.plates.filter(p=>p.ai).map(p=>p.deckId+'|'+p.ai));
+  G.filter(g=>g.kind==='photo').forEach(g=>g.cards.forEach(c=>{const n=an.notes.get(c.nid);const fi=akIOImageField(meta.models[n.mid],n);const src=fi>=0?akImgSrc(n.f[fi]):'';if(src&&!haveAi.has(g.deck.id+'|'+src))imgNeed.set(g.deck.id+'|'+src,{deck:g.deck,src:src});}));
   let cancelled=false;busy('Разбираю карточки…',()=>{cancelled=true;});
   await new Promise(r=>setTimeout(r,30));
   /* 3. text cards: render templates, sanitize, collect media */
-  const textMedia=new Set();const out=[];let skipped=0,ix=0;
+  const textMedia=new Set();const out=[];let skipped=0,ix=0;const yld=akYielder();
   for(const g of G.filter(g=>g.kind==='text')){
     for(const c of g.cards){
-      if(cancelled)break;if(++ix%200===0){setBusy('Разбираю карточки… '+ix+' из '+todo.length);await new Promise(r=>setTimeout(r,0));}
+      if(cancelled)break;if(++ix%50===0){setBusy('Разбираю карточки… '+ix+' из '+todo.length);await yld();}
       const n=an.notes.get(c.nid);const m=meta.models[n.mid];let r=null;
       try{r=akRenderCard(m,n,c,meta);}catch(e){console.warn('anki render',e);}
       if(!r){skipped++;continue;}
@@ -4047,24 +4249,27 @@ async function akImport(an,pick){
   const estDocs=fresh.length+(folder&&folder._new?1:0)+imgNeed.size+Math.ceil(out.reduce((a,c)=>a+JSON.stringify(c).length,0)/PACK_MAX)+G.length+4;
   if(S.db&&!window.CORPUS_WEB&&dbDocCount()+estDocs>4950){hideBusy();await confirmDialog({title:'Хранилище почти заполнено',text:'Выберите меньше колод или удалите ненужные.',ok:'Понятно',danger:false});return;}
   /* 5. photos for image occlusion → plates; then frames */
-  const uploaded=[];const plateFor=new Map();const newPlates=[];let miss=0,i=0;
+  const uploaded=[];const plateFor=new Map();const newPlates=[];let miss=0;
   const fail=e=>{hideBusy();uploaded.forEach(a=>S.assets.delete(a).catch(()=>{}));toast(uploadErrText(e)+' Импорт отменён.');};
   try{
-    for(const [k,it] of imgNeed){
-      if(cancelled)break;i++;setBusy('Загружаю фото '+i+' из '+imgNeed.size+'…');
-      const bytes=an.pkg.getMedia(it.src);if(!bytes){miss++;continue;}
-      let pr;try{pr=await akPrepImage(bytes,it.src,1800);}catch(e){miss++;continue;}
+    if(imgNeed.size)setBusy('Загружаю фото 1 из '+imgNeed.size+'…');
+    await parallel(imgNeed,AK_PAR,async([k,it],idx)=>{
+      if(cancelled)return;
+      const bytes=await an.pkg.getMedia(it.src);if(!bytes){miss++;return;}
+      let pr;try{pr=await akPrepImage(bytes,it.src,1800);}catch(e){miss++;return;}
+      if(cancelled)return;
       const r=await akUpload(pr.blob);uploaded.push(r.id);
-      const p={id:newId('plates'),deckId:it.deck.id,assetId:r.id,w:pr.w,h:pr.h,createdAt:now+i,ai:it.src};
+      const p={id:newId('plates'),deckId:it.deck.id,assetId:r.id,w:pr.w,h:pr.h,createdAt:now+idx+1,ai:it.src};
       plateFor.set(k,{p:p,nw:pr.nw,nh:pr.nh});newPlates.push(p);
-    }
+    },(d,n)=>{if(d<n)setBusy('Загружаю фото '+(d+1)+' из '+n+'…');});
     G.filter(g=>g.kind==='photo').forEach(g=>platesOf(g.deck.id).forEach(p=>{if(p.ai&&!plateFor.has(g.deck.id+'|'+p.ai))plateFor.set(g.deck.id+'|'+p.ai,{p:p,nw:0,nh:0,old:true});}));
   }catch(e){fail(e);return;}
   if(cancelled){hideBusy();uploaded.forEach(a=>S.assets.delete(a).catch(()=>{}));toast('Импорт отменён.');return;}
-  const modeVotes=new Map();
+  const modeVotes=new Map();setBusy('Расставляю рамки…');
   for(const g of G.filter(g=>g.kind==='photo')){
     const svgCache=new Map();
     for(const c of g.cards){
+      if(++ix%50===0)await yld();
       const n=an.notes.get(c.nid),m=meta.models[n.mid];const fi=akIOImageField(m,n);const src=fi>=0?akImgSrc(n.f[fi]):'';
       const pl0=plateFor.get(g.deck.id+'|'+src);if(!pl0){skipped++;continue;}
       let rects=[],oi=true,note='';
@@ -4077,7 +4282,7 @@ async function akImport(an,pick){
         note=akNote([n.f[hi]||'',n.f[bi]||'',n.f[ci]||''].filter((v,j)=>[hi,bi,ci][j]!==fi));
       }else{
         const qi=akFieldIdx(m,['Question Mask'],3);const qs=akImgSrc(n.f[qi]);
-        let svg=svgCache.get(qs);if(svg===undefined){const b=qs?an.pkg.getMedia(qs):null;svg=b?akIOESvg(akTD.decode(b)):null;svgCache.set(qs,svg);}
+        let svg=svgCache.get(qs);if(svg===undefined){const b=qs?await an.pkg.getMedia(qs):null;svg=b?akIOESvg(akTD.decode(b)):null;svgCache.set(qs,svg);}
         if(!svg||!svg.shapes.length){skipped++;continue;}
         const W=svg.W||pl0.nw||pl0.p.w,H=svg.H||pl0.nh||pl0.p.h;if(!W||!H){skipped++;continue;}
         rects=svg.shapes.map(s=>akRect(s,100/W,100/H));
@@ -4091,14 +4296,16 @@ async function akImport(an,pick){
     }
   }
   /* 6. pictures inside text cards */
-  const mediaUrl=new Map();i=0;
+  const mediaUrl=new Map();
   try{
-    for(const nm of textMedia){
-      if(cancelled)break;i++;setBusy('Загружаю картинки карточек '+i+' из '+textMedia.size+'…');
-      const bytes=an.pkg.getMedia(nm);if(!bytes){miss++;continue;}
-      let pr;try{pr=await akPrepImage(bytes,nm,akMime(nm,bytes)==='image/svg+xml'?-1600:1600);}catch(e){miss++;continue;}
+    if(textMedia.size)setBusy('Загружаю картинки карточек 1 из '+textMedia.size+'…');
+    await parallel(textMedia,AK_PAR,async nm=>{
+      if(cancelled)return;
+      const bytes=await an.pkg.getMedia(nm);if(!bytes){miss++;return;}
+      let pr;try{pr=await akPrepImage(bytes,nm,akMime(nm,bytes)==='image/svg+xml'?-1600:1600);}catch(e){miss++;return;}
+      if(cancelled)return;
       const r=await akUpload(pr.blob);uploaded.push(r.id);mediaUrl.set(nm,blobUrl(r.id));
-    }
+    },(d,n)=>{if(d<n)setBusy('Загружаю картинки карточек '+(d+1)+' из '+n+'…');});
   }catch(e){fail(e);return;}
   if(cancelled){hideBusy();uploaded.forEach(a=>S.assets.delete(a).catch(()=>{}));toast('Импорт отменён.');return;}
   const fix=h=>String(h||'').replace(/<img src="akm:([^"]*)" alt="">/g,(m0,e)=>{let nm;try{nm=decodeURIComponent(e);}catch(x){nm=e;}const u=mediaUrl.get(nm);return u?'<img src="'+u+'" alt="" loading="lazy">':'';});
@@ -4172,8 +4379,9 @@ function settingsBody(){
       '<div class="sm" style="margin-bottom:12px;color:'+(old?'var(--learn)':'var(--ink2)')+'">'+esc(backupAgeText())+'</div>'+
       '<button class="btn primary block" data-act="backup">'+ic('check',18)+'Скачать копию</button>'+
       '<button class="btn line block" data-act="importPick" style="margin-top:8px">Восстановить из файла</button></section>'+
-      '<section class="overview"><div class="h2">Обмен колодами</div><p class="muted" style="margin:4px 0 12px;line-height:1.5">Поделиться можно колодой или целой папкой: откройте её и выберите в меню «Поделиться файлом» или «Поделиться папкой». Полученный файл импортируйте здесь — фото, рамки и названия появятся, прогресс начнётся с нуля.</p>'+
-      '<button class="btn line block" data-act="importPick">Импортировать колоду или папку</button>'+
+      '<section class="overview"><div class="h2">Обмен колодами</div><p class="muted" style="margin:4px 0 12px;line-height:1.5">'+(sharesApi()?'Поделиться можно колодой или целой папкой: откройте её и выберите в меню «Поделиться по QR-коду» или «Поделиться файлом». По коду колода приходит сразу; файл импортируйте здесь. Фото, рамки и названия появятся, прогресс начнётся с нуля.':'Поделиться можно колодой или целой папкой: откройте её и выберите в меню «Поделиться файлом» или «Поделиться папкой». Полученный файл импортируйте здесь — фото, рамки и названия появятся, прогресс начнётся с нуля.')+'</p>'+
+      (sharesApi()?'<button class="btn primary block" data-act="shareCode">'+ic('qr',18)+'Получить по коду</button>':'')+
+      '<button class="btn line block" data-act="importPick"'+(sharesApi()?' style="margin-top:8px"':'')+'>Импортировать колоду или папку</button>'+
       '<button class="btn line block" data-act="ankiPick" style="margin-top:8px">'+ic('import',18)+'Импорт из Anki (.apkg)</button></section>'+
       '<section class="overview"><div class="h2">Алгоритм повторения</div><p class="muted" style="margin:4px 0 12px;line-height:1.5">'+(META.algo==='sm2'?'Классический SM-2: интервал растёт на коэффициент лёгкости карточки.':'FSRS — алгоритм из современного Anki. Для каждой карточки он считает, насколько прочно она запомнилась, и назначает повтор к моменту, когда вы начнёте её забывать. Обычно это меньше повторений при той же памяти.')+'</p>'+
       '<div class="seg" role="radiogroup" aria-label="Алгоритм"><button role="radio" aria-checked="'+(META.algo!=='sm2')+'" class="'+(META.algo!=='sm2'?'on':'')+'" data-act="algo" data-v="fsrs">FSRS</button><button role="radio" aria-checked="'+(META.algo==='sm2')+'" class="'+(META.algo==='sm2'?'on':'')+'" data-act="algo" data-v="sm2">Классический SM-2</button></div>'+
@@ -4752,6 +4960,7 @@ const A={
   step:el=>{const k=el.dataset.k;const cur=k==='hintAfter'?hintAfter():hintShows();META[k]=clamp(cur+(+el.dataset.d),1,10);persistMeta();afterSetting();},
   ankiPick:()=>ankiPick(),
   cmpNotes:()=>cmpNotes(view.deckId),
+  shareCode:()=>askShareCode(),
   importPick:()=>{const f=$('#importFile');if(!f)return;f.onchange=e=>{const file=e.target.files&&e.target.files[0];e.target.value='';if(file)importFile(file);};f.click();},
   newDeck:()=>newDeck(),
   addMenu:()=>addMenu(),
@@ -4909,12 +5118,14 @@ async function bootData(){
   }
   S.ready=true;NAV='enter-tab';view={name:'home'};render();
   S.cards.filter(c=>c._mig).forEach(c=>{delete c._mig;persist('terms',c.id);});
+  const W=window.CORPUS_WEB;
+  if(W&&W.shareCode&&sharesApi()){const code=W.shareCode;if(W.clearShareCode)W.clearShareCode();setTimeout(()=>openShareCode(code),400);}
 }
 if(window.__TEST__){
   Object.defineProperty(window,'SS',{get:()=>SS});
   Object.defineProperty(window,'ED',{get:()=>ED});
   Object.defineProperty(window,'view',{get:()=>view});
-  window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
+  window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;
   window.newId=newId;window.persist=persist;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;

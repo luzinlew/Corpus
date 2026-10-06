@@ -7,7 +7,10 @@
      downloads — save a generated file (on phones: the share sheet, e.g. straight to Telegram)
      user      — the signed-in person
      sample    — Claude, through the Supabase Edge Function "corpus-ai" (the site owner's API key,
-                 a daily allowance per user). Until that function is deployed, AI features stay hidden. */
+                 a daily allowance per user). Until that function is deployed, AI features stay hidden.
+   Beyond window.claude, window.CORPUS_WEB.shares passes a deck or folder to another person by a short
+   code (shown as a QR code): the snapshot lives in public.shares, photos stay in the public bucket and
+   are copied into the receiver's own Corpus on import (supabase/share.sql). */
 (function () {
   'use strict';
   var CFG = window.CORPUS_CONFIG || {};
@@ -18,8 +21,16 @@
   var PUBLIC = configured ? CFG.url.replace(/\/+$/, '') + '/storage/v1/object/public/' + BUCKET + '/' : '';
   var FN = configured ? CFG.url.replace(/\/+$/, '') + '/functions/v1/corpus-ai' : '';
 
-  var W = { blobBase: BASE + '_blob/', email: '', uid: '', admin: false, signOut: signOut, siteStats: siteStats };
+  var W = { blobBase: BASE + '_blob/', email: '', uid: '', admin: false, signOut: signOut, siteStats: siteStats,
+    shares: null, shareCode: '', qrScript: BASE + 'vendor/qrcode.js' };
   window.CORPUS_WEB = W;
+
+  /* a share code arrives in the link (?s=...): the app imports that deck or folder once the person is signed in */
+  try { W.shareCode = (new URL(location.href).searchParams.get('s') || '').trim().toLowerCase(); } catch (e) {}
+  W.clearShareCode = function () {
+    W.shareCode = '';
+    try { var u = new URL(location.href); u.searchParams.delete('s'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch (e) {}
+  };
 
   /* the invite code arrives in the link (?i=...) and is kept for the sign-up form. It stays in the
      address bar, so a link copied from there still works as an invitation. */
@@ -74,6 +85,7 @@
     ping();
     /* signed out elsewhere (or the session was revoked): start over at the sign-in screen */
     sb.auth.onAuthStateChange(function (ev) { if (ev === 'SIGNED_OUT' && !leaving) setTimeout(function () { location.reload(); }, 0); });
+    W.shares = mkShares();
     return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user), sample: aiOn ? mkSample() : null };
   })();
 
@@ -150,7 +162,7 @@
       return Object.freeze({
         doc: function (id) { return docRef(coll, id || genId()); },
         get: async function () {
-          var docs = [], PAGE = 200;
+          var docs = [], PAGE = 1000;
           for (var from = 0; ; from += PAGE) {
             var res = await sb.from(T).select('id,data').eq('owner', uid).eq('coll', coll).order('id').range(from, from + PAGE - 1);
             if (res.error) throw fail(res);
@@ -161,9 +173,56 @@
         }
       });
     }
+    /* many documents in one request (an import writes hundreds of photos and packs at once) */
+    async function setMany(items) {
+      var now = new Date().toISOString();
+      var rows = items.map(function (it) { return { owner: uid, coll: it.coll, id: it.id, data: it.data, updated_at: now }; });
+      var res = await sb.from(T).upsert(rows, { onConflict: 'owner,coll,id' });
+      if (res.error) throw fail(res);
+    }
     return Object.freeze({
       collection: collection,
-      doc: function (path) { var p = String(path).split('/'); return docRef(p.slice(0, -1).join('/'), p[p.length - 1]); }
+      doc: function (path) { var p = String(path).split('/'); return docRef(p.slice(0, -1).join('/'), p[p.length - 1]); },
+      setMany: setMany
+    });
+  }
+
+  /* ---------- shares: a deck or folder for another person, by code / QR (supabase/share.sql) ---------- */
+  function mkShares() {
+    function shareFail(res) {
+      var e = (res && res.error) || {}, m = String(e.message || '');
+      if (e.code === 'P0002' || /share_not_found/.test(m)) return { code: 'not_found', message: 'no such share' };
+      if (e.code === '54000' || /share_too_large/.test(m) || (res && res.status === 413)) return { code: 'too_large', message: m || 'too large' };
+      if (e.code === '42883' || e.code === 'PGRST202' || e.code === '42P01' || /could not find the function|does not exist/i.test(m)) return { code: 'not_set_up', message: m };
+      return { code: 'unavailable', message: m || 'network error' };
+    }
+    var link = function (code) { return location.origin + BASE + '?s=' + encodeURIComponent(code); };
+    return Object.freeze({
+      link: link,
+      /* publish (or refresh) the share of one deck / folder; the code stays the same for the same source */
+      put: async function (src, kind, name, data) {
+        var r = await sb.rpc('corpus_share_put', { p_src: String(src), p_kind: String(kind), p_name: String(name || ''), p_data: data });
+        if (r.error) throw shareFail(r);
+        var o = r.data || {};
+        return { code: o.code, url: link(o.code), createdAt: o.createdAt || null };
+      },
+      /* what another person shared, by code */
+      open: async function (code) {
+        var r = await sb.rpc('corpus_share_open', { p_code: String(code || '').trim().toLowerCase() });
+        if (r.error) throw shareFail(r);
+        return r.data;
+      },
+      /* my own share of this source, if any (its code and how many times it was opened) */
+      get: async function (src) {
+        var r = await sb.from('shares').select('code,opens,created_at,updated_at').eq('owner', W.uid).eq('src', String(src)).maybeSingle();
+        if (r.error) throw shareFail(r);
+        return r.data ? { code: r.data.code, url: link(r.data.code), opens: r.data.opens | 0, createdAt: r.data.created_at, updatedAt: r.data.updated_at } : null;
+      },
+      /* stop sharing: the code and the QR stop working */
+      drop: async function (src) {
+        var r = await sb.from('shares').delete().eq('owner', W.uid).eq('src', String(src));
+        if (r.error) throw shareFail(r);
+      }
     });
   }
 
@@ -410,7 +469,7 @@
       var d = document.createElement('div');
       d.className = 'cw-auth';
       d.innerHTML = '<div class="cw-card">' + BRAND +
-        '<p class="cw-sub">Анатомия по изображениям: колоды из фото атласа и интервальные повторения.</p>' +
+        '<p class="cw-sub">' + (W.shareCode ? 'Вам передали колоду Corpus. Войдите или создайте аккаунт — колода появится у вас.' : 'Анатомия по изображениям: колоды из фото атласа и интервальные повторения.') + '</p>' +
         '<div class="cw-box"><div class="cw-tabs" role="tablist">' +
         '<button type="button" role="tab" data-m="in">Вход</button><button type="button" role="tab" data-m="up">Регистрация</button></div>' +
         '<form novalidate>' +

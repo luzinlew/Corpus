@@ -16,13 +16,34 @@ Corpus — карточки по анатомии из фото атласа: р
 | `supabase/setup.sql` | Разовая настройка базы: таблица `docs` с RLS, бакет `plates`, проверка кода приглашения |
 | `supabase/stats.sql` | Статистика для админов: отметка «заходил сегодня» (`activity`), `corpus_site_stats` |
 | `supabase/ai.sql` | Тарифы и дневные лимиты ИИ: `ai_plans`, `ai_usage`, функция `corpus_ai_take` |
+| `supabase/share.sql` | Обмен колодами по коду / QR: таблица `shares`, функции `corpus_share_put`, `corpus_share_open` |
 | `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
-| `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js |
+| `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js, qrcode-generator |
 | `tools/` | Тестовый сервер-заглушка Supabase и сквозной тест в браузере |
 
 Данные лежат в одной таблице `public.docs (owner, coll, id) → data jsonb`. Коллекции те же, что в claude.ai: `decks`, `plates`, `packs`, `terms`, `stats`, `folders`, `meta`. Частичные обновления идут через RPC `corpus_doc_update` с рекурсивным слиянием, как у `update()` в claude.ai.
 
 ИИ (подсказки, чат, распознавание подписей по фото, сверка с конспектом) на сайте идёт через функцию `corpus-ai` с ключом Claude API владельца. Текст обрабатывает Haiku 4.5, фото — Sonnet 5.5. Каждый запрос списывается с дневного лимита пользователя (фото = 1 + число фото). Пока функция не развёрнута, ИИ-кнопки на сайте скрыты. Распознавание подписей на устройстве (Tesseract) работает всегда.
+
+## Обмен колодами по QR-коду
+
+В меню колоды и папки есть «Поделиться по QR-коду». Приложение сохраняет снимок колоды (названия, рамки, текстовые карточки и ссылки на фото, без прогресса) в таблицу `public.shares` под случайным кодом из 10 букв и показывает QR-код, сам код и кнопку «Отправить ссылку». Другой человек наводит камеру на QR (ссылка вида `https://luzinlew.github.io/Corpus/?s=<код>`), либо вводит код в «Ещё → Получить по коду». После входа колода предлагается к импорту; фото копируются из общего бакета в его собственный Corpus, так что удаление у автора ничего не ломает.
+
+У одной колоды или папки один код: открыв «Поделиться по QR-коду» снова, автор обновляет снимок, код не меняется. «Отозвать» удаляет снимок — ссылка и QR перестают работать, у тех, кто уже импортировал, колода остаётся. Открыть код может только вошедший пользователь; новому человеку по-прежнему нужна ссылка-приглашение для регистрации.
+
+Настройка: Supabase → SQL Editor → выполнить `supabase/share.sql`. Пока таблицы нет, пункт меню показывает «Обмен по коду ещё не настроен на сайте».
+
+```sql
+-- кто что раздаёт и сколько раз открывали
+select u.email, s.kind, s.name, s.code, s.opens, s.updated_at from public.shares s join auth.users u on u.id = s.owner order by s.updated_at desc;
+
+-- отозвать чужой код
+delete from public.shares where code = 'abcde23456';
+```
+
+## Импорт из Anki
+
+Файл `.apkg` / `.colpkg` не распаковывается целиком: приложение читает оглавление архива и достаёт только коллекцию и те картинки, которые нужны выбранным колодам, прямо из файла по смещению (поддерживается zip64). Картинки декодируются вне главного потока, готовятся и загружаются по четыре одновременно, а документы (фото, колоды, пачки карточек) сохраняются в базу пакетами по сто штук в одном запросе — за это отвечает `setMany` в `web.js`. На claude.ai, где пакетной записи нет, документы по-прежнему пишутся по одному.
 
 ## ИИ: настройка и лимиты
 
@@ -51,7 +72,7 @@ select u.email, a.day, a.used from public.ai_usage a join auth.users u on u.id =
 
 1. Изменить `src/corpus.html` (и при необходимости `web.js` / `web.css` / `sw.js`).
 2. `python3 build.py`, чтобы пересобрать `index.html` (у скриптов меняется `?v=`, и браузеры сразу берут новую версию).
-3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase, функция `corpus-ai` при этом работает по-настоящему в Deno. Нужны `pip install playwright pillow && python3 -m playwright install chromium` и `deno` (или `npx deno`).
+3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase (включая импорт сгенерированного `.apkg` и обмен по коду между двумя аккаунтами), функция `corpus-ai` при этом работает по-настоящему в Deno. Нужны `pip install playwright pillow && python3 -m playwright install chromium` и `deno` (или `npx deno`).
 4. Закоммитить и запушить: `git push origin main main:gh-pages`. Сайт публикуется из ветки `gh-pages`, GitHub Pages обновит его за минуту-две.
 
 Чтобы обновить и артефакт в claude.ai, опубликуйте туда `src/corpus.html` вместе с `ocr/*` и `anki/*`.
@@ -95,4 +116,4 @@ update private.settings set value = 'you@example.com, other@example.com' where k
 
 ## Сторонний код
 
-supabase-js (MIT), tesseract.js (Apache-2.0), sql.js (MIT), fflate (MIT), fzstd (MIT). Лицензия supabase-js лежит в `vendor/supabase-LICENSE.txt`.
+supabase-js (MIT), tesseract.js (Apache-2.0), sql.js (MIT), fflate (MIT), fzstd (MIT), qrcode-generator (MIT, Kazuhiko Arase; лицензия в шапке `vendor/qrcode.js`). Лицензия supabase-js лежит в `vendor/supabase-LICENSE.txt`.

@@ -125,7 +125,7 @@ async def main():
             await pg.wait_for_selector('.cw-auth .cw-tabs .on')
             check('auth screen opens on sign-up for an invite link', (await pg.get_attribute('.cw-tabs .on', 'data-m')) == 'up')
             check('invite code is taken from the link and hidden', not await pg.is_visible('.cw-inv'))
-            check('invite code removed from the address bar', '?i=' not in pg.url, pg.url)
+            check('invite code stays in the address bar (a copied link still invites)', '?i=' + INVITE in pg.url, pg.url)
             tab = (await pg.inner_text('.cw-tabs .on')).strip()
             check('sign-in screen is translated (Estonian by default)', tab == 'Registreerimine', tab)
             await pg.fill('input[name=email]', 'lev@test.ee')
@@ -218,6 +218,19 @@ async def main():
             await app_ready(pg)
             check("friend signed up and sees an empty Corpus, not Lev's", await pg.evaluate('S.decks.length===0 && S.cards.length===0 && S.folders.length===0'))
             errs_b = list(errs)
+            await ctx.close()
+
+            # ---------- storage blocked: the code from the link still works ----------
+            ctx, pg, errs_d = await open_ctx()
+            await pg.add_init_script("Object.defineProperty(window,'localStorage',{get(){throw new Error('blocked')}});")
+            await pg.goto(SITE + '?i=' + INVITE)
+            await pg.wait_for_selector('.cw-auth .cw-tabs .on')
+            check('storage blocked: sign-up opens without asking for the code', (await pg.get_attribute('.cw-tabs .on', 'data-m')) == 'up' and not await pg.is_visible('.cw-inv'))
+            await pg.fill('input[name=email]', 'third@test.ee')
+            await pg.fill('input[name=password]', 'kolju2026')
+            await pg.click('.cw-go')
+            await pg.wait_for_function('window.S && S.ready && !document.querySelector(".cw-auth")', timeout=20000)
+            check('storage blocked: signed up with the code from the link', True)
             await ctx.close()
 
             # ---------- fallback: browser without service workers ----------

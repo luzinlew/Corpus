@@ -19,16 +19,16 @@
   var W = { blobBase: BASE + '_blob/', email: '', uid: '', signOut: signOut };
   window.CORPUS_WEB = W;
 
-  /* the invite code arrives in the link (?i=...) and is kept for the sign-up form */
-  try {
-    var u0 = new URL(location.href), inv0 = u0.searchParams.get('i');
-    if (inv0) {
-      localStorage.setItem('corpus.invite', inv0);
-      u0.searchParams.delete('i');
-      history.replaceState(null, '', u0.pathname + u0.search + u0.hash);
-    }
-  } catch (e) {}
-  function storedInvite() { try { return localStorage.getItem('corpus.invite') || ''; } catch (e) { return ''; } }
+  /* the invite code arrives in the link (?i=...) and is kept for the sign-up form. It stays in the
+     address bar, so a link copied from there still works as an invitation. */
+  var INVITE = '';
+  try { INVITE = (new URL(location.href).searchParams.get('i') || '').trim(); } catch (e) {}
+  if (INVITE) { try { localStorage.setItem('corpus.invite', INVITE); } catch (e) {} }
+  function storedInvite() {
+    var v = '';
+    try { v = localStorage.getItem('corpus.invite') || ''; } catch (e) {}
+    return v || INVITE;
+  }
 
   var sb = configured ? window.supabase.createClient(CFG.url, CFG.key, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'corpus-auth' }

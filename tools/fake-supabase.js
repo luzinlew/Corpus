@@ -12,6 +12,11 @@ const access = new Map();     // access token -> uid
 const refresh = new Map();    // refresh token -> uid
 const docs = new Map();       // owner|coll|id -> row
 const objects = new Map();    // name -> {owner,type,buf}
+const aiUsed = new Map();     // uid|day -> units used today (public.ai_usage)
+const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
+let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
+const FN_URL0 = FN_URL;
+const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
 const log = [];
 
 const b64u = (s) => Buffer.from(s).toString('base64url');
@@ -96,6 +101,7 @@ http.createServer(async (req, res) => {
   /* ---------- test helpers ---------- */
   if (p === '/__state') { send(res, 200, { users: users.size, docs: Array.from(docs.values()), objects: Array.from(objects.entries()).map(([k, v]) => ({ name: k, owner: v.owner, type: v.type, size: v.buf.length })) }); return; }
   if (p === '/__log') { send(res, 200, log.splice(0)); return; }
+  if (p === '/__fn') { FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; send(res, 200, { fn: FN_URL }); return; }
 
   /* ---------- auth ---------- */
   if (p === '/auth/v1/signup' && req.method === 'POST') {
@@ -157,6 +163,42 @@ http.createServer(async (req, res) => {
     if (!uid || !row) { send(res, 404, { code: 'P0002', message: 'doc_missing', details: null, hint: null }); return; }
     row.data = merge(row.data, body.p_patch); row.updated_at = new Date().toISOString();
     send(res, 204); return;
+  }
+
+  /* ---------- rpc: corpus_ai_take (daily allowance, as in supabase/ai.sql) ---------- */
+  if (p === '/rest/v1/rpc/corpus_ai_take' && req.method === 'POST') {
+    const uid = uidOf(req);
+    if (!uid) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_ai_take' }); return; }
+    const n = body && body.p_units;
+    if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
+    const k = uid + '|' + new Date().toISOString().slice(0, 10), used = aiUsed.get(k) || 0;
+    if (used + n > AI_LIMIT) { send(res, 200, { ok: false, plan: 'free', limit: AI_LIMIT, used }); return; }
+    aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: AI_LIMIT, used: used + n }); return;
+  }
+
+  /* ---------- a stand-in for the Claude Messages API ---------- */
+  if (p === '/v1/messages' && req.method === 'POST') {
+    if (req.headers['x-api-key'] !== ANTHROPIC_KEY) { send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }); return; }
+    const last = body.messages[body.messages.length - 1];
+    const blocks = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : last.content;
+    const imgs = blocks.filter((b) => b.type === 'image').length, said = blocks.filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+    const text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length })
+      : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
+    send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 } });
+    return;
+  }
+
+  /* ---------- edge function: forwarded to the real function code running in deno ---------- */
+  if (p === '/functions/v1/corpus-ai') {
+    if (!FN_URL) { send(res, 404, { message: 'Requested function was not found' }); return; }
+    try {
+      const h = {};
+      for (const k of ['authorization', 'apikey', 'content-type']) if (req.headers[k]) h[k] = req.headers[k];
+      const r = await fetch(FN_URL, { method: req.method, headers: h, body: req.method === 'GET' ? undefined : raw });
+      const buf = Buffer.from(await r.arrayBuffer());
+      cors(res); res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' }); res.end(buf);
+    } catch (e) { send(res, 502, { message: 'function not reachable: ' + e.message }); }
+    return;
   }
 
   /* ---------- storage: bucket 'plates' (public reads, owner-only delete, image/* only) ---------- */

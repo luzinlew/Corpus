@@ -92,3 +92,5 @@ grant execute on function private.corpus_check_invite() to supabase_auth_admin;
 drop trigger if exists corpus_check_invite on auth.users;
 create trigger corpus_check_invite before insert on auth.users
   for each row execute function private.corpus_check_invite();
+
+-- 4. AI plans and daily limits: run supabase/ai.sql as well.

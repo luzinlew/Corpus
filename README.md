@@ -14,18 +14,43 @@ Corpus — карточки по анатомии из фото атласа: р
 | `config.js` | URL проекта Supabase и publishable key (оба публичные) |
 | `index.html` | Собирается из `src/corpus.html` командой `python3 build.py`. Руками не править |
 | `supabase/setup.sql` | Разовая настройка базы: таблица `docs` с RLS, бакет `plates`, проверка кода приглашения |
+| `supabase/ai.sql` | Тарифы и дневные лимиты ИИ: `ai_plans`, `ai_usage`, функция `corpus_ai_take` |
+| `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
 | `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js |
 | `tools/` | Тестовый сервер-заглушка Supabase и сквозной тест в браузере |
 
 Данные лежат в одной таблице `public.docs (owner, coll, id) → data jsonb`. Коллекции те же, что в claude.ai: `decks`, `plates`, `packs`, `terms`, `stats`, `folders`, `meta`. Частичные обновления идут через RPC `corpus_doc_update` с рекурсивным слиянием, как у `update()` в claude.ai.
 
-Функции, которым нужен Claude (подсказки, чат, распознавание через ИИ), есть только в версии на claude.ai. На сайте они скрыты. Распознавание подписей на устройстве (Tesseract) работает везде.
+ИИ (подсказки, чат, распознавание подписей по фото, сверка с конспектом) на сайте идёт через функцию `corpus-ai` с ключом Claude API владельца. Текст обрабатывает Haiku 4.5, фото — Sonnet 5.5. Каждый запрос списывается с дневного лимита пользователя (фото = 1 + число фото). Пока функция не развёрнута, ИИ-кнопки на сайте скрыты. Распознавание подписей на устройстве (Tesseract) работает всегда.
+
+## ИИ: настройка и лимиты
+
+1. Ключ: platform.claude.com → пополнить баланс → API Keys → Create key. Там же стоит поставить месячный лимит расходов.
+2. Supabase → Edge Functions → Secrets: `ANTHROPIC_API_KEY` = ключ.
+3. Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-ai`, код из `supabase/functions/corpus-ai/index.ts`.
+4. Supabase → SQL Editor: выполнить `supabase/ai.sql`.
+
+Сайт сам заметит функцию и включит ИИ. Модели можно сменить секретами `CORPUS_AI_MODEL` (текст) и `CORPUS_AI_VISION_MODEL` (фото).
+
+```sql
+-- бесплатный дневной лимит для всех
+update private.settings set value = '30' where key = 'ai_free_daily';
+
+-- тариф Pro / свой лимит конкретному человеку
+insert into public.ai_plans (user_id, plan, daily_limit)
+select id, 'pro', 200 from auth.users where email = 'friend@example.com'
+on conflict (user_id) do update set plan = excluded.plan, daily_limit = excluded.daily_limit, updated_at = now();
+
+-- кто сколько потратил за неделю
+select u.email, a.day, a.used from public.ai_usage a join auth.users u on u.id = a.user_id
+ where a.day > current_date - 7 order by a.day desc, a.used desc;
+```
 
 ## Обновить приложение
 
 1. Изменить `src/corpus.html` (и при необходимости `web.js` / `web.css` / `sw.js`).
 2. `python3 build.py`, чтобы пересобрать `index.html` (у скриптов меняется `?v=`, и браузеры сразу берут новую версию).
-3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase. Нужен `pip install playwright && python3 -m playwright install chromium`.
+3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase, функция `corpus-ai` при этом работает по-настоящему в Deno. Нужны `pip install playwright pillow && python3 -m playwright install chromium` и `deno` (или `npx deno`).
 4. Закоммитить и запушить: `git push origin main main:gh-pages`. Сайт публикуется из ветки `gh-pages`, GitHub Pages обновит его за минуту-две.
 
 Чтобы обновить и артефакт в claude.ai, опубликуйте туда `src/corpus.html` вместе с `ocr/*` и `anki/*`.

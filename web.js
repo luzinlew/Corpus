@@ -6,7 +6,8 @@
      assets    — photos in Supabase Storage, served same-origin at <site>/_blob/<id> by sw.js
      downloads — save a generated file (on phones: the share sheet, e.g. straight to Telegram)
      user      — the signed-in person
-   'sample' (asking Claude) does not exist outside claude.ai; the app hides those features. */
+     sample    — Claude, through the Supabase Edge Function "corpus-ai" (the site owner's API key,
+                 a daily allowance per user). Until that function is deployed, AI features stay hidden. */
 (function () {
   'use strict';
   var CFG = window.CORPUS_CONFIG || {};
@@ -15,6 +16,7 @@
   var CACHE = 'corpus-blobs-v1';
   var configured = !!(CFG.url && CFG.key && window.supabase && window.supabase.createClient);
   var PUBLIC = configured ? CFG.url.replace(/\/+$/, '') + '/storage/v1/object/public/' + BUCKET + '/' : '';
+  var FN = configured ? CFG.url.replace(/\/+$/, '') + '/functions/v1/corpus-ai' : '';
 
   var W = { blobBase: BASE + '_blob/', email: '', uid: '', signOut: signOut };
   window.CORPUS_WEB = W;
@@ -59,18 +61,23 @@
     var r = await sb.auth.getSession();
     var session = r && r.data && r.data.session;
     if (!session) session = await authScreen();
+    var aiP = aiStatus();
     if (!(await swP)) W.blobBase = PUBLIC;    // no service worker (rare): load photos straight from Storage
     W.uid = session.user.id;
     W.email = session.user.email || '';
+    /* AI: known to work on this device → on at once, refreshed in the background; otherwise wait briefly for the answer */
+    var aiKnown = false;
+    try { aiKnown = localStorage.getItem('corpus.ai') === '1'; } catch (e) {}
+    aiP.then(function (st) { if (st) W.ai = st; try { localStorage.setItem('corpus.ai', st ? '1' : '0'); } catch (e) {} });
+    var aiOn = aiKnown || !!(await Promise.race([aiP, new Promise(function (r) { setTimeout(function () { r(null); }, 2500); })]));
     try { localStorage.setItem('corpus.known', '1'); } catch (e) {}
     /* signed out elsewhere (or the session was revoked): start over at the sign-in screen */
     sb.auth.onAuthStateChange(function (ev) { if (ev === 'SIGNED_OUT' && !leaving) setTimeout(function () { location.reload(); }, 0); });
-    return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user) };
+    return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user), sample: aiOn ? mkSample() : null };
   })();
 
   window.claude = Object.freeze({
     use: async function (name) {
-      if (name === 'sample') return null;
       var ns = await ready;
       return (ns && ns[name]) || null;
     }
@@ -227,6 +234,95 @@
       });
       document.body.appendChild(ov);
     });
+  }
+
+  /* ---------- sample: Claude through the corpus-ai function ---------- */
+  async function fnFetch(method, body, signal) {
+    var s = await sb.auth.getSession();
+    var tok = s && s.data && s.data.session ? s.data.session.access_token : '';
+    return fetch(FN, {
+      method: method, signal: signal,
+      headers: { Authorization: 'Bearer ' + tok, apikey: CFG.key, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  }
+  /* today's allowance, or null while the function is not deployed / has no API key */
+  async function aiStatus() {
+    try {
+      var r = await fnFetch('GET');
+      if (!r.ok) return null;
+      var j = await r.json();
+      return j && j.ready ? { plan: j.plan, limit: j.limit, used: j.used } : null;
+    } catch (e) { return null; }
+  }
+  function toB64(blob) {
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      fr.onload = function () { var s = String(fr.result); res(s.slice(s.indexOf(',') + 1)); };
+      fr.onerror = function () { rej({ code: 'image_rejected', message: 'could not read the image' }); };
+      fr.readAsDataURL(blob);
+    });
+  }
+  async function imageBlocks(images) {
+    var list = !images ? [] : (images instanceof Blob ? [images] : Array.prototype.slice.call(images));
+    if (list.length > 4) throw { code: 'image_rejected', message: 'at most 4 images' };
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var t = String(list[i].type || 'image/jpeg').toLowerCase();
+      if (!/^image\/(jpeg|png|webp|gif)$/.test(t)) throw { code: 'image_rejected', message: 'unsupported image type ' + t };
+      out.push({ type: 'image', source: { type: 'base64', media_type: t, data: await toB64(list[i]) } });
+    }
+    return out;
+  }
+  /* the whole reply as JSON; else one code fence; else from the first { or [ to the last } or ] */
+  function parseLoose(text) {
+    var t = String(text || '').trim();
+    try { return { ok: true, v: JSON.parse(t) }; } catch (e) {}
+    var m = /```(?:json)?\s*([\s\S]*?)```/i.exec(t);
+    if (m) { try { return { ok: true, v: JSON.parse(m[1].trim()) }; } catch (e) {} }
+    var a = t.search(/[[{]/), b = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'));
+    if (a >= 0 && b > a) { try { return { ok: true, v: JSON.parse(t.slice(a, b + 1)) }; } catch (e) {} }
+    return { ok: false };
+  }
+  function mkSample() {
+    async function ask(input, opts, asJson) {
+      opts = opts || {};
+      if (opts.signal && opts.signal.aborted) throw { code: 'cancelled', message: 'cancelled' };
+      var turns = typeof input === 'string' ? [{ role: 'user', content: input }]
+        : (Array.isArray(input) ? input.map(function (t) { return { role: t.role, content: String(t.content) }; }) : []);
+      if (!turns.length) throw { code: 'invalid_input', message: 'empty input' };
+      var imgs = await imageBlocks(opts.images);
+      if (imgs.length) {
+        var last = turns[turns.length - 1];
+        turns[turns.length - 1] = { role: last.role, content: imgs.concat([{ type: 'text', text: last.content }]) };
+      }
+      var r;
+      try { r = await fnFetch('POST', { messages: turns, json: !!asJson, max_tokens: asJson ? 3000 : 1500 }, opts.signal); }
+      catch (e) {
+        if (e && e.name === 'AbortError') throw { code: 'cancelled', message: 'cancelled' };
+        throw { code: 'unavailable', message: String((e && e.message) || e) };
+      }
+      var j = null;
+      try { j = await r.json(); } catch (e) {}
+      if (j && j.limit != null) W.ai = { plan: j.plan, limit: j.limit, used: j.used };
+      if (!r.ok || !j) throw { code: (j && j.code) || 'unavailable', message: (j && j.message) || ('HTTP ' + r.status) };
+      if (opts.onText) { try { opts.onText({ text: j.text, delta: j.text }); } catch (e) {} }
+      return j;
+    }
+    var sample = async function (input, opts) {
+      var j = await ask(input, opts, false);
+      return { text: j.text, truncated: !!j.truncated };
+    };
+    sample.json = async function (input, opts) {
+      var j = await ask(input, opts, true);
+      var p = parseLoose(j.text);
+      if (j.truncated || !p.ok) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON in the answer', text: j.text };
+      return p.v;
+    };
+    sample.limits = async function () {
+      return { maxPromptBytes: 65536, images: { maxCount: 4, maxInputBytes: 5 * 1024 * 1024, mediaTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] } };
+    };
+    return Object.freeze(sample);
   }
 
   /* ---------- user ---------- */

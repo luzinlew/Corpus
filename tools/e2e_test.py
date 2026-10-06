@@ -4,14 +4,18 @@
     pip install playwright && python3 -m playwright install chromium
     python3 tools/e2e_test.py
 
-Covers: invite sign-up, sign in / out, importing a folder file (photos to Storage, cards to packs),
+The AI function (supabase/functions/corpus-ai) runs for real in Deno (`deno` on PATH, else `npx deno`),
+talking to the fake backend and to a fake Claude API inside it.
+
+Covers: invite sign-up, sign in / out, AI through the function (text, JSON, images, daily limit,
+hidden when the function is not deployed), importing a folder file (photos to Storage, cards to packs),
 progress saved through the merge RPC and restored after reload, photos served by the service worker
 and readable on a canvas, exporting a folder, isolation between two accounts, and the no-service-worker
 fallback. Prints one line per check and exits non-zero on the first failure."""
 import asyncio, base64, io, json, os, pathlib, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SITE_PORT, API_PORT, INVITE = 8765, 54321, 'p8wyzmtw'
+SITE_PORT, API_PORT, FN_PORT, INVITE, AI_LIMIT = 8765, 54321, 8000, 'p8wyzmtw', 6
 API = f'http://localhost:{API_PORT}'
 SITE = f'http://localhost:{SITE_PORT}/corpus/'
 
@@ -91,9 +95,14 @@ async def main():
     (site / 'config.js').write_text(f"self.CORPUS_CONFIG={{url:'{API}',key:'test-publishable-key',bucket:'plates'}};")
     folder_file(tmp / 'corpus-folder-Kolju.json')
     order_file(tmp / 'corpus-folder-order.json')
-    procs = [subprocess.Popen(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], stdout=subprocess.DEVNULL),
+    deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
+    fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key')
+    api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT))
+    procs = [subprocess.Popen(deno + ['run', '--allow-net', '--allow-env', '--allow-read', '--allow-sys', str(ROOT / 'supabase' / 'functions' / 'corpus-ai' / 'index.ts')],
+                              env=fn_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+             subprocess.Popen(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], env=api_env, stdout=subprocess.DEVNULL),
              subprocess.Popen([sys.executable, '-m', 'http.server', str(SITE_PORT), '--directory', str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
-    wait_port(API_PORT); wait_port(SITE_PORT)
+    wait_port(API_PORT); wait_port(SITE_PORT); wait_port(FN_PORT, 120)
     ok = True
 
     def check(name, cond, extra=''):
@@ -120,7 +129,9 @@ async def main():
                 #  sign-out makes Chrome report it as aborted even though the server handled it; likewise any
                 #  ERR_ABORTED is a request cut short by the test's own reloads, not a failure)
                 pg.on('requestfailed', lambda r: 'fonts.g' not in r.url and 'ERR_ABORTED' not in str(r.failure) and errs.append('failed: ' + r.url + ' (' + str(r.failure) + ')'))
-                pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url) and errs.append(f'http {r.status}: {r.url}'))
+                pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url)
+                      and not ('/functions/v1/corpus-ai' in r.url and r.status in (404, 429))   # provoked: function off, daily limit
+                      and errs.append(f'http {r.status}: {r.url}'))
                 return ctx, pg, errs
 
             async def app_ready(pg):
@@ -163,7 +174,19 @@ async def main():
             info = await pg.evaluate("({ctrl:!!navigator.serviceWorker.controller,base:CORPUS_WEB.blobBase,sample:S.sample,email:CORPUS_WEB.email})")
             check('service worker controls the page', info['ctrl'], json.dumps(info))
             check('photos served from the site itself', info['base'] == '/corpus/_blob/', info['base'])
-            check('Claude-only features are off on the web', info['sample'] is None)
+            ai = await pg.evaluate('({on:!!S.sample, img:S.imgOK, ai:CORPUS_WEB.ai||null})')
+            check('AI is on: the function is deployed', ai['on'] and ai['img'] and ai['ai'] and ai['ai']['limit'] == AI_LIMIT, json.dumps(ai))
+            r = await pg.evaluate("S.sample.json('Reply with JSON')")
+            check('AI JSON answer (text model)', r.get('ok') is True and r.get('model', '').startswith('claude-haiku'), json.dumps(r))
+            r = await pg.evaluate("""(async()=>{let seen='';const r=await S.sample([{role:'user',content:'Mis on os frontale?'}],{onText:u=>{seen=u.text;}});return {text:r.text,seen};})()""")
+            check('AI chat answer reaches onText', 'os frontale' in r['text'] and r['seen'] == r['text'], r['text'])
+            r = await pg.evaluate("""(async()=>{const c=document.createElement('canvas');c.width=40;c.height=30;const b=await new Promise(r=>c.toBlob(r,'image/jpeg'));
+                                   return S.sample.json('Read the labels',{images:[b]});})()""")
+            check('AI with a photo uses the vision model', r.get('images') == 1 and r.get('model') == 'claude-sonnet-5-5', json.dumps(r))
+            used = await pg.evaluate('CORPUS_WEB.ai.used')
+            check('each call is counted (photo = 2)', used == 4, str(used))
+            r = await pg.evaluate("""(async()=>{const out=[];for(let i=0;i<4;i++){try{await S.sample('more');out.push('ok');}catch(e){out.push(e.code);}}return out;})()""")
+            check('daily limit stops further calls', r == ['ok', 'ok', 'quota_exceeded', 'quota_exceeded'], json.dumps(r))
 
             await import_folder(pg)
             st = await state_when(lambda st: {'decks', 'folders', 'packs', 'plates'} <= set(d['coll'] for d in st['docs']))
@@ -233,6 +256,7 @@ async def main():
             await pg.evaluate("go({name:'settings'})")
             acc = await pg.inner_text('.page')
             check('settings show the account', 'lev@test.ee' in acc and 'Konto' in acc)
+            check("settings show today's AI allowance", f'TI täna: {AI_LIMIT} / {AI_LIMIT}' in acc, [l for l in acc.split('\n') if 'TI' in l][:1])
             await pg.click('[data-act=signOut]')
             await pg.click('#layer [data-s="1"]')
             await pg.wait_for_selector('.cw-auth .cw-tabs .on', timeout=15000)
@@ -250,6 +274,7 @@ async def main():
             await ctx.close()
 
             # ---------- user B: no invite, then a wrong one, then the right one ----------
+            urllib.request.urlopen(API + '/__fn?off=1')           # as if the AI function were not deployed
             ctx, pg, errs = await open_ctx()
             await pg.goto(SITE)
             await pg.wait_for_selector('.cw-auth .cw-tabs .on')
@@ -268,6 +293,8 @@ async def main():
             await pg.click('.cw-go')
             await app_ready(pg)
             check("friend signed up and sees an empty Corpus, not Lev's", await pg.evaluate('S.decks.length===0 && S.cards.length===0 && S.folders.length===0'))
+            check('no AI function deployed → AI features hidden', await pg.evaluate('S.sample===null'))
+            urllib.request.urlopen(API + '/__fn?off=0')
             errs_b = list(errs)
             await ctx.close()
 

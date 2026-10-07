@@ -5901,11 +5901,9 @@ boot();
 }
 /* ===== сияние на фоне ===== */
 #aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;background:var(--bg)}
-#aurora i{position:absolute;width:78vmax;height:78vmax;border-radius:50%;opacity:var(--au-op);will-change:transform;transition:background 2s}
-#aurora .a1{left:-30vmax;top:-32vmax;background:radial-gradient(circle,var(--au1) 0,transparent 66%);animation:auA 48s ease-in-out infinite alternate}
-#aurora .a2{right:-34vmax;top:-6vmax;background:radial-gradient(circle,var(--au2) 0,transparent 66%);animation:auB 56s ease-in-out infinite alternate}
-#aurora .a3{left:-36vmax;bottom:-30vmax;background:radial-gradient(circle,var(--au3) 0,transparent 66%);animation:auC 62s ease-in-out infinite alternate}
-#aurora .a4{right:-30vmax;bottom:-40vmax;background:radial-gradient(circle,var(--au4) 0,transparent 66%);opacity:calc(var(--au-op) * .75);animation:auB 70s ease-in-out infinite alternate-reverse}
+/* one static layer: four big moving blobs under the glass blur were too heavy to repaint */
+#aurora i{display:none}
+#aurora::before{content:"";position:absolute;inset:0;opacity:var(--au-op);transition:opacity 2s;background:radial-gradient(circle 26vmax at 9vmax 7vmax,var(--au1),transparent),radial-gradient(circle 26vmax at calc(100% - 5vmax) 33vmax,var(--au2),transparent),radial-gradient(circle 26vmax at 3vmax calc(100% - 9vmax),var(--au3),transparent),radial-gradient(circle 26vmax at calc(100% - 9vmax) calc(100% + 1vmax),color-mix(in srgb,var(--au4) 75%,transparent),transparent)}
 @keyframes auA{to{transform:translate(9vmax,7vmax) scale(1.12)}}
 @keyframes auB{to{transform:translate(-8vmax,9vmax) scale(.92)}}
 @keyframes auC{to{transform:translate(10vmax,-8vmax) scale(1.08)}}

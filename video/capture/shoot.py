@@ -65,7 +65,7 @@ def backup():
                       {'id': 'd2', 'name': 'Ladina — eesti', 'newPerDay': 20, 'mode': 'hideAll', 'kind': 'text', 'folderId': 'f1', 'createdAt': now - 9 * DAY}],
             'plates': [{'id': 'p1', 'deckId': 'd1', 'w': 1400, 'h': 1000, 'createdAt': now - 10 * DAY, 'image': img}],
             'cards': cards, 'stats': {'d1': {'days': days}},
-            'exams': [{'id': 'e1', 'title': 'Kolju kollokvium', 'date': exam, 'folderIds': ['f1'], 'deckIds': [], 'createdAt': now - DAY}]}
+            'exams': [{'id': 'e1', 'title': 'Kolju kontrolltöö', 'date': exam, 'folderIds': ['f1'], 'deckIds': [], 'createdAt': now - DAY}]}
 
 
 AI = {

@@ -4,6 +4,7 @@ import {Background, C, Caption, Chip, Device, Eyebrow, I, Icon, SANS, SERIF, Sce
 import {Bubble, Kostik} from './Kostik';
 
 const OVERLAP = 10;
+const TAGLINE = ['Õpi', 'kõike,', 'mida', 'saab', {t: 'pildistada', accent: true}];
 export const SCENES: [React.FC<{dur: number}>, number][] = [];
 const add = (c: React.FC<{dur: number}>, d: number) => SCENES.push([c, d]);
 export const promoLength = () => SCENES.reduce((s, [, d]) => s + d, 0) - OVERLAP * (SCENES.length - 1);
@@ -41,8 +42,8 @@ add(({dur}) => {
       <Background intensity={lerp(f, 0, 40, 0.3, 1)} />
       <TermStorm fadeAt={52} />
       <AbsoluteFill style={{background: 'radial-gradient(ellipse 60% 22% at 50% 46%, rgba(7,6,15,0.92), rgba(7,6,15,0.5) 60%, transparent)'}} />
-      <Caption at={6} top={760} size={104} out={50} words={['Sadu', {t: '\n'}, {t: 'ladina', accent: true}, {t: 'termineid…', accent: true}]} />
-      <Caption at={58} top={700} size={112} words={['Kollokvium', {t: '\n'}, 'nädala', {t: 'pärast?', accent: true}]} />
+      <Caption at={6} top={760} size={104} out={50} words={['Sadu', {t: 'termineid…', accent: true}]} />
+      <Caption at={58} top={700} size={112} words={['Kontrolltöö', {t: '\n'}, 'nädala', {t: 'pärast?', accent: true}]} />
       <div style={{position: 'absolute', left: 540 - 130, top: 1920 - 300 * kk, transform: `rotate(${(1 - kk) * 20}deg)`}}><Kostik size={260} mood="oops" look={[0, -3]} /></div>
     </Scene>
   );
@@ -64,19 +65,18 @@ const Logo: React.FC<{at: number; y: number; size?: number}> = ({at, y, size = 1
 add(({dur}) => {
   const f = useCurrentFrame();
   const up = useSpring(0, {damping: 11, stiffness: 110});
-  const move = lerp(f, 66, 92, 0, 1, easeInOut);
+  const move = lerp(f, 34, 60, 0, 1, easeInOut);
   const size = 380 - 120 * move;
   const y = 980 - 340 * up * (1 - move) - 600 * up * move + 340 * (1 - up);
   return (
     <Scene dur={dur}>
       <Background />
-      <div style={{position: 'absolute', left: 540 - size / 2 - 120 * move, top: y - size / 2}}><Kostik size={size} mood={f < 40 ? 'hi' : 'joy'} look={[lerp(f, 10, 30, -4, 3), 0]} /></div>
-      <Bubble at={18} x={260 + 150 * move} y={1040 - 640 * move} width={600} size={50} text="Tere! Mina olen Kostik." bold={['Kostik']} tail={move > 0.5 ? 'left' : 'bottom'} out={64} />
-      <Logo at={84} y={880} />
-      <Caption at={100} top={1090} size={52} weight={500} color={C.ink2} words={['anatoomia', 'piltide', 'järgi']} />
+      <div style={{position: 'absolute', left: 540 - size / 2, top: y - size / 2}}><Kostik size={size} mood={f < 26 ? 'hi' : 'joy'} look={[lerp(f, 6, 22, -4, 3), 0]} tilt={Math.sin(f / 4) * 6 * lerp(f, 8, 30, 1, 0)} /></div>
+      <Logo at={50} y={880} />
+      <Caption at={66} top={1090} size={52} weight={500} color={C.ink2} words={TAGLINE} />
     </Scene>
   );
-}, 150);
+}, 125);
 
 /* ============ 3. photo → cards: automatic frames ============ */
 add(({dur}) => {
@@ -101,13 +101,13 @@ add(({dur}) => {
 }, 300);
 
 /* ============ 4. studying: reveal, the ring of grades, four modes ============ */
-const MiniDevice: React.FC<{src: string; at: number; x: number; ry: number; label: string; tone: string; rz?: number}> = ({src, at, x, ry, label, tone, rz = 0}) => {
+const MiniDevice: React.FC<{src: string; at: number; x: number; ry: number; label: string; tone: string; rz?: number; y?: number}> = ({src, at, x, ry, label, tone, rz = 0, y = 1110}) => {
   const s = useSpring(at, {damping: 15, stiffness: 90});
   const f = useCurrentFrame();
   return (
     <>
-      <Device width={320} x={540 + (x - 540) * s} y={1120 + (1 - s) * 200 + Math.sin(f / 25 + x) * 8} ry={ry * s} rz={rz * s} scale={0.6 + 0.4 * s} opacity={Math.min(1, s * 1.5)} glow={0.6} screens={[{src}]} />
-      <Chip at={at + 14} x={x} y={1555} text={label} size={32} tone={tone} />
+      <Device width={238} x={540 + (x - 540) * s} y={y + (1 - s) * 200 + Math.sin(f / 25 + x) * 8} ry={ry * s} rz={rz * s} scale={0.6 + 0.4 * s} opacity={Math.min(1, s * 1.5)} glow={0.55} screens={[{src}]} />
+      <Chip at={at + 14} x={x} y={1450} text={label} size={28} tone={tone} />
     </>
   );
 };
@@ -130,9 +130,10 @@ add(({dur}) => {
       {f > 100 && f < 150 ? <Chip at={112} x={540} y={1790} out={140} text="→ Hea   ← Uuesti   ↑ Lihtne   ↓ Raske" size={30} tone={C.green} /> : null}
       {fan > 0 ? (
         <>
-          <MiniDevice src="choice_q" at={156} x={215} ry={22} rz={-3} label="Valik" tone={C.blue} />
-          <MiniDevice src="find_q" at={170} x={865} ry={-22} rz={3} label="Leia pildilt" tone={C.orange} />
-          <MiniDevice src="type_a" at={163} x={540} ry={0} label="Kirjuta" tone={C.pink} />
+          <MiniDevice src="study_q" at={152} x={150} ry={22} rz={-3} y={1130} label="Peida kõik" tone={C.violet} />
+          <MiniDevice src="choice_q" at={158} x={410} ry={8} rz={-1} label="Valik" tone={C.blue} />
+          <MiniDevice src="type_a" at={164} x={670} ry={-8} rz={1} label="Kirjuta" tone={C.pink} />
+          <MiniDevice src="find_q" at={170} x={930} ry={-22} rz={3} y={1130} label="Leia pildilt" tone={C.orange} />
         </>
       ) : null}
       <Chip at={214} x={540} y={1760} out={dur - 18} text="Kordused planeeruvad ise · FSRS" icon={<Icon d={I.brain} size={36} />} size={33} />
@@ -188,7 +189,7 @@ const Push: React.FC<{at: number; y: number}> = ({at, y}) => {
       </div>
       <div style={{flex: 1, fontFamily: SANS, color: C.ink}}>
         <div style={{display: 'flex', justifyContent: 'space-between', fontSize: 28, color: C.ink2, fontWeight: 500, letterSpacing: 1}}><span>CORPUS</span><span>nüüd</span></div>
-        <div style={{fontSize: 38, fontWeight: 700, marginTop: 4, letterSpacing: -0.5}}>Kolju kollokvium</div>
+        <div style={{fontSize: 38, fontWeight: 700, marginTop: 4, letterSpacing: -0.5}}>Kolju kontrolltöö</div>
         <div style={{fontSize: 34, fontWeight: 400, color: '#DCD7F2', marginTop: 2}}>3 päeva pärast. Uusi kaarte jäänud: 4.</div>
       </div>
     </div>
@@ -332,7 +333,7 @@ add(({dur}) => {
       <div style={{position: 'absolute', left: 150, top: 1100 - 520 * up}}><Kostik size={320} mood="cap" /></div>
       <Bubble at={26} x={520} y={700} width={440} size={56} tail="left" text="Õpime koos!" />
       <Logo at={40} y={1060} size={170} />
-      <Caption at={58} top={1290} size={54} weight={500} color={C.ink2} words={['anatoomia', 'piltide', 'järgi']} />
+      <Caption at={58} top={1290} size={54} weight={500} color={C.ink2} words={TAGLINE} />
       <AbsoluteFill style={{background: '#000', opacity: end}} />
     </Scene>
   );

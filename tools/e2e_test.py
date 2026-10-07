@@ -293,6 +293,35 @@ async def main():
             ph = await photo_check(pg)
             check('after reload: photo still loads', ph['status'] == 200 and ph['readable'], json.dumps(ph))
 
+            # a folder can be switched off: its decks leave «today» and the shared session, and it is remembered
+            fid0 = await pg.evaluate('S.folders[0].id')
+            n_on = await pg.evaluate('(()=>{const c=globalCounts();return c.new+c.learn+c.review;})()')
+            await pg.evaluate(f"go({{name:'folder',folderId:'{fid0}'}})")
+            await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="off"]')
+            st = await state_when(lambda st: any(d['coll'] == 'folders' and d['data'].get('off') for d in st['docs']))
+            n_off = await pg.evaluate('(()=>{const c=globalCounts();return c.new+c.learn+c.review;})()')
+            check('switched-off folder: saved, its cards leave «today»', any(d['coll'] == 'folders' and d['data'].get('off') for d in st['docs']) and n_on > 0 and n_off == 0, f'{n_on} -> {n_off}')
+            check('switched-off folder: a banner offers to switch it back on', await pg.is_visible('[data-act=folderOn]'))
+            await pg.click('[data-act=folderOn]')
+            check('folder switched back on', (await pg.evaluate('(()=>{const c=globalCounts();return c.new+c.learn+c.review;})()')) == n_on and not await pg.evaluate('!!S.folders[0].off'))
+
+            # grading: the drag ring goes with touch gestures; with gestures off the plain buttons are back
+            await pg.evaluate("go({name:'home'})")
+            await pg.evaluate('startGlobalStudy()')
+            await pg.wait_for_selector('#panel')
+            ring = await pg.evaluate("!!document.querySelector('#panel .ring')")
+            await pg.evaluate("META.swipe=false;updStudy()")
+            plain = await pg.evaluate("!document.querySelector('#panel .ring')&&!!document.querySelector('#panel .btn[data-act=reveal]')")
+            check('gestures on: grade ring; off: plain buttons', ring and plain)
+            await pg.evaluate("META.swipe=true;go({name:'home'})")
+
+            # strict mode: no Kostik and no fact of the day
+            await pg.evaluate("META.calm=true;applyLook();go({name:'home'})")
+            strict = await pg.evaluate("[document.querySelectorAll('#app .kk').length,!!document.querySelector('#app .svfact'),document.documentElement.classList.contains('calm')]")
+            await pg.evaluate("META.calm=false;applyLook();go({name:'home'})")
+            check('strict mode hides Kostik and the fact of the day', strict == [0, False, True], json.dumps(strict))
+
             # share the folder → a file with the photo inside
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")

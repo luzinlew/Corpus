@@ -520,6 +520,102 @@ async def main():
             await pg.evaluate("go({name:'settings'})")
             await pg.wait_for_timeout(800)
             check('a friend does not see site statistics', await pg.evaluate("!document.querySelector('#siteStats')"))
+            # ---------- introduction: a new photo is shown 6 labels at a time before they are learned ----------
+            ch = await pg.evaluate("[0,1,2,6,7,13].map(n=>introChunks(Array.from({length:n},(_,i)=>i),INTRO_CHUNK).map(g=>g.length))")
+            check('intro: chunks of 6 for 0, 1, 2, 6, 7, 13 labels', ch == [[], [1], [2], [6], [6, 1], [6, 6, 1]], json.dumps(ch))
+            plans = await pg.evaluate("""(()=>{const L=(n,old)=>Array.from({length:n},(_,i)=>({id:'x'+i,createdAt:100-i,type:old.indexOf(i)>=0?'review':'new'}));
+              const f=p=>p&&{k:p.k,fresh:p.fresh,n:p.ids.length,first:p.ids[0]};
+              return [f(introPlan(L(2,[]))),f(introPlan(L(13,[]))),f(introPlan(L(13,[12,11,10,9,8,7]))),f(introPlan(L(13,[0,7]))),f(introPlan(L(13,[12,11]))),f(introPlan(L(4,[0,1,2,3])))];})()""")
+            # createdAt runs backwards here, so the first label in order is x12
+            check('intro: which chunk is next and whether it is fresh', plans == [None, {'k': 0, 'fresh': True, 'n': 6, 'first': 'x12'}, {'k': 1, 'fresh': True, 'n': 6, 'first': 'x6'},
+                  None, {'k': 0, 'fresh': False, 'n': 6, 'first': 'x12'}, None], json.dumps(plans))
+            await pg.evaluate("""window.__introDeck=(n,name,old)=>{const p0=S.plates[0];const t0=Date.now();
+              const did=newId('decks');S.decks.push({id:did,name:name,newPerDay:100,mode:'hideAll',createdAt:t0});persist('decks',did);
+              const pid=newId('plates');S.plates.push({id:pid,deckId:did,assetId:p0.assetId,w:p0.w,h:p0.h,createdAt:t0});persist('plates',pid);
+              for(let i=n-1;i>=0;i--){const c=normCard({id:newId('terms'),deckId:did,plateId:pid,term:'pars '+(i+1),note:'osa '+(i+1),x:2+(i%4)*24,y:2+Math.floor(i/4)*20,w:18,h:5,type:'new',createdAt:t0+i});
+                if(old&&old.indexOf(i)>=0){c.type='review';c.reps=3;c.ivl=5;c.due=t0+5*86400000;}S.cards.push(c);persist('terms',c.id);}
+              return did;};
+              window.__srs=did=>JSON.stringify([cardsOfDeck(did).map(c=>Object.keys(c).sort().map(k=>k+'='+JSON.stringify(c[k])).join(',')),deckById(did).newToday||null,S.stats[did]||null]);
+              window.__ord=did=>cardsOfDeck(did).slice().sort((a,b)=>a.createdAt-b.createdAt).map(c=>c.id);""")
+            check('intro: switched on by default (old settings have no such key)', await pg.evaluate("META.intro===undefined && metaOn('intro')"))
+            did = await pg.evaluate("__introDeck(13,'Intro 13')")
+            before = await pg.evaluate(f"__srs('{did}')")
+            await pg.evaluate(f"go({{name:'home'}});startStudy('{did}')")
+            await pg.wait_for_selector('.full.study.intro #panel .intro-nav')
+            it = await pg.evaluate(f"(()=>{{const o=__ord('{did}');return {{ids:SS.intro.ids,want:o.slice(0,6),k:SS.intro.k,n:SS.intro.n,shown:document.querySelector('#panel .latin').textContent,open:document.querySelectorAll('#masks .mk.open').length,masks:document.querySelectorAll('#masks .mk').length}};}})()")
+            check('intro: a new 13-label photo opens with the first 6 labels in their order', it['ids'] == it['want'] and it['k'] == 0 and it['n'] == 3, json.dumps(it))
+            check('intro: the current label is highlighted, its name shown', it['shown'] == 'pars 1' and it['open'] == 1 and it['masks'] == 13, json.dumps(it))
+            title = (await pg.inner_text('#introTitle')).replace('\n', ' ')
+            check('intro: translated, says which part and label', 'Tutvumine' in title and '1/3' in title and '1/6' in title, title)
+            await pg.click('[data-act=introNext]')
+            await pg.click('[data-act=introNext]')
+            await pg.keyboard.press('ArrowLeft')
+            step = await pg.evaluate("[SS.intro.i,document.querySelector('#panel .latin').textContent,document.querySelector('#panel .anote').textContent,document.querySelectorAll('#masks .mk.peek').length]")
+            check('intro: Next / Back (button and arrow key) move between labels; seen ones stay visible', step == [1, 'pars 2', 'osa 2', 1], json.dumps(step))
+            for _ in range(4):
+                await pg.keyboard.press('ArrowRight')
+            last = await pg.inner_text('[data-act=introNext]')
+            check('intro: the last label offers to learn them', 'Õpi need sildid' in last, last)
+            check('intro: looking through labels writes nothing to the schedule', await pg.evaluate(f"__srs('{did}')") == before and await pg.evaluate('SS.done===0'))
+            await pg.click('[data-act=introNext]')
+            await pg.wait_for_selector('.full.study:not(.intro) #panel')
+            st1 = await pg.evaluate(f"(()=>{{const c=cardById(SS.cur);return {{intro:!!SS.intro,inChunk:__ord('{did}').slice(0,6).indexOf(SS.cur)>=0,type:c.type,reps:c.reps}};}})()")
+            check('intro: learning of these 6 starts right away, as a brand-new card', st1 == {'intro': False, 'inChunk': True, 'type': 'new', 'reps': 0}, json.dumps(st1))
+            newSeen = []
+            for _ in range(40):
+                if await pg.evaluate('!!SS.intro || !SS.cur'):
+                    break
+                cur = await pg.evaluate("(()=>{const c=cardById(SS.cur);return c.type==='new'?c.id:null;})()")
+                if cur:
+                    newSeen.append(cur)
+                await pg.evaluate('doReveal();rate(3)')
+                await asyncio.sleep(0.3)
+            first6 = await pg.evaluate(f"__ord('{did}').slice(0,6)")
+            it2 = await pg.evaluate(f"SS.intro&&{{k:SS.intro.k,ids:SS.intro.ids,want:__ord('{did}').slice(6,12)}}")
+            check('intro: exactly those 6 new labels were learned, then the next part is introduced',
+                  sorted(newSeen) == sorted(first6) and it2 and it2['k'] == 1 and it2['ids'] == it2['want'], json.dumps([newSeen, it2]))
+            check('intro: learned labels went through the usual schedule', await pg.evaluate(f"__ord('{did}').slice(0,6).every(id=>{{const c=cardById(id);return c.type!=='new'&&c.reps===1;}}) && deckById('{did}').newToday.count===6"))
+            # leave in the middle of an introduction, come back: the same part starts from its first label
+            await pg.click('[data-act=introNext]')
+            await pg.click('[data-act=introNext]')
+            mid = await pg.evaluate(f"__srs('{did}')")
+            await pg.click('[data-act=studyExit]')
+            await pg.evaluate(f"startStudy('{did}')")
+            await pg.wait_for_selector('.full.study.intro')
+            back = await pg.evaluate('[SS.intro.k,SS.intro.i]')
+            check('intro: interrupted half-way → back at the start of the same part', back == [1, 0] and await pg.evaluate(f"__srs('{did}')") == mid, json.dumps(back))
+            await pg.click('[data-act=introSkip]')
+            await pg.wait_for_selector('.full.study:not(.intro) #panel')
+            sk = await pg.evaluate(f"(()=>{{const c=cardById(SS.cur);return {{inChunk:__ord('{did}').slice(6,12).indexOf(SS.cur)>=0,type:c.type,same:__srs('{did}')==={json.dumps(mid)}}};}})()")
+            check('intro: «Skip» goes straight to learning this part, nothing written', sk == {'inChunk': True, 'type': 'new', 'same': True}, json.dumps(sk))
+            skipText = await pg.evaluate("document.querySelector('#app .intro')===null")
+            check('intro: no introduction screen left behind', skipText)
+            await pg.click('[data-act=studyExit]')
+            # small photos, old progress, the switch
+            did2 = await pg.evaluate("__introDeck(2,'Intro 2')")
+            await pg.evaluate(f"startStudy('{did2}')")
+            await pg.wait_for_selector('.full.study #panel')
+            check('intro: a photo with 2 labels is learned straight away', await pg.evaluate('!SS.intro && !!SS.cur'))
+            await pg.click('[data-act=studyExit]')
+            did3 = await pg.evaluate("__introDeck(13,'Intro old',[2,9])")
+            await pg.evaluate(f"startStudy('{did3}')")
+            await pg.wait_for_selector('.full.study #panel')
+            check('intro: a photo with earlier progress is learned as before, no introduction', await pg.evaluate('!SS.intro && !!SS.cur'))
+            await pg.click('[data-act=studyExit]')
+            await pg.evaluate("go({name:'settings'})")
+            await pg.click('[data-act=tgl][data-k=intro]')
+            check('intro: switch in settings (translated), saved off', await pg.evaluate("META.intro===false") and 'Tutvumine enne õppimist' in await pg.inner_text('#app'))
+            await state_when(lambda st: any(d['coll'] == 'meta' and d['id'] == 'settings' and d['data'].get('intro') is False for d in st['docs']))
+            did4 = await pg.evaluate("__introDeck(8,'Intro off')")
+            await pg.evaluate(f"startStudy('{did4}')")
+            await pg.wait_for_selector('.full.study #panel')
+            check('intro: switched off → new photos are learned straight away', await pg.evaluate('!SS.intro && !!SS.cur'))
+            await pg.click('[data-act=studyExit]')
+            await pg.reload()
+            await app_ready(pg)
+            check('intro: the switch is remembered after a reload', await pg.evaluate("META.intro===false && !metaOn('intro')"))
+            await pg.evaluate("META.intro=true;persistMeta()")
+
             urllib.request.urlopen(API + '/__fn?off=0')
             errs_b = list(errs)
             await ctx.close()

@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render CorpusTour out/corpus-tour.mp4"
+    "shots": "python3 capture/shoot.py",
+    "render": "remotion render CorpusPromo out/corpus-promo-et.mp4"
   },
   "dependencies": {
     "@fontsource/onest": "^5.3.1",

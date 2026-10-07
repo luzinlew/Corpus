@@ -23,7 +23,7 @@
   var FN = configured ? CFG.url.replace(/\/+$/, '') + '/functions/v1/corpus-ai' : '';
 
   var W = { blobBase: BASE + '_blob/', email: '', uid: '', admin: false, signOut: signOut, siteStats: siteStats,
-    shares: null, shareCode: '', qrScript: BASE + 'vendor/qrcode.js' };
+    shares: null, shareCode: '', starter: String(CFG.starter || '').trim().toLowerCase(), qrScript: BASE + 'vendor/qrcode.js' };
   window.CORPUS_WEB = W;
 
   /* a share code arrives in the link (?s=...): the app imports that deck or folder once the person is signed in */

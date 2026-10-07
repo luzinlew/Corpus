@@ -631,6 +631,16 @@ async def main():
             await pg.click('.cw-go')
             await pg.wait_for_function('window.S && S.ready && !document.querySelector(".cw-auth")', timeout=20000)
             check('storage blocked: signed up with the code from the link', True)
+            # empty account: a ready-made folder offered on the home screen (CORPUS_CONFIG.starter = a share code)
+            check('no starter code configured → no offer', not await pg.evaluate("!!document.querySelector('[data-act=starter]')"))
+            await pg.evaluate(f"CORPUS_WEB.starter='{code}';go({{name:'library'}});go({{name:'home'}})")
+            btn = await pg.inner_text('#app [data-act=starter]')
+            check('empty home offers the ready-made folder (translated)', 'Võta valmis kaust' in btn and await pg.evaluate("!!document.querySelector('.page [data-act=starter]')"), btn)
+            await pg.click('#app [data-act=starter]')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function('S.folders.length===1 && S.plates.length===1 && S.cards.length===2', timeout=20000)
+            check('starter folder imported into the empty account; offer gone', not await pg.evaluate("go({name:'home'}),!!document.querySelector('[data-act=starter]')"))
             await ctx.close()
 
             # ---------- fallback: browser without service workers ----------
@@ -649,7 +659,7 @@ async def main():
             me = await pg.evaluate('CORPUS_WEB.uid')
             objs = state()['objects']
             check("friend's import made the friend's own photo copy; Lev's photos untouched",
-                  sum(o['owner'] == me for o in objs) == 2 and sum(o['owner'] != me for o in objs) == 10, json.dumps([o['owner'][:8] for o in objs]))
+                  sum(o['owner'] == me for o in objs) == 2 and sum(o['owner'] != me for o in objs) == 11, json.dumps([o['owner'][:8] for o in objs]))
             await ctx.close()
 
             check('no script errors or failed requests in the browser', not errs_a and not errs_b and not errs_c, '; '.join(errs_a + errs_b + errs_c)[:600])

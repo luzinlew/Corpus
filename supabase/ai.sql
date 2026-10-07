@@ -36,14 +36,23 @@ create table if not exists private.settings (key text primary key, value text no
 insert into private.settings (key, value) values ('ai_free_daily', '20')
 on conflict (key) do nothing;
 
+-- Cap for the whole site per day (all people together), so that many accounts cannot add up to an unlimited bill.
+-- Change it:  update private.settings set value = '500' where key = 'ai_global_daily';
+insert into private.settings (key, value) values ('ai_global_daily', '300')
+on conflict (key) do nothing;
+create table if not exists private.ai_global (
+  day date primary key,
+  used integer not null default 0
+);
+
 -- Takes p_units of today's allowance for the signed-in user, atomically. p_units = 0 just reports.
--- Never gives units back, so calling it directly can only use up one's own allowance.
+-- Never gives units back to the caller (only itself, when the site-wide cap refuses), so calling it directly can only use up one's own allowance.
 create or replace function public.corpus_ai_take(p_units integer default 1) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   uid uuid := auth.uid();
   d date := (now() at time zone 'Europe/Tallinn')::date;
-  lim integer; pl text; cur integer;
+  lim integer; pl text; cur integer; gl integer; gcur integer;
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '28000'; end if;
   if p_units is null or p_units < 0 or p_units > 20 then raise exception 'bad_units' using errcode = '22023'; end if;
@@ -59,6 +68,19 @@ begin
   if cur is null then
     select used into cur from public.ai_usage where user_id = uid and day = d;
     return jsonb_build_object('ok', false, 'plan', pl, 'limit', lim, 'used', cur);
+  end if;
+  if p_units > 0 then
+    -- the site-wide cap: if it is used up, this person's units are put back and the request is refused
+    select coalesce(nullif(value, '')::integer, 300) into gl from private.settings where key = 'ai_global_daily';
+    gl := coalesce(gl, 300);
+    insert into private.ai_global (day, used) values (d, 0) on conflict (day) do nothing;
+    update private.ai_global set used = used + p_units
+     where day = d and used + p_units <= gl
+    returning used into gcur;
+    if gcur is null then
+      update public.ai_usage set used = used - p_units where user_id = uid and day = d returning used into cur;
+      return jsonb_build_object('ok', false, 'plan', pl, 'limit', lim, 'used', cur, 'global', true);
+    end if;
   end if;
   return jsonb_build_object('ok', true, 'plan', pl, 'limit', lim, 'used', cur);
 end $$;

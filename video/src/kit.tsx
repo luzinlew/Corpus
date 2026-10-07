@@ -252,3 +252,36 @@ export const I = {
 };
 
 export const Shot: React.FC<{src: string; style?: React.CSSProperties}> = ({src, style}) => <Img src={staticFile('shots/' + src + '.png')} style={style} />;
+
+/* ---------- tablet and laptop around a wide screenshot ---------- */
+export const Tablet: React.FC<{src: string | ScreenLayer[]; width: number; x: number; y: number; ry?: number; rx?: number; rz?: number; scale?: number; opacity?: number; aspect?: number}> = ({src, width, x, y, ry = 0, rx = 0, rz = 0, scale = 1, opacity = 1, aspect = 820 / 1180}) => {
+  const f = useCurrentFrame();
+  const h = width * aspect, b = width * 0.028;
+  const layers = typeof src === 'string' ? [{src}] : src;
+  return (
+    <div style={{position: 'absolute', left: x - width / 2 - b, top: y - h / 2 - b, width: width + 2 * b, height: h + 2 * b, perspective: 2400, opacity}}>
+      <div style={{position: 'absolute', inset: 0, transform: `rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${scale})`, borderRadius: b * 2.2, background: 'linear-gradient(145deg,#2c2a38,#121118)', boxShadow: `0 40px 90px rgba(0,0,0,0.6), 0 0 0 1.5px rgba(255,255,255,0.14), 0 0 80px rgba(110,92,240,0.25)`}}>
+        <div style={{position: 'absolute', left: b, top: b, width, height: h, borderRadius: b * 1.1, overflow: 'hidden', background: '#120f24'}}>
+          {layers.map((l, i) => {
+            const p = i === 0 ? 1 : lerp(f, l.from ?? 0, (l.from ?? 0) + (l.fade ?? 10), 0, 1);
+            return p > 0 ? <Img key={i} src={staticFile('shots/' + l.src + '.png')} style={{position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: p}} /> : null;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const Laptop: React.FC<{src: string; width: number; x: number; y: number; rx?: number; scale?: number; opacity?: number}> = ({src, width, x, y, rx = 0, scale = 1, opacity = 1}) => {
+  const h = width * (900 / 1440), b = width * 0.022;
+  return (
+    <div style={{position: 'absolute', left: x - width / 2 - b, top: y - h / 2 - b, width: width + 2 * b, height: h + 2 * b + width * 0.05, perspective: 2400, opacity, transform: `scale(${scale})`}}>
+      <div style={{position: 'absolute', left: 0, top: 0, width: width + 2 * b, height: h + 2 * b, transform: `rotateX(${rx}deg)`, transformOrigin: '50% 100%', borderRadius: `${b * 1.6}px ${b * 1.6}px ${b * 0.4}px ${b * 0.4}px`, background: '#0d0c12', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.14), 0 0 90px rgba(110,92,240,0.22)'}}>
+        <Img src={staticFile('shots/' + src + '.png')} style={{position: 'absolute', left: b, top: b, width, height: h, borderRadius: b * 0.5}} />
+      </div>
+      <div style={{position: 'absolute', left: -width * 0.07, top: h + 2 * b - 2, width: width * 1.14 + 2 * b, height: width * 0.03, borderRadius: `0 0 ${width * 0.03}px ${width * 0.03}px`, background: 'linear-gradient(#cfcbe0,#77738c)', boxShadow: '0 30px 60px rgba(0,0,0,0.6)'}}>
+        <div style={{position: 'absolute', left: '50%', top: 0, width: width * 0.16, height: width * 0.012, marginLeft: -width * 0.08, borderRadius: `0 0 ${width * 0.01}px ${width * 0.01}px`, background: '#9894ac'}} />
+      </div>
+    </div>
+  );
+};

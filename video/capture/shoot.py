@@ -277,6 +277,25 @@ async def themes(app):
 
 
 @scene
+async def devices(app):
+    pg = app.pg
+    await pg.set_viewport_size({'width': 1180, 'height': 820})
+    await study_card(app, 'hideAll')
+    await pg.wait_for_timeout(600)
+    await app.shot('ipad_study', 0.8)
+    await pg.click('[data-act=reveal]')
+    await app.shot('ipad_study_a', 0.9)
+    await pg.set_viewport_size({'width': 1440, 'height': 900})
+    await app.js("go({name:'home'})")
+    await pg.wait_for_timeout(3500)
+    await app.shot('laptop_home', 0.8)
+    await app.js("go({name:'calendar'})")
+    await app.shot('laptop_calendar', 1.0)
+    await pg.set_viewport_size({'width': W, 'height': H})
+    await app.js("go({name:'home'})")
+
+
+@scene
 async def settings(app):
     await app.js("META.speakOn=true;go({name:'settings'})")
     await app.shot('settings', 1.0)

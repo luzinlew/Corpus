@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, Series, random, useCurrentFrame} from 'remotion';
-import {Background, C, Caption, Chip, Device, Eyebrow, I, Icon, SANS, SERIF, Scene, Swipe, Tap, clamp, ease, easeInOut, lerp, useSpring} from './kit';
+import {Background, C, Caption, Chip, Device, Eyebrow, Laptop, Tablet, I, Icon, SANS, SERIF, Scene, Swipe, Tap, clamp, ease, easeInOut, lerp, useSpring} from './kit';
 import {Bubble, Kostik} from './Kostik';
 
 const OVERLAP = 10;
@@ -36,18 +36,18 @@ const TermStorm: React.FC<{fadeAt?: number}> = ({fadeAt = 999}) => {
 
 add(({dur}) => {
   const f = useCurrentFrame();
-  const kk = useSpring(78, {damping: 12, stiffness: 120});
+  const kk = useSpring(52, {damping: 12, stiffness: 140});
   return (
     <Scene dur={dur} inFrames={6}>
       <Background intensity={lerp(f, 0, 40, 0.3, 1)} />
-      <TermStorm fadeAt={52} />
+      <TermStorm fadeAt={32} />
       <AbsoluteFill style={{background: 'radial-gradient(ellipse 60% 22% at 50% 46%, rgba(7,6,15,0.92), rgba(7,6,15,0.5) 60%, transparent)'}} />
-      <Caption at={6} top={760} size={104} out={50} words={['Sadu', {t: 'termineid…', accent: true}]} />
-      <Caption at={58} top={700} size={112} words={['Kontrolltöö', {t: '\n'}, 'nädala', {t: 'pärast?', accent: true}]} />
+      <Caption at={2} top={760} size={104} out={32} words={['Sadu', {t: 'termineid…', accent: true}]} />
+      <Caption at={36} top={700} size={112} stagger={2} words={['Kontrolltöö', {t: '\n'}, 'nädala', {t: 'pärast?', accent: true}]} />
       <div style={{position: 'absolute', left: 540 - 130, top: 1920 - 300 * kk, transform: `rotate(${(1 - kk) * 20}deg)`}}><Kostik size={260} mood="oops" look={[0, -3]} /></div>
     </Scene>
   );
-}, 130);
+}, 85);
 
 /* ============ 2. Kostik says hi, the logo lands ============ */
 const Logo: React.FC<{at: number; y: number; size?: number}> = ({at, y, size = 150}) => {
@@ -65,18 +65,18 @@ const Logo: React.FC<{at: number; y: number; size?: number}> = ({at, y, size = 1
 add(({dur}) => {
   const f = useCurrentFrame();
   const up = useSpring(0, {damping: 11, stiffness: 110});
-  const move = lerp(f, 34, 60, 0, 1, easeInOut);
+  const move = lerp(f, 16, 38, 0, 1, easeInOut);
   const size = 380 - 120 * move;
   const y = 980 - 340 * up * (1 - move) - 600 * up * move + 340 * (1 - up);
   return (
     <Scene dur={dur}>
       <Background />
-      <div style={{position: 'absolute', left: 540 - size / 2, top: y - size / 2}}><Kostik size={size} mood={f < 26 ? 'hi' : 'joy'} look={[lerp(f, 6, 22, -4, 3), 0]} tilt={Math.sin(f / 4) * 6 * lerp(f, 8, 30, 1, 0)} /></div>
-      <Logo at={50} y={880} />
-      <Caption at={66} top={1090} size={52} weight={500} color={C.ink2} words={TAGLINE} />
+      <div style={{position: 'absolute', left: 540 - size / 2, top: y - size / 2}}><Kostik size={size} mood={f < 14 ? 'hi' : 'joy'} look={[lerp(f, 2, 14, -4, 3), 0]} tilt={Math.sin(f / 3) * 6 * lerp(f, 4, 20, 1, 0)} /></div>
+      <Logo at={26} y={880} />
+      <Caption at={36} top={1090} size={52} weight={500} color={C.ink2} words={TAGLINE} />
     </Scene>
   );
-}, 125);
+}, 78);
 
 /* ============ 3. photo → cards: automatic frames ============ */
 add(({dur}) => {
@@ -132,7 +132,7 @@ add(({dur}) => {
         <>
           <MiniDevice src="study_q" at={152} x={150} ry={22} rz={-3} y={1130} label="Peida kõik" tone={C.violet} />
           <MiniDevice src="choice_q" at={158} x={410} ry={8} rz={-1} label="Valik" tone={C.blue} />
-          <MiniDevice src="type_a" at={164} x={670} ry={-8} rz={1} label="Kirjuta" tone={C.pink} />
+          <MiniDevice src="type_q" at={164} x={670} ry={-8} rz={1} label="Kirjuta" tone={C.pink} />
           <MiniDevice src="find_q" at={170} x={930} ry={-22} rz={3} y={1130} label="Leia pildilt" tone={C.orange} />
         </>
       ) : null}
@@ -210,6 +210,41 @@ add(({dur}) => {
     </Scene>
   );
 }, 180);
+
+/* ============ 6b. on every device, reminders included ============ */
+const MiniPush: React.FC<{at: number; x: number; y: number; w: number}> = ({at, x, y, w}) => {
+  const s = useSpring(at, {damping: 14, stiffness: 140});
+  return (
+    <div style={{position: 'absolute', left: x - w / 2, top: y - 90 * (1 - s), width: w, opacity: Math.min(1, s * 1.6), padding: '14px 16px', borderRadius: 22, display: 'flex', gap: 12, alignItems: 'center',
+      background: 'linear-gradient(135deg, rgba(70,62,120,0.92), rgba(40,34,78,0.92))', border: '1.5px solid rgba(255,255,255,0.2)', boxShadow: '0 20px 40px rgba(0,0,0,0.5), 0 0 30px rgba(110,92,240,0.4)', fontFamily: SANS, color: C.ink}}>
+      <div style={{flex: 'none', width: 46, height: 46, borderRadius: 12, background: '#14112A', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><div style={{width: 24, height: 16, borderRadius: 5, background: C.ink, boxShadow: `inset -9px 0 0 ${C.violet}`}} /></div>
+      <div style={{minWidth: 0}}>
+        <div style={{fontSize: 21, fontWeight: 700}}>Aeg korrata</div>
+        <div style={{fontSize: 18, color: '#DCD7F2', whiteSpace: 'nowrap'}}>Täna: 5 kordamist ja 2 uut.</div>
+      </div>
+    </div>
+  );
+};
+
+add(({dur}) => {
+  const f = useCurrentFrame();
+  const lap = useSpring(0, {damping: 18, stiffness: 80});
+  const tab = useSpring(10, {damping: 16, stiffness: 90});
+  const ph = useSpring(20, {damping: 15, stiffness: 100});
+  return (
+    <Scene dur={dur}>
+      <Background />
+      <Eyebrow text="Igal seadmel" at={2} top={150} out={dur - 22} />
+      <Caption at={6} top={232} size={86} words={['Telefon', '·', {t: 'iPad', accent: true}, '·', 'arvuti']} />
+      <Laptop src="laptop_home" width={900} x={540} y={760 + (1 - lap) * 60} rx={6} scale={0.85 + 0.15 * lap} opacity={Math.min(1, lap * 1.5)} />
+      <Tablet src={[{src: 'ipad_study'}, {src: 'ipad_study_a', from: 56, fade: 8}]} width={640} x={400} y={1300 + (1 - tab) * 200 + Math.sin(f / 40) * 6} ry={16 * tab} rz={-2} opacity={Math.min(1, tab * 1.5)} />
+      <Device width={270} x={880} y={1380 + (1 - ph) * 240 + Math.sin(f / 33) * 6} ry={-16 * ph} rz={3} glow={0.6} opacity={Math.min(1, ph * 1.5)} screens={[{src: 'home'}]}>
+        <MiniPush at={58} x={195 * 270 / 390} y={20} w={250} />
+      </Device>
+      <Chip at={64} x={540} y={1790} out={dur - 18} text="Meeldetuletused ka suletud rakendusega" size={30} icon={<Icon d={I.bell} size={34} />} tone={C.peach} />
+    </Scene>
+  );
+}, 140);
 
 /* ============ 7. «Did you know?» — the small things ============ */
 const TipCard: React.FC<{at: number; len: number; children: React.ReactNode; title: string; icon: string | string[]; tone: string}> = ({at, len, children, title, icon, tone}) => {

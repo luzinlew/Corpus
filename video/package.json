@@ -1,0 +1,16 @@
+{
+  "name": "corpus-video",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render CorpusTour out/corpus-tour.mp4"
+  },
+  "dependencies": {
+    "@fontsource/onest": "^5.3.1",
+    "@fontsource/source-serif-4": "^5.3.0",
+    "@remotion/cli": "^4.0.534",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.534"
+  }
+}

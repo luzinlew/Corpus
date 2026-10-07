@@ -368,7 +368,7 @@ add(({dur}) => {
       <div style={{position: 'absolute', left: 150, top: 1100 - 520 * up}}><Kostik size={320} mood="cap" /></div>
       <Bubble at={26} x={520} y={700} width={440} size={56} tail="left" text="Õpime koos!" />
       <Logo at={40} y={1060} size={170} />
-      <Caption at={58} top={1290} size={54} weight={500} color={C.ink2} words={TAGLINE} />
+      <Caption at={58} top={1290} size={54} weight={500} color={C.ink2} words={['Õpi', 'kõike,', 'mida', 'saab', {t: 'pildistada.', accent: true}]} />
       <AbsoluteFill style={{background: '#000', opacity: end}} />
     </Scene>
   );

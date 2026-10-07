@@ -216,6 +216,7 @@ http.createServer(async (req, res) => {
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: AI_LIMIT, used: used + n }); return;
   }
 
+  if (p === '/rest/v1/rpc/corpus_week_award' && req.method === 'POST') { send(res, 200, { week: null }); return; }
   /* ---------- rpc: corpus_ping / corpus_site_stats (as in supabase/stats.sql) ---------- */
   const isAdmin = (uid) => { const u = byId(uid); return !!u && ADMINS.includes(u.email.toLowerCase()); };
   const dayOf = (t) => new Date(t).toISOString().slice(0, 10);

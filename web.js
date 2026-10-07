@@ -103,6 +103,19 @@
   function ping() {
     pingDay = today();
     sb.rpc('corpus_ping').then(function (r) { if (r && r.data && r.data.admin) W.admin = true; }, function () {});
+    weekAward();
+  }
+  /* weekly reward (supabase/reward.sql): the winner of last week is told once */
+  function weekAward() {
+    sb.rpc('corpus_week_award').then(function (r) {
+      var a = r && r.data;
+      if (!a || !a.week || !a.me) return;
+      var seen = ''; try { seen = localStorage.getItem('corpus.award') || ''; } catch (e) {}
+      if (seen === String(a.week)) return;
+      try { localStorage.setItem('corpus.award', String(a.week)); } catch (e) {}
+      W.award = a;
+      if (W.onAward) W.onAward(a);
+    }, function () {});
   }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && W.uid && pingDay && pingDay !== today()) ping();   // the app was left open overnight

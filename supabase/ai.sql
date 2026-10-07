@@ -45,14 +45,28 @@ create table if not exists private.ai_global (
   used integer not null default 0
 );
 
+-- Bonus requests won as the weekly reward (supabase/reward.sql). Spent only after the day's own allowance is used up.
+-- Users can read their own balance; only SQL and the reward function change it.
+create table if not exists public.ai_bonus (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  balance integer not null default 0 check (balance >= 0)
+);
+alter table public.ai_bonus enable row level security;
+drop policy if exists "read own bonus" on public.ai_bonus;
+create policy "read own bonus" on public.ai_bonus for select to authenticated
+  using (user_id = (select auth.uid()));
+grant select on public.ai_bonus to authenticated;
+alter table public.ai_usage add column if not exists bonus_used integer not null default 0;
+
 -- Takes p_units of today's allowance for the signed-in user, atomically. p_units = 0 just reports.
+-- The day's own allowance goes first, then the bonus balance. 'limit' = everything that can be used today (allowance + bonus).
 -- Never gives units back to the caller (only itself, when the site-wide cap refuses), so calling it directly can only use up one's own allowance.
 create or replace function public.corpus_ai_take(p_units integer default 1) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   uid uuid := auth.uid();
   d date := (now() at time zone 'Europe/Tallinn')::date;
-  lim integer; pl text; cur integer; gl integer; gcur integer;
+  lim integer; pl text; cu integer; bu integer; bal integer; room integer; fb integer; gl integer; gcur integer;
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '28000'; end if;
   if p_units is null or p_units < 0 or p_units > 20 then raise exception 'bad_units' using errcode = '22023'; end if;
@@ -62,15 +76,16 @@ begin
     lim := coalesce(lim, 20); pl := 'free';
   end if;
   insert into public.ai_usage (user_id, day, used) values (uid, d, 0) on conflict (user_id, day) do nothing;
-  update public.ai_usage set used = used + p_units
-   where user_id = uid and day = d and used + p_units <= lim
-  returning used into cur;
-  if cur is null then
-    select used into cur from public.ai_usage where user_id = uid and day = d;
-    return jsonb_build_object('ok', false, 'plan', pl, 'limit', lim, 'used', cur);
+  insert into public.ai_bonus (user_id, balance) values (uid, 0) on conflict (user_id) do nothing;
+  select used, bonus_used into cu, bu from public.ai_usage where user_id = uid and day = d for update;
+  select balance into bal from public.ai_bonus where user_id = uid for update;
+  room := greatest(lim - (cu - bu), 0);          -- what is left of the day's own allowance
+  fb := greatest(p_units - room, 0);             -- the part that has to come from the bonus
+  if fb > bal then
+    return jsonb_build_object('ok', false, 'plan', pl, 'limit', lim + bu + bal, 'used', cu, 'bonus', bal);
   end if;
   if p_units > 0 then
-    -- the site-wide cap: if it is used up, this person's units are put back and the request is refused
+    -- the site-wide cap: if it is used up, nothing is taken and the request is refused
     select coalesce(nullif(value, '')::integer, 300) into gl from private.settings where key = 'ai_global_daily';
     gl := coalesce(gl, 300);
     insert into private.ai_global (day, used) values (d, 0) on conflict (day) do nothing;
@@ -78,11 +93,13 @@ begin
      where day = d and used + p_units <= gl
     returning used into gcur;
     if gcur is null then
-      update public.ai_usage set used = used - p_units where user_id = uid and day = d returning used into cur;
-      return jsonb_build_object('ok', false, 'plan', pl, 'limit', lim, 'used', cur, 'global', true);
+      return jsonb_build_object('ok', false, 'plan', pl, 'limit', lim + bu + bal, 'used', cu, 'bonus', bal, 'global', true);
     end if;
+    update public.ai_usage set used = cu + p_units, bonus_used = bu + fb where user_id = uid and day = d;
+    if fb > 0 then update public.ai_bonus set balance = bal - fb where user_id = uid; bal := bal - fb; end if;
+    cu := cu + p_units; bu := bu + fb;
   end if;
-  return jsonb_build_object('ok', true, 'plan', pl, 'limit', lim, 'used', cur);
+  return jsonb_build_object('ok', true, 'plan', pl, 'limit', lim + bu + bal, 'used', cu, 'bonus', bal);
 end $$;
 revoke execute on function public.corpus_ai_take(integer) from public, anon;
 grant execute on function public.corpus_ai_take(integer) to authenticated;

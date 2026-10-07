@@ -5964,6 +5964,8 @@ async function bootData(){
   if(S.db&&!S.loadErr)examMigrate();
   S.ready=true;NAV='enter-tab';view={name:'home'};render();
   {const W0=window.CORPUS_WEB;if(W0){W0.onOpenView=v=>{if(S.ready&&SCREENS[v]&&!layer.firstChild&&view.name!=='study'&&view.name!=='editor'){CAL.y=null;go({name:v});}};
+    const award=a=>toast(T3('Вы — самый активный и точный на прошлой неделе! +'+a.units+' запросов ИИ','You were the most active and accurate person last week! +'+a.units+' AI requests','Sa olid eelmisel nädalal kõige aktiivsem ja täpsem! +'+a.units+' TI päringut'),7000);
+    W0.onAward=award;if(W0.award){const a=W0.award;W0.award=null;setTimeout(()=>award(a),1500);}
     if(W0.startView&&SCREENS[W0.startView]&&!S.loadErr){const v=W0.startView;W0.clearStartView();CAL.y=null;go({name:v});}}}
   if(META.pushOn)pushSyncSoon(4000);
   if(!S.loadErr)setTimeout(()=>{if(!window.__TEST__||window.__NUDGE_TEST__)examNudge();},1200);

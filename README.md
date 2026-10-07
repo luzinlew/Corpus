@@ -16,6 +16,7 @@ Corpus — карточки по анатомии из фото атласа: р
 | `supabase/setup.sql` | Разовая настройка базы: таблица `docs` с RLS, бакет `plates`, проверка кода приглашения |
 | `supabase/stats.sql` | Статистика для админов: отметка «заходил сегодня» (`activity`), `corpus_site_stats` |
 | `supabase/ai.sql` | Тарифы и дневные лимиты ИИ: `ai_plans`, `ai_usage`, функция `corpus_ai_take` |
+| `supabase/reward.sql` | Награда недели: самому активному и точному +20 запросов ИИ (`corpus_week_award`, баланс в `ai_bonus`) |
 | `supabase/share.sql` | Обмен колодами по коду / QR: таблица `shares`, функции `corpus_share_put`, `corpus_share_open` |
 | `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
 | `supabase/push.sql`, `supabase/functions/corpus-push/` | Push-уведомления: ключи VAPID, расписание каждые 15 минут (pg_cron), рассылка |

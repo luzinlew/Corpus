@@ -8,7 +8,7 @@ b = next(i for i, l in enumerate(lines) if l.startswith('SCREENS.foreign='))
 e = next(i for i in range(b, len(lines)) if lines[i].endswith("'</section></div>'};"))
 assert a == b - 1
 lines[a:e + 1] = [
-    "const SITE_URL='https://luzinlew.github.io/Corpus/?i=p8wyzmtw';",
+    "const SITE_URL='https://corpusapp.ee/?i=p8wyzmtw';",
     "SCREENS.foreign={html:()=>'<div class=\"page\"><header class=\"hhead\"><div class=\"brand\"><span class=\"brand-mark\" aria-hidden=\"true\"><i></i><b></b></span>Corpus</div></header>'+",
     "  '<section class=\"overview\"><div class=\"h2\">Это Corpus другого человека</div>'+",
     "  '<p class=\"muted\" style=\"margin:6px 0 10px;line-height:1.55\">Здесь колоды и прогресс его владельца, поэтому учиться и импортировать файлы в этом окне нельзя.</p>'+",

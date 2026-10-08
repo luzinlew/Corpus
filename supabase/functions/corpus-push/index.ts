@@ -15,7 +15,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
 
-const SITE = Deno.env.get("CORPUS_SITE_URL") ?? "https://luzinlew.github.io/Corpus/";
+const SITE = Deno.env.get("CORPUS_SITE_URL") ?? "https://corpusapp.ee/";
 const EXAM_AT = 8 * 60;          // test reminders: 8:00 local time
 const WINDOW = 3 * 60;           // a run missed by the scheduler still sends within this many minutes
 const STALE = 30 * 86400000;     // no daily nudges for someone who hasn't opened Corpus in a month

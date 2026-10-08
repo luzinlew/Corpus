@@ -1,6 +1,6 @@
 # Corpus: как вносить изменения
 
-Corpus — приложение Льва для карточек по анатомии. Этот репозиторий — сайт https://luzinlew.github.io/Corpus/ (GitHub Pages), данные и аккаунты в Supabase. Подробности устройства в `README.md`.
+Corpus — приложение Льва для карточек по анатомии. Этот репозиторий — сайт https://corpusapp.ee/ (GitHub Pages, раньше https://luzinlew.github.io/Corpus/), данные и аккаунты в Supabase. Подробности устройства в `README.md`.
 
 ## Порядок работы
 1. Приложение — один файл `src/corpus.html`. Правки делаются там. `index.html` руками не трогать.

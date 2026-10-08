@@ -594,6 +594,22 @@ async def main():
             skipText = await pg.evaluate("document.querySelector('#app .intro')===null")
             check('intro: no introduction screen left behind', skipText)
             await pg.click('[data-act=studyExit]')
+            # introduction on request: the small button on the deck, even though the labels are no longer new
+            await pg.evaluate(f"go({{name:'deck',deckId:'{did}'}})")
+            await pg.wait_for_selector('[data-act=introAgain]')
+            before = await pg.evaluate(f"__srs('{did}')")
+            await pg.click('[data-act=introAgain]')
+            await pg.wait_for_selector('.full.study.intro #panel')
+            ir = await pg.evaluate("({n:SS.intro.ids.length,review:!!SS.intro.review,parts:SS.intro.n})")
+            check('intro on request: a button on the deck opens the first part', ir['review'] and ir['n'] == 6 and ir['parts'] == 3, json.dumps(ir))
+            for _ in range(6):
+                await pg.click('[data-act=introNext]')
+            await pg.wait_for_function('SS.intro && SS.intro.k===1')
+            for _ in range(7):
+                await pg.click('[data-act=introNext]')
+            await pg.wait_for_function('!SS.intro')
+            await pg.wait_for_selector('.tabs')
+            check('intro on request: ends back at the deck, nothing written', await pg.evaluate("view.name==='deck'") and await pg.evaluate(f"__srs('{did}')") == before)
             # small photos, old progress, the switch
             did2 = await pg.evaluate("__introDeck(2,'Intro 2')")
             await pg.evaluate(f"startStudy('{did2}')")

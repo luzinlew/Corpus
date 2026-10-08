@@ -119,7 +119,7 @@ update private.settings set value = 'новыйкод' where key = 'invite';
 -- открыть регистрацию всем, у кого есть адрес сайта
 update private.settings set value = '' where key = 'invite';
 
--- задать пользователю новый пароль (письма для сброса пароля не отправляются)
+-- задать пользователю новый пароль вручную (сам пользователь может сбросить его кнопкой «Забыли пароль?» на экране входа: Supabase шлёт письмо со ссылкой на сайт)
 update auth.users set encrypted_password = extensions.crypt('новый-пароль', extensions.gen_salt('bf'))
  where email = 'friend@example.com';
 

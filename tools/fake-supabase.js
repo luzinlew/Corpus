@@ -135,6 +135,14 @@ http.createServer(async (req, res) => {
     const id = uidOf(req); if (!id) return authErr(res, 401, 'bad_jwt', 'invalid JWT');
     send(res, 200, userObj(byId(id))); return;
   }
+  if (p === '/auth/v1/recover' && req.method === 'POST') { log.push({ recover: String(body.email || '').toLowerCase() }); send(res, 200, {}); return; }
+  if (p === '/auth/v1/user' && req.method === 'PUT') {
+    const id = uidOf(req); if (!id) return authErr(res, 401, 'bad_jwt', 'invalid JWT');
+    const usr = byId(id), pw = String(body.password || '');
+    if (pw.length < 6) return authErr(res, 422, 'weak_password', 'Password should be at least 6 characters.');
+    if (pw === usr.password) return authErr(res, 422, 'same_password', 'New password should be different from the old password.');
+    usr.password = pw; send(res, 200, userObj(usr)); return;
+  }
   if (p === '/auth/v1/logout') { const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, ''); access.delete(t); send(res, 204); return; }
 
   /* ---------- rest: public.docs (row-level security: owner = auth.uid()) ---------- */

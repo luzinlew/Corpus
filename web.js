@@ -70,9 +70,21 @@
   var swP = swControl();                      // installs in parallel with signing in
   var ready = (async function () {
     if (!configured) { await bodyReady(); notConfigured(); return null; }
-    var r = await sb.auth.getSession();
-    var session = r && r.data && r.data.session;
-    if (!session) session = await authScreen();
+    var rp = recoveryParams(), session = null, firstMsg = '';
+    if (rp) {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      var at = rp.get('access_token'), rt = rp.get('refresh_token');
+      if (at && rt) {
+        var sr = await sb.auth.setSession({ access_token: at, refresh_token: rt });
+        if (!sr.error && sr.data && sr.data.session) session = await recoveryScreen();
+      }
+      if (!session) firstMsg = 'Ссылка устарела или уже использована. Нажмите «Забыли пароль?» и запросите новую.';
+    }
+    if (!session) {
+      var r = await sb.auth.getSession();
+      session = r && r.data && r.data.session;
+    }
+    if (!session) session = await authScreen(firstMsg);
     var aiP = aiStatus();
     if (!(await swP)) W.blobBase = PUBLIC;    // no service worker (rare): load photos straight from Storage
     W.uid = session.user.id;
@@ -550,6 +562,7 @@
     var c = String((e && e.code) || ''), m = String((e && e.message) || ''), st = (e && e.status) | 0;
     if (c === 'invalid_credentials' || /invalid login credentials/i.test(m)) return 'Неверный email или пароль.';
     if (c === 'user_already_exists' || c === 'email_exists' || /already (been )?registered/i.test(m)) return 'Такой email уже зарегистрирован — войдите.';
+    if (c === 'same_password' || /different from the old/i.test(m)) return 'Новый пароль должен отличаться от старого.';
     if (c === 'weak_password' || /at least \d+ char/i.test(m)) return 'Пароль — минимум 6 символов.';
     if (c === 'email_not_confirmed' || /not confirmed/i.test(m)) return 'Вход требует подтверждения почты, а письма отсюда не отправляются. Попросите администратора выключить «Confirm email» в Supabase.';
     if (c === 'signup_disabled' || /signups not allowed/i.test(m)) return 'Регистрация сейчас закрыта.';
@@ -560,7 +573,45 @@
     return 'Не получилось войти. Попробуйте ещё раз.';
   }
 
-  async function authScreen() {
+  /* link from the password-reset e-mail: <site>/#access_token=…&type=recovery (or #error_code=otp_expired) */
+  function recoveryParams() {
+    var h = location.hash.replace(/^#/, '');
+    return /(^|&)(type=recovery|error_code=)/.test(h) ? new URLSearchParams(h) : null;
+  }
+  async function recoveryScreen() {
+    await bodyReady();
+    return new Promise(function (resolve) {
+      var d = document.createElement('div');
+      d.className = 'cw-auth';
+      d.innerHTML = '<div class="cw-card">' + BRAND + '<p class="cw-sub">Придумайте новый пароль для входа в Corpus.</p>' +
+        '<div class="cw-box"><form novalidate>' +
+        '<label class="cw-f">Новый пароль<input name="password" type="password" minlength="6" autocomplete="new-password" required></label>' +
+        '<div class="cw-err" role="alert"></div>' +
+        '<button class="btn primary big block cw-go" type="submit">Сохранить пароль</button></form></div>' + langRow() + '</div>';
+      var f = d.querySelector('form'), err = d.querySelector('.cw-err'), go = d.querySelector('.cw-go'), busy = false;
+      onLang(d);
+      f.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        if (busy) return;
+        var pw = f.password.value;
+        if (pw.length < 6) { err.textContent = 'Пароль — минимум 6 символов.'; f.password.focus(); return; }
+        busy = true; go.disabled = true; err.textContent = '';
+        try {
+          var r = await sb.auth.updateUser({ password: pw });
+          if (r.error) throw r.error;
+          var g = await sb.auth.getSession();
+          if (!g.data || !g.data.session) throw { message: 'no session' };
+          d.classList.add('out');
+          setTimeout(function () { d.remove(); }, 220);
+          resolve(g.data.session);
+        } catch (er) { err.textContent = authErrText(er); busy = false; go.disabled = false; }
+      });
+      document.body.appendChild(d);
+      setTimeout(function () { try { f.password.focus({ preventScroll: true }); } catch (e) {} }, 60);
+    });
+  }
+
+  async function authScreen(firstMsg) {
     await bodyReady();
     return new Promise(function (resolve) {
       var known = false;
@@ -577,10 +628,11 @@
         '<label class="cw-f">Пароль<input name="password" type="password" minlength="6" required></label>' +
         '<label class="cw-f cw-inv">Код приглашения<input name="invite" autocomplete="off" autocapitalize="off" spellcheck="false"></label>' +
         '<div class="cw-err" role="alert"></div>' +
-        '<button class="btn primary big block cw-go" type="submit"></button></form></div>' +
+        '<button class="btn primary big block cw-go" type="submit"></button>' +
+        '<button type="button" class="cw-forgot">Забыли пароль?</button></form></div>' +
         '<p class="cw-note"></p>' + langRow() + '</div>';
       var f = d.querySelector('form'), err = d.querySelector('.cw-err'), go = d.querySelector('.cw-go'), note = d.querySelector('.cw-note');
-      var invWrap = d.querySelector('.cw-inv');
+      var invWrap = d.querySelector('.cw-inv'), forgot = d.querySelector('.cw-forgot');
       var busy = false, showInvite = false;
 
       function paint() {
@@ -593,11 +645,23 @@
         go.disabled = busy;
         f.password.setAttribute('autocomplete', mode === 'in' ? 'current-password' : 'new-password');
         invWrap.style.display = mode === 'up' && (showInvite || !storedInvite()) ? '' : 'none';
-        note.textContent = mode === 'in'
-          ? 'Забыли пароль? Попросите того, кто дал вам ссылку, сбросить его.'
-          : 'Аккаунт хранит ваши колоды и прогресс — они будут доступны с любого устройства.';
+        forgot.style.display = mode === 'in' ? '' : 'none';
+        forgot.disabled = busy;
+        note.textContent = mode === 'in' ? '' : 'Аккаунт хранит ваши колоды и прогресс — они будут доступны с любого устройства.';
       }
-      function say(t) { err.textContent = t || ''; }
+      function say(t, ok) { err.textContent = t || ''; err.classList.toggle('cw-ok', !!ok); }
+      forgot.addEventListener('click', async function () {
+        if (busy) return;
+        var email = f.email.value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { say('Введите email выше, и мы пришлём ссылку для нового пароля.'); f.email.focus(); return; }
+        busy = true; say(''); paint();
+        try {
+          var rr = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + BASE });
+          if (rr.error) throw rr.error;
+          say('Если такой аккаунт есть, мы отправили письмо со ссылкой для нового пароля. Проверьте и папку «Спам».', true);
+        } catch (er) { say(authErrText(er)); }
+        finally { busy = false; if (d.isConnected) paint(); }
+      });
 
       d.querySelector('.cw-tabs').addEventListener('click', function (e) {
         var b = e.target.closest('[data-m]');
@@ -647,6 +711,7 @@
         resolve(session);
       }
       paint();
+      if (firstMsg) say(firstMsg);
       document.body.appendChild(d);
       setTimeout(function () { try { f.email.focus({ preventScroll: true }); } catch (e) {} }, 60);
     });

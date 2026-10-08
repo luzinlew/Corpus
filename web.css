@@ -16,6 +16,9 @@
   color:var(--ink);padding:0 14px;font:inherit;font-size:16px;font-weight:400}
 .cw-f input:focus{outline:2px solid var(--primary);outline-offset:1px}
 .cw-err{min-height:20px;color:var(--bad);font-size:13.5px;line-height:1.4;margin:0 0 10px}
+.cw-err.cw-ok{color:var(--ink2)}
+.cw-forgot{display:block;margin:12px auto 0;border:none;background:none;color:var(--ink2);font-size:13.5px;text-decoration:underline;padding:6px}
+.cw-forgot:disabled{opacity:.5}
 .cw-err:empty{min-height:0;margin:0}
 .cw-go{margin-top:4px}
 .cw-note{color:var(--ink3);font-size:12.5px;line-height:1.45;margin:12px 4px 0;text-align:center}

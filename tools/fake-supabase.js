@@ -45,7 +45,7 @@ const byId = (id) => Array.from(users.values()).find((u) => u.id === id);
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
-  res.setHeader('Access-Control-Allow-Headers', 'authorization,apikey,content-type,prefer,x-client-info,x-upsert,accept-profile,content-profile,range,cache-control,x-supabase-api-version,accept');
+  res.setHeader('Access-Control-Allow-Headers', 'authorization,apikey,content-type,prefer,x-client-info,x-corpus-demo,x-upsert,accept-profile,content-profile,range,cache-control,x-supabase-api-version,accept');
   res.setHeader('Access-Control-Expose-Headers', 'content-range,content-type,x-supabase-api-version');
 }
 function send(res, status, body, type) {
@@ -224,6 +224,15 @@ http.createServer(async (req, res) => {
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: AI_LIMIT, used: used + n }); return;
   }
 
+  /* ---------- rpc: corpus_demo_take (demo allowance per visitor, as in supabase/demo.sql; service role only) ---------- */
+  if (p === '/rest/v1/rpc/corpus_demo_take' && req.method === 'POST') {
+    if (!/service-key/.test(req.headers.authorization || '')) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_demo_take' }); return; }
+    const n = body && body.p_units, k = 'demo|' + (body && body.p_visitor), used = aiUsed.get(k) || 0, LIM = 5;
+    if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
+    if (used + n > LIM) { send(res, 200, { ok: false, plan: 'demo', limit: LIM, used }); return; }
+    aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'demo', limit: LIM, used: used + n }); return;
+  }
+
   if (p === '/rest/v1/rpc/corpus_week_award' && req.method === 'POST') { send(res, 200, { week: null }); return; }
   /* ---------- rpc: corpus_ping / corpus_site_stats (as in supabase/stats.sql) ---------- */
   const isAdmin = (uid) => { const u = byId(uid); return !!u && ADMINS.includes(u.email.toLowerCase()); };
@@ -268,7 +277,7 @@ http.createServer(async (req, res) => {
     if (!FN_URL) { send(res, 404, { message: 'Requested function was not found' }); return; }
     try {
       const h = {};
-      for (const k of ['authorization', 'apikey', 'content-type']) if (req.headers[k]) h[k] = req.headers[k];
+      for (const k of ['authorization', 'apikey', 'content-type', 'x-corpus-demo']) if (req.headers[k]) h[k] = req.headers[k];
       const r = await fetch(FN_URL, { method: req.method, headers: h, body: req.method === 'GET' ? undefined : raw });
       const buf = Buffer.from(await r.arrayBuffer());
       cors(res); res.writeHead(r.status, { 'Content-Type': r.headers.get('content-type') || 'application/json' }); res.end(buf);

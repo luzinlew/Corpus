@@ -85,7 +85,7 @@
       session = r && r.data && r.data.session;
     }
     if (!session) session = await authScreen(firstMsg);
-    if (session.guest) return guestStart();
+    if (session.guest) return await guestStart();
     var aiP = aiStatus();
     if (!(await swP)) W.blobBase = PUBLIC;    // no service worker (rare): load photos straight from Storage
     W.uid = session.user.id;
@@ -302,15 +302,18 @@
 
 
   /* ---------- guest: look around without an account. Everything lives in memory and disappears on reload. ---------- */
-  function guestStart() {
+  async function guestStart() {
     W.guest = true; W.uid = 'guest'; W.email = ''; W.starter = ''; W.push = null; W.guestUrls = {};
     guestBanner();
-    return { db: mkGuestDb(), assets: mkGuestAssets(), downloads: mkDownloads(), user: mkUser({ id: 'guest', email: '' }), sample: null };
+    /* a few AI requests with the cheapest model, counted per visitor by the function (supabase/demo.sql) */
+    var st = await Promise.race([aiStatus(), new Promise(function (r) { setTimeout(function () { r(null); }, 3000); })]);
+    if (st) W.ai = st;
+    return { db: mkGuestDb(), assets: mkGuestAssets(), downloads: mkDownloads(), user: mkUser({ id: 'guest', email: '' }), sample: st ? mkSample() : null };
   }
   function guestBanner() {
     var b = document.createElement('div');
     b.className = 'cw-guest';
-    b.innerHTML = '<span>Гостевой режим: ничего не сохраняется — после закрытия всё исчезнет.</span>' +
+    b.innerHTML = '<span>Демо-режим: ничего не сохраняется — после закрытия всё исчезнет. ИИ — до 5 запросов.</span>' +
       '<button type="button" class="cw-guest-go">Войти или создать аккаунт</button>';
     b.querySelector('button').addEventListener('click', function () { location.reload(); });
     document.body.insertBefore(b, document.body.firstChild);
@@ -491,6 +494,13 @@
 
   /* ---------- sample: Claude through the corpus-ai function ---------- */
   async function fnFetch(method, body, signal) {
+    if (W.guest) {
+      return fetch(FN, {
+        method: method, signal: signal,
+        headers: { apikey: CFG.key, 'x-corpus-demo': '1', 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined
+      });
+    }
     var s = await sb.auth.getSession();
     var tok = s && s.data && s.data.session ? s.data.session.access_token : '';
     return fetch(FN, {
@@ -612,12 +622,13 @@
       location.reload();
     });
   }
-  var BRAND = '<div class="cw-brand"><span class="brand-mark" aria-hidden="true"><i></i><b></b></span><span>Corpus</span></div>';
+  var AURORA = '<div class="cw-aur" aria-hidden="true"><i></i><i></i><i></i><i></i></div>';
+  var BRAND = '<div class="cw-brand"><span class="cw-word">Corpus</span></div>';
 
   function notConfigured() {
     var d = document.createElement('div');
     d.className = 'cw-auth';
-    d.innerHTML = '<div class="cw-card">' + BRAND + '<div class="cw-box"><div class="h2">Сайт ещё настраивается</div>' +
+    d.innerHTML = AURORA + AURORA + '<div class="cw-card">' + BRAND + '<div class="cw-box"><div class="h2">Сайт ещё настраивается</div>' +
       '<p class="muted" style="margin:6px 0 0">Загляните чуть позже.</p></div>' + langRow() + '</div>';
     onLang(d);
     document.body.appendChild(d);
@@ -648,7 +659,7 @@
     return new Promise(function (resolve) {
       var d = document.createElement('div');
       d.className = 'cw-auth';
-      d.innerHTML = '<div class="cw-card">' + BRAND + '<p class="cw-sub">Придумайте новый пароль для входа в Corpus.</p>' +
+      d.innerHTML = AURORA + '<div class="cw-card">' + BRAND + '<p class="cw-sub">Придумайте новый пароль для входа в Corpus.</p>' +
         '<div class="cw-box"><form novalidate>' +
         '<label class="cw-f">Новый пароль<input name="password" type="password" minlength="6" autocomplete="new-password" required></label>' +
         '<div class="cw-err" role="alert"></div>' +
@@ -684,7 +695,7 @@
       var mode = (!known && storedInvite()) ? 'up' : 'in';
       var d = document.createElement('div');
       d.className = 'cw-auth';
-      d.innerHTML = '<div class="cw-card">' + BRAND +
+      d.innerHTML = AURORA + '<div class="cw-card">' + BRAND +
         '<p class="cw-sub">' + (W.shareCode ? 'Вам передали колоду Corpus. Войдите или создайте аккаунт — колода появится у вас.' : 'Анатомия по изображениям: колоды из фото атласа и интервальные повторения.') + '</p>' +
         '<div class="cw-box"><div class="cw-tabs" role="tablist">' +
         '<button type="button" role="tab" data-m="in">Вход</button><button type="button" role="tab" data-m="up">Регистрация</button></div>' +
@@ -695,7 +706,7 @@
         '<div class="cw-err" role="alert"></div>' +
         '<button class="btn primary big block cw-go" type="submit"></button>' +
         '<button type="button" class="cw-forgot">Забыли пароль?</button></form></div>' +
-        '<button type="button" class="cw-guest-btn">Посмотреть без аккаунта</button>' +
+        '<button type="button" class="cw-guest-btn"><b>Демо-режим</b><span>Посмотреть без аккаунта · 5 запросов ИИ</span></button>' +
         '<p class="cw-note"></p>' + langRow() + '</div>';
       var f = d.querySelector('form'), err = d.querySelector('.cw-err'), go = d.querySelector('.cw-go'), note = d.querySelector('.cw-note');
       var invWrap = d.querySelector('.cw-inv'), forgot = d.querySelector('.cw-forgot');

@@ -153,7 +153,7 @@ async def main():
     order_file(tmp / 'corpus-folder-order.json')
     anki_file(tmp / 'Kolju.apkg')
     deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
-    fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key')
+    fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key', SUPABASE_SERVICE_ROLE_KEY='service-key')
     api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT), FAKE_ADMINS='lev@test.ee')
     procs = [subprocess.Popen(deno + ['run', '--allow-net', '--allow-env', '--allow-read', '--allow-sys', str(ROOT / 'supabase' / 'functions' / 'corpus-ai' / 'index.ts')],
                               env=fn_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
@@ -669,6 +669,8 @@ async def main():
             ctx, pg, errs_g = await open_ctx()
             await pg.goto(SITE)
             await pg.wait_for_selector('.cw-guest-btn')
+            await pg.wait_for_timeout(1500)
+            await pg.screenshot(path=os.environ.get('SHOT', '/tmp/auth.png'))
             docs_before = len(state().get('docs', [])) if isinstance(state().get('docs'), list) else None
             await pg.click('.cw-guest-btn')
             await app_ready(pg)
@@ -676,6 +678,9 @@ async def main():
             await pg.evaluate("S.decks.push({id:'gd1',name:'Gost',newPerDay:20,mode:'hideAll',createdAt:1});persist('decks','gd1')")
             await pg.wait_for_timeout(800)
             check('guest data is kept in memory only', await pg.evaluate("S.decks.some(d=>d.id==='gd1')") and (docs_before is None or len(state().get('docs', [])) == docs_before))
+            check('demo has AI, 5 requests', await pg.evaluate('!!S.sample && CORPUS_WEB.ai && CORPUS_WEB.ai.limit') == 5)
+            res = await pg.evaluate("(async()=>{const o=[];for(let i=0;i<6;i++){try{await S.sample('hi');o.push('ok')}catch(e){o.push(e.code)}}return o})()")
+            check('demo AI stops after 5 requests', res == ['ok'] * 5 + ['quota_exceeded'], json.dumps(res))
             await pg.evaluate("go({name:'settings'})")
             check('guest settings offer to sign in', bool(await pg.query_selector('[data-act=signOut]')) and not await pg.evaluate('!!CORPUS_WEB.push'))
             await pg.click('.cw-guest-go')

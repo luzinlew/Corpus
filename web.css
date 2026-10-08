@@ -1,13 +1,23 @@
 /* Corpus — screens of the web runtime (sign in, file sheet). Colors and buttons come from the app's own tokens. */
-.cw-auth{position:fixed;inset:0;z-index:500;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;
+.cw-auth{position:fixed;inset:0;z-index:500;background:var(--bg);isolation:isolate;overflow:auto;-webkit-overflow-scrolling:touch;
   display:flex;justify-content:center;padding:calc(28px + env(safe-area-inset-top,0px)) 16px calc(28px + env(safe-area-inset-bottom,0px));
   animation:cwIn .28s ease both}
 .cw-auth.out{opacity:0;transition:opacity .2s}
 .cw-card{width:100%;max-width:420px;margin:auto 0}
-.cw-brand{display:flex;align-items:center;gap:12px;font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-weight:600;font-size:36px;letter-spacing:.2px;margin:0 0 6px}
-.cw-brand .brand-mark i{width:20px}
-.cw-sub{color:var(--ink2);margin:0 0 20px;line-height:1.5;font-size:15px}
-.cw-box{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px}
+.cw-aur{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.cw-aur i{position:absolute;width:80vmax;height:80vmax;border-radius:50%;opacity:var(--au-op,.78);will-change:transform}
+.cw-aur i:nth-child(1){left:-30vmax;top:-30vmax;background:radial-gradient(circle,var(--au1) 0,transparent 62%);animation:cwA 17s ease-in-out infinite alternate}
+.cw-aur i:nth-child(2){right:-34vmax;top:6vmax;background:radial-gradient(circle,var(--au2) 0,transparent 62%);animation:cwB 21s ease-in-out infinite alternate}
+.cw-aur i:nth-child(3){left:-26vmax;bottom:-36vmax;background:radial-gradient(circle,var(--au3) 0,transparent 62%);animation:cwC 19s ease-in-out infinite alternate}
+.cw-aur i:nth-child(4){right:-30vmax;bottom:-40vmax;background:radial-gradient(circle,var(--au4) 0,transparent 62%);animation:cwA 23s ease-in-out infinite alternate-reverse}
+@keyframes cwA{to{transform:translate(26vmax,18vmax) scale(1.18)}}
+@keyframes cwB{to{transform:translate(-24vmax,22vmax) scale(.9)}}
+@keyframes cwC{to{transform:translate(28vmax,-20vmax) scale(1.12)}}
+.cw-brand{display:flex;justify-content:center;margin:6px 0 10px}
+.cw-word{font-family:'Fraunces','Source Serif 4',Georgia,serif;font-weight:300;font-size:64px;line-height:1;letter-spacing:-1.5px;color:var(--ink)}
+.cw-sub{color:var(--ink2);margin:0 0 22px;line-height:1.5;font-size:15px;text-align:center}
+.cw-box{background:var(--glass-strong,var(--surface));border:1px solid var(--glass-line,var(--line));border-radius:20px;padding:16px;
+  -webkit-backdrop-filter:blur(18px) saturate(1.3);backdrop-filter:blur(18px) saturate(1.3);box-shadow:var(--glass-shadow,0 8px 30px rgba(80,60,120,.08))}
 .cw-tabs{display:flex;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:16px}
 .cw-tabs button{flex:1;border:none;background:none;padding:9px 6px;border-radius:9px;font-weight:600;font-size:14px;color:var(--ink2)}
 .cw-tabs button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
@@ -25,7 +35,10 @@
 .cw-lang{display:flex;justify-content:center;gap:6px;margin-top:18px}
 .cw-lang button{border:1px solid var(--line);background:var(--surface);color:var(--ink2);border-radius:20px;padding:6px 12px;font-size:13px;font-weight:600}
 .cw-lang button.on{border-color:var(--primary);color:var(--primary)}
-.cw-guest-btn{display:block;width:100%;margin:12px 0 0;border:1px dashed var(--line);background:none;color:var(--ink);border-radius:14px;padding:12px;font:inherit;font-size:14.5px;font-weight:600}
+.cw-guest-btn{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;margin:12px 0 0;border:1px solid var(--glass-line,var(--line));
+  background:var(--glass,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);color:var(--ink);border-radius:16px;padding:12px;font:inherit}
+.cw-guest-btn b{font-size:15px;font-weight:700}
+.cw-guest-btn span{font-size:12.5px;color:var(--ink2)}
 .cw-guest{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;
   background:var(--warn-soft,#FFF3DC);color:var(--warn-ink,#7A5310);border-bottom:1px solid var(--line);font-size:13px;line-height:1.35;
   padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px;text-align:center}
@@ -37,4 +50,4 @@
 .cw-fn{font-size:13px;color:var(--ink2);text-align:center;overflow-wrap:anywhere;margin-bottom:6px}
 @media (min-width:640px){.cw-ov{align-items:center;padding:24px}.cw-sheet{border-radius:20px}}
 @keyframes cwIn{from{opacity:0}to{opacity:1}}
-@media (prefers-reduced-motion:reduce){.cw-auth,.cw-ov{animation:none}}
+@media (prefers-reduced-motion:reduce){.cw-auth,.cw-ov,.cw-aur i{animation:none}}

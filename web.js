@@ -85,6 +85,7 @@
       session = r && r.data && r.data.session;
     }
     if (!session) session = await authScreen(firstMsg);
+    if (session.guest) return guestStart();
     var aiP = aiStatus();
     if (!(await swP)) W.blobBase = PUBLIC;    // no service worker (rare): load photos straight from Storage
     W.uid = session.user.id;
@@ -296,6 +297,70 @@
       collection: collection,
       doc: function (path) { var p = String(path).split('/'); return docRef(p.slice(0, -1).join('/'), p[p.length - 1]); },
       setMany: setMany
+    });
+  }
+
+
+  /* ---------- guest: look around without an account. Everything lives in memory and disappears on reload. ---------- */
+  function guestStart() {
+    W.guest = true; W.uid = 'guest'; W.email = ''; W.starter = ''; W.push = null; W.guestUrls = {};
+    guestBanner();
+    return { db: mkGuestDb(), assets: mkGuestAssets(), downloads: mkDownloads(), user: mkUser({ id: 'guest', email: '' }), sample: null };
+  }
+  function guestBanner() {
+    var b = document.createElement('div');
+    b.className = 'cw-guest';
+    b.innerHTML = '<span>Гостевой режим: ничего не сохраняется — после закрытия всё исчезнет.</span>' +
+      '<button type="button" class="cw-guest-go">Войти или создать аккаунт</button>';
+    b.querySelector('button').addEventListener('click', function () { location.reload(); });
+    document.body.insertBefore(b, document.body.firstChild);
+    document.body.classList.add('cw-is-guest');
+  }
+  function mkGuestDb() {
+    var store = {}, seq = 0;
+    function key(c, id) { return c + '/' + id; }
+    function genId() { return 'g' + Date.now().toString(36) + (++seq).toString(36) + Math.random().toString(36).slice(2, 8); }
+    function copy(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v)); }
+    function docRef(coll, id) {
+      return Object.freeze({
+        id: id, path: coll + '/' + id,
+        get: async function () { var d = copy(store[key(coll, id)]); return { id: id, exists: d !== undefined, data: function () { return d; } }; },
+        set: async function (obj) { store[key(coll, id)] = copy(obj); },
+        update: async function (patch) {
+          var k = key(coll, id);
+          if (!(k in store)) throw { code: 'invalid_argument', message: 'document does not exist' };
+          store[k] = Object.assign({}, store[k], copy(patch));
+        },
+        delete: async function () { delete store[key(coll, id)]; }
+      });
+    }
+    return Object.freeze({
+      collection: function (coll) {
+        return Object.freeze({
+          doc: function (id) { return docRef(coll, id || genId()); },
+          get: async function () {
+            var docs = Object.keys(store).filter(function (k) { return k.indexOf(coll + '/') === 0; }).sort().map(function (k) {
+              var d = copy(store[k]); return { id: k.slice(coll.length + 1), exists: true, data: function () { return d; } };
+            });
+            return { docs: docs, size: docs.length, empty: !docs.length };
+          }
+        });
+      },
+      doc: function (path) { var p = String(path).split('/'); return docRef(p.slice(0, -1).join('/'), p[p.length - 1]); },
+      setMany: async function (items) { items.forEach(function (it) { store[key(it.coll, it.id)] = copy(it.data); }); }
+    });
+  }
+  function mkGuestAssets() {
+    var n = 0;
+    return Object.freeze({
+      upload: async function (blob) {
+        var id = 'guest' + Date.now().toString(36) + (++n).toString(36), type = (blob && blob.type) || 'image/jpeg';
+        var url = URL.createObjectURL(blob);
+        W.guestUrls[id] = url;
+        return { id: id, url: url, sizeBytes: blob.size || 0, contentType: type };
+      },
+      delete: async function (id) { var u = W.guestUrls[id]; if (u) { try { URL.revokeObjectURL(u); } catch (e) {} delete W.guestUrls[id]; } },
+      list: async function () { return { assets: [], usage: {} }; }
     });
   }
 
@@ -630,6 +695,7 @@
         '<div class="cw-err" role="alert"></div>' +
         '<button class="btn primary big block cw-go" type="submit"></button>' +
         '<button type="button" class="cw-forgot">Забыли пароль?</button></form></div>' +
+        '<button type="button" class="cw-guest-btn">Посмотреть без аккаунта</button>' +
         '<p class="cw-note"></p>' + langRow() + '</div>';
       var f = d.querySelector('form'), err = d.querySelector('.cw-err'), go = d.querySelector('.cw-go'), note = d.querySelector('.cw-note');
       var invWrap = d.querySelector('.cw-inv'), forgot = d.querySelector('.cw-forgot');
@@ -669,6 +735,12 @@
         mode = b.dataset.m; say(''); paint();
       });
       onLang(d);
+      d.querySelector('.cw-guest-btn').addEventListener('click', function () {
+        if (busy) return;
+        d.classList.add('out');
+        setTimeout(function () { d.remove(); }, 220);
+        resolve({ guest: true });
+      });
       f.addEventListener('submit', async function (e) {
         e.preventDefault();
         if (busy) return;

@@ -665,6 +665,25 @@ async def main():
                   sum(o['owner'] == me for o in objs) == 2 and sum(o['owner'] != me for o in objs) == 11, json.dumps([o['owner'][:8] for o in objs]))
             await ctx.close()
 
+            # ---------- guest: look around without an account, nothing reaches the server ----------
+            ctx, pg, errs_g = await open_ctx()
+            await pg.goto(SITE)
+            await pg.wait_for_selector('.cw-guest-btn')
+            docs_before = len(state().get('docs', [])) if isinstance(state().get('docs'), list) else None
+            await pg.click('.cw-guest-btn')
+            await app_ready(pg)
+            check('guest enters the app with a notice banner', bool(await pg.query_selector('.cw-guest')) and await pg.evaluate('CORPUS_WEB.guest === true'))
+            await pg.evaluate("S.decks.push({id:'gd1',name:'Gost',newPerDay:20,mode:'hideAll',createdAt:1});persist('decks','gd1')")
+            await pg.wait_for_timeout(800)
+            check('guest data is kept in memory only', await pg.evaluate("S.decks.some(d=>d.id==='gd1')") and (docs_before is None or len(state().get('docs', [])) == docs_before))
+            await pg.evaluate("go({name:'settings'})")
+            check('guest settings offer to sign in', bool(await pg.query_selector('[data-act=signOut]')) and not await pg.evaluate('!!CORPUS_WEB.push'))
+            await pg.click('.cw-guest-go')
+            await pg.wait_for_selector('.cw-auth .cw-tabs .on')
+            check('guest banner leads back to sign-in', True)
+            check('no script errors in guest mode', not errs_g, '; '.join(errs_g)[:400])
+            await ctx.close()
+
             # ---------- password reset: the e-mail request, then the link from the e-mail ----------
             ctx, pg, errs_r = await open_ctx()
             await pg.goto(SITE)

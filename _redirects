@@ -1,0 +1,3 @@
+# Cloudflare Pages: old addresses kept working after the move from luzinlew.github.io/Corpus/ to the root of corpusapp.ee
+/Corpus     /         301
+/Corpus/*   /:splat   301

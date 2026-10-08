@@ -203,7 +203,7 @@ http.createServer(async (req, res) => {
     const row = Array.from(shares.values()).find((r) => r.code === code);
     if (!row) { send(res, 404, { code: 'P0002', message: 'share_not_found', details: null, hint: null }); return; }
     row.opens++;
-    send(res, 200, { kind: row.kind, name: row.name, data: row.data, createdAt: row.created_at, updatedAt: row.updated_at, from: byId(row.owner).email, mine: row.owner === uid }); return;
+    send(res, 200, { kind: row.kind, name: row.name, data: row.data, createdAt: row.created_at, updatedAt: row.updated_at, from: byId(row.owner).email.replace(/^(.{0,2})[^@]*@/, '$1***@'), mine: row.owner === uid }); return;
   }
   if (p === '/rest/v1/rpc/corpus_doc_update' && req.method === 'POST') {
     const uid = uidOf(req);
@@ -276,7 +276,7 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  /* ---------- storage: bucket 'plates' (public reads, owner-only delete, image/* only) ---------- */
+  /* ---------- storage: bucket 'plates' (public reads, owner-only delete, raster pictures only) ---------- */
   let m;
   if ((m = /^\/storage\/v1\/object\/public\/plates\/(.+)$/.exec(p)) && req.method === 'GET') {
     const o = objects.get(decodeURIComponent(m[1]));
@@ -289,7 +289,7 @@ http.createServer(async (req, res) => {
     const name = decodeURIComponent(m[1]);
     const file = /multipart/i.test(req.headers['content-type'] || '') ? multipartFile(raw, req.headers['content-type']) : { type: req.headers['content-type'], buf: raw };
     if (!file) { send(res, 400, { statusCode: '400', error: 'invalid', message: 'no file' }); return; }
-    if (!/^image\//.test(file.type)) { send(res, 400, { statusCode: '415', error: 'invalid_mime_type', message: 'mime type ' + file.type + ' is not supported' }); return; }
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) { send(res, 400, { statusCode: '415', error: 'invalid_mime_type', message: 'mime type ' + file.type + ' is not supported' }); return; }
     if (file.buf.length > 26214400) { send(res, 400, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' }); return; }
     if (objects.has(name)) { send(res, 400, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' }); return; }
     objects.set(name, { owner: uid, type: file.type, buf: file.buf });

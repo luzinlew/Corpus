@@ -2,7 +2,7 @@
 
 Corpus — карточки по анатомии из фото атласа: рамки на подписях, интервальные повторения (FSRS / SM-2), режимы «Скрыть все», «Выбор», «Ввод», импорт из Anki, распознавание подписей на устройстве.
 
-Сайт работает на GitHub Pages, аккаунты, колоды и фото хранятся в Supabase. Каждый пользователь видит только свои данные. Менять само приложение может только владелец репозитория.
+Сайт https://corpusapp.ee/ работает на Cloudflare Pages (раньше — GitHub Pages, https://luzinlew.github.io/Corpus/), аккаунты, колоды и фото хранятся в Supabase. Каждый пользователь видит только свои данные. Менять само приложение может только владелец репозитория.
 
 ## Как устроено
 
@@ -12,6 +12,7 @@ Corpus — карточки по анатомии из фото атласа: р
 | `web.js` | Веб-среда: даёт приложению `window.claude.use('db' / 'assets' / 'downloads' / 'user')` поверх Supabase, экран входа и регистрации |
 | `sw.js` | Service worker: отдаёт фото по адресу `<сайт>/_blob/<id>` из Supabase Storage и кэширует их на устройстве, показывает push-уведомления |
 | `config.js` | URL проекта Supabase и publishable key (оба публичные) |
+| `_redirects` | Cloudflare Pages: `/Corpus/…` → `/…` для старых ссылок |
 | `index.html` | Собирается из `src/corpus.html` командой `python3 build.py`. Руками не править |
 | `supabase/setup.sql` | Разовая настройка базы: таблица `docs` с RLS, бакет `plates`, проверка кода приглашения |
 | `supabase/stats.sql` | Статистика для админов: отметка «заходил сегодня» (`activity`), `corpus_site_stats` |
@@ -104,7 +105,7 @@ select u.email, a.day, a.used from public.ai_usage a join auth.users u on u.id =
 1. Изменить `src/corpus.html` (и при необходимости `web.js` / `web.css` / `sw.js`).
 2. `python3 build.py`, чтобы пересобрать `index.html` (у скриптов меняется `?v=`, и браузеры сразу берут новую версию).
 3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase (включая импорт сгенерированного `.apkg` и обмен по коду между двумя аккаунтами), функция `corpus-ai` при этом работает по-настоящему в Deno. Нужны `pip install playwright pillow && python3 -m playwright install chromium` и `deno` (или `npx deno`).
-4. Закоммитить и запушить: `git push origin main main:gh-pages`. Сайт публикуется из ветки `gh-pages`, GitHub Pages обновит его за минуту-две.
+4. Закоммитить и запушить: `git push origin main main:gh-pages`. Cloudflare Pages публикует ветку `main` (без команды сборки, папка — корень репозитория) за минуту-две. Ветка `gh-pages` с файлом `CNAME` остаётся включённой в GitHub Pages только ради старого адреса: GitHub перенаправляет `luzinlew.github.io/Corpus/…` на `corpusapp.ee/…`, так что старые ссылки и QR-коды работают. `_redirects` делает то же для `corpusapp.ee/Corpus/…`.
 
 Чтобы обновить и артефакт в claude.ai, опубликуйте туда `src/corpus.html` вместе с `ocr/*` и `anki/*`.
 

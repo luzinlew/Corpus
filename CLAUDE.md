@@ -1,13 +1,13 @@
 # Corpus: как вносить изменения
 
-Corpus — приложение Льва для карточек по анатомии. Этот репозиторий — сайт https://corpusapp.ee/ (GitHub Pages, раньше https://luzinlew.github.io/Corpus/), данные и аккаунты в Supabase. Подробности устройства в `README.md`.
+Corpus — приложение Льва для карточек по анатомии. Этот репозиторий — сайт https://corpusapp.ee/ (Cloudflare Pages, раньше GitHub Pages https://luzinlew.github.io/Corpus/, который теперь только перенаправляет на новый адрес), данные и аккаунты в Supabase. Подробности устройства в `README.md`.
 
 ## Порядок работы
 1. Приложение — один файл `src/corpus.html`. Правки делаются там. `index.html` руками не трогать.
    Веб-обвязка: `web.js` (вход, Supabase, `window.claude.use`, push), `web.css`, `sw.js` (фото и push), `config.js`.
 2. `python3 build.py`, чтобы пересобрать `index.html`.
 3. Тест: `pip install playwright pillow --break-system-packages && python3 -m playwright install chromium`, нужен `deno` (или `npx deno`), затем `python3 tools/e2e_test.py`. Должно напечатать `ALL PASSED`. Для нового поведения добавлять проверку туда же.
-4. Выкладка: коммит, потом `git push origin main main:gh-pages`. Pages публикует ветку `gh-pages`, сайт обновляется у всех примерно за минуту.
+4. Выкладка: коммит, потом `git push origin main main:gh-pages`. Cloudflare Pages публикует `main` (сборки нет, папка — корень), сайт обновляется примерно за минуту. `gh-pages` с `CNAME` нужен только для перенаправления со старого адреса, GitHub Pages не выключать.
 
 ## Правила
 - Интерфейс трёхъязычный (по умолчанию эстонский). Каждой новой русской строке интерфейса нужна запись `[ru, en, et]` в `I18N_DICT` в `src/corpus.html`.

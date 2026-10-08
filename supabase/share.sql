@@ -3,7 +3,7 @@
 --
 -- The author's device stores a snapshot of the deck (names, frames, text cards, photo ids — no
 -- progress) in public.shares under a random 10-letter code. Anyone signed in who has the code
--- (a link https://…/Corpus/?s=<code>, usually scanned as a QR) gets a copy: the photos are read from
+-- (a link https://corpusapp.ee/?s=<code>, usually scanned as a QR) gets a copy: the photos are read from
 -- the public bucket and uploaded again into the receiver's own Corpus. One share per source (deck or
 -- folder): opening "Share by QR" again refreshes the snapshot and keeps the code; "Revoke" deletes it.
 
@@ -75,6 +75,7 @@ revoke execute on function public.corpus_share_put(text, text, text, jsonb) from
 grant execute on function public.corpus_share_put(text, text, text, jsonb) to authenticated;
 
 -- what somebody shared under this code (any signed-in person who has the code). Counts the opening.
+-- The author is shown as a masked e-mail (le***@example.com): codes travel through group chats.
 create or replace function public.corpus_share_open(p_code text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare s record;
@@ -91,7 +92,7 @@ begin
   end if;
   update public.shares set opens = opens + 1 where code = lower(trim(p_code));
   return jsonb_build_object('kind', s.kind, 'name', s.name, 'data', s.data, 'createdAt', s.created_at, 'updatedAt', s.updated_at,
-                            'from', s.email, 'mine', s.owner = (select auth.uid()));
+                            'from', left(s.email, 2) || '***@' || split_part(s.email, '@', 2), 'mine', s.owner = (select auth.uid()));
 end $$;
 revoke execute on function public.corpus_share_open(text) from public, anon;
 grant execute on function public.corpus_share_open(text) to authenticated;

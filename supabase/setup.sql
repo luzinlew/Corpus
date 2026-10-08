@@ -51,8 +51,9 @@ grant execute on function public.corpus_doc_update(text, text, jsonb) to authent
 grant execute on function public.corpus_merge(jsonb, jsonb) to authenticated;
 
 -- 2. Photos. Names are random ids; each user can upload, and delete only their own.
+--    Only plain raster pictures: an SVG in this public bucket could run a script when opened by its address.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('plates', 'plates', true, 26214400, array['image/*'])
+values ('plates', 'plates', true, 26214400, array['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 on conflict (id) do update
   set public = true,
       file_size_limit = excluded.file_size_limit,

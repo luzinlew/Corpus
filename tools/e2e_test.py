@@ -82,6 +82,16 @@ def stop(procs, t=10):
             pass
 
 
+def i18n_gaps():
+    """Plain Russian texts in web.js (the sign-in screens, shown before the app's own texts) that the app's dictionary does not have.
+    The dictionary is built by many I18N_DICT.push(...) calls between `const I18N_DICT=[` and `let LANG=`."""
+    app = (ROOT / 'src' / 'corpus.html').read_text(encoding='utf8')
+    block = app[app.index('const I18N_DICT=['):app.index('let LANG=')]
+    known = {json.loads('"' + k + '"') for k in re.findall(r'\[\s*"((?:[^"\\]|\\.)*)"\s*,\s*"', block)}
+    texts = set(re.findall(r"'([^'\n]*[А-Яа-яЁё][^'\n]*)'", (ROOT / 'web.js').read_text(encoding='utf8')))
+    return sorted(x for x in texts if '<' not in x and x not in known and x != 'Русский')   # «Русский» is the language button, never translated
+
+
 def state():
     return json.loads(urllib.request.urlopen(API + '/__state').read())
 
@@ -296,6 +306,7 @@ async def main():
             await pg.click('.cw-go')
             await app_ready(pg)
             check('signed up and the app opened', True)
+            check('i18n: every Russian text of the sign-in screens (web.js) has a translation', not i18n_gaps(), json.dumps(i18n_gaps(), ensure_ascii=False)[:300])
             # ---------- first-run tour: opens by itself for a new account, skippable, remembered ----------
             await pg.wait_for_selector('#layer .tour', timeout=5000)
             check('new account: the tour opens by itself', True)
@@ -600,6 +611,17 @@ async def main():
             await pg.click('#layer [data-s="1"]')
             await pg.wait_for_function('S.plates.length===1 && S.cards.length===2 && S.folders.length===1', timeout=20000)
             check('share link: folder, photo and cards copied', (await pg.evaluate('view.name')) == 'folder')
+            # somebody who is not signed in opens the same link: the sign-in screen says a deck was shared with them, in the page language
+            ctx_s, pg_s, _ = await open_ctx()
+            await pg_s.goto(SITE + '?s=' + code)
+            await pg_s.wait_for_selector('.cw-sub', timeout=15000)
+            sub_et = (await pg_s.inner_text('.cw-sub')).strip()
+            check('share link, not signed in: the sign-in screen says a deck was shared (Estonian by default)', sub_et == 'Sulle edastati Corpuse pakk. Logi sisse või loo konto — pakk ilmub sinu Corpusesse.', sub_et)
+            await pg_s.click('.cw-lang [data-lang=en]')   # reloads the page in English
+            await pg_s.wait_for_function("(document.querySelector('.cw-sub')||{textContent:''}).textContent.startsWith('Someone passed you')", timeout=15000)
+            sub_en = (await pg_s.inner_text('.cw-sub')).strip()
+            check('…and in English after switching the language', sub_en.startswith('Someone passed you a Corpus deck.'), sub_en)
+            await ctx_s.close()
             check('share link: the code is removed from the address', 's=' not in pg.url, pg.url)
             me = await pg.evaluate('CORPUS_WEB.uid')
             st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == 1)

@@ -13,8 +13,9 @@ progress saved through the merge RPC and restored after reload, photos served by
 and readable on a canvas, exporting a folder, importing an Anki .apkg (pictures read from the zip by
 offset, uploaded in parallel, documents written in batches), sharing a folder by code / QR and receiving
 it in another account, isolation between two accounts, and the no-service-worker fallback.
-Prints one line per check and exits non-zero on the first failure."""
-import asyncio, base64, io, json, os, pathlib, re, shutil, socket, sqlite3, subprocess, sys, tempfile, time, urllib.request, zipfile
+Prints one line per check and exits non-zero on the first failure.
+The test itself checks that its ports are free and stops all its servers (deno under npx too) however it ends."""
+import asyncio, base64, io, json, os, pathlib, re, shutil, signal, socket, sqlite3, subprocess, sys, tempfile, time, urllib.request, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SITE_PORT, API_PORT, FN_PORT, INVITE, AI_LIMIT = 8765, 54321, 8000, 'p8wyzmtw', 6
@@ -22,14 +23,63 @@ API = f'http://localhost:{API_PORT}'
 SITE = f'http://localhost:{SITE_PORT}/corpus/'
 
 
+def port_open(port):
+    """True if something listens on the port."""
+    with socket.socket() as s:
+        return s.connect_ex(('127.0.0.1', port)) == 0
+
+
 def wait_port(port, t=10):
     end = time.time() + t
     while time.time() < end:
-        with socket.socket() as s:
-            if s.connect_ex(('127.0.0.1', port)) == 0:
-                return
+        if port_open(port):
+            return
         time.sleep(0.1)
     raise RuntimeError(f'port {port} did not open')
+
+
+def wait_port_closed(port, t=5):
+    """True if the port stops listening within t seconds."""
+    end = time.time() + t
+    while time.time() < end:
+        if not port_open(port):
+            return True
+        time.sleep(0.1)
+    return not port_open(port)
+
+
+def start(cmd, **kw):
+    """Start a server in its own process group: npx runs deno as a child, so the whole tree has to be stopped."""
+    return subprocess.Popen(cmd, start_new_session=True, **kw)
+
+
+def stop(procs, t=10):
+    """SIGTERM every server's process group, wait up to t seconds, then SIGKILL what is still alive."""
+    for pr in procs:
+        try:
+            os.killpg(pr.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    end = time.time() + t
+    for pr in procs:
+        try:
+            pr.wait(max(0.1, end - time.time()))
+        except subprocess.TimeoutExpired:
+            pass
+    for pr in procs:
+        try:
+            os.killpg(pr.pid, 0)   # the group lives while any member does, even after npx itself has exited
+        except ProcessLookupError:
+            continue
+        try:
+            os.killpg(pr.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    for pr in procs:
+        try:
+            pr.wait(5)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def state():
@@ -145,6 +195,13 @@ def anki_file(path):
 
 async def main():
     from playwright.async_api import async_playwright
+    # SIGTERM cancels only this task (as asyncio does for SIGINT): Playwright closes normally and the finally below stops the servers
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+    busy = [p for p in (SITE_PORT, API_PORT, FN_PORT) if port_open(p)]
+    if busy:
+        print('FAIL test ports already in use: ' + ', '.join(map(str, busy)) + ' (probably a server left from an earlier run; '
+              'find it with: pgrep -af "corpus-ai/index.ts|fake-supabase|http.server")')
+        raise SystemExit(1)
     tmp = pathlib.Path(tempfile.mkdtemp())
     site = tmp / 'corpus'
     shutil.copytree(ROOT, site, ignore=shutil.ignore_patterns('.git', 'tools', 'src', 'supabase', '*.md'))
@@ -155,11 +212,7 @@ async def main():
     deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
     fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key', SUPABASE_SERVICE_ROLE_KEY='service-key')
     api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT), FAKE_ADMINS='lev@test.ee')
-    procs = [subprocess.Popen(deno + ['run', '--allow-net', '--allow-env', '--allow-read', '--allow-sys', str(ROOT / 'supabase' / 'functions' / 'corpus-ai' / 'index.ts')],
-                              env=fn_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
-             subprocess.Popen(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], env=api_env, stdout=subprocess.DEVNULL),
-             subprocess.Popen([sys.executable, '-m', 'http.server', str(SITE_PORT), '--directory', str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
-    wait_port(API_PORT); wait_port(SITE_PORT); wait_port(FN_PORT, 120)
+    procs = []
     ok = True
 
     def check(name, cond, extra=''):
@@ -170,6 +223,14 @@ async def main():
             raise SystemExit(1)
 
     try:
+        procs.append(start(deno + ['run', '--allow-net', '--allow-env', '--allow-read', '--allow-sys', str(ROOT / 'supabase' / 'functions' / 'corpus-ai' / 'index.ts')],
+                           env=fn_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        procs.append(start(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], env=api_env, stdout=subprocess.DEVNULL))
+        procs.append(start([sys.executable, '-m', 'http.server', str(SITE_PORT), '--directory', str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        wait_port(API_PORT); wait_port(SITE_PORT); wait_port(FN_PORT, 120)
+        for pr in procs:
+            if pr.poll() is not None:
+                raise RuntimeError(f'test server exited at start: {pr.args} (code {pr.returncode}); its port was probably taken by another process')
         async with async_playwright() as p:
             b = await p.chromium.launch()
 
@@ -741,11 +802,19 @@ async def main():
             check('no script errors or failed requests in the browser', not errs_a and not errs_b and not errs_c and not errs_r, '; '.join(errs_a + errs_b + errs_c + errs_r)[:600])
             await b.close()
     finally:
-        for pr in procs:
-            pr.terminate()
+        stop(procs)
         shutil.rmtree(tmp, ignore_errors=True)
+        left = [p for p in (SITE_PORT, API_PORT, FN_PORT) if not wait_port_closed(p)]
+        if left:
+            print('FAIL test servers still listening after the run on ports ' + ', '.join(map(str, left)))
+            ok = False
     print('ALL PASSED' if ok else 'FAILED')
+    if not ok:
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except asyncio.CancelledError:   # SIGTERM: exit code 128+15, no traceback
+        sys.exit(143)

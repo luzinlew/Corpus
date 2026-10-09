@@ -4618,13 +4618,13 @@ async function akDecode(blob,mime){
   const url=URL.createObjectURL(blob);
   try{return {img:await loadImage(url),url:url};}catch(e){URL.revokeObjectURL(url);throw e;}
 }
+/* only plain raster pictures are stored (the site serves nothing else): SVG, BMP, TIFF, ... are drawn on a canvas and saved as JPEG */
 async function akPrepImage(bytes,name,max){
   const mime=akMime(name,bytes)||'image/jpeg';const raw=new Blob([bytes],{type:mime});
-  if(mime==='image/svg+xml'&&bytes.length<=2e6&&max<0)return {blob:raw,w:0,h:0,nw:0,nh:0};
   const d=await akDecode(raw,mime);const img=d.img;
   try{
     const nw=img.naturalWidth||img.width,nh=img.naturalHeight||img.height;if(!nw||!nh)throw new Error('img');
-    const M=Math.abs(max);
+    const M=max;
     if(/^image\/(jpeg|png|webp|gif)$/.test(mime)&&Math.max(nw,nh)<=M&&bytes.length<=3e6)return {blob:raw,w:nw,h:nh,nw:nw,nh:nh};
     const s=Math.min(1,M/Math.max(nw,nh));const w=Math.max(1,Math.round(nw*s)),h=Math.max(1,Math.round(nh*s));
     const cv=document.createElement('canvas');cv.width=w;cv.height=h;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);
@@ -4755,7 +4755,7 @@ async function akImport(an,pick){
     await parallel(textMedia,AK_PAR,async nm=>{
       if(cancelled)return;
       const bytes=await an.pkg.getMedia(nm);if(!bytes){miss++;return;}
-      let pr;try{pr=await akPrepImage(bytes,nm,akMime(nm,bytes)==='image/svg+xml'?-1600:1600);}catch(e){miss++;return;}
+      let pr;try{pr=await akPrepImage(bytes,nm,1600);}catch(e){miss++;return;}
       if(cancelled)return;
       const r=await akUpload(pr.blob);uploaded.push(r.id);mediaUrl.set(nm,blobUrl(r.id));
     },(d,n)=>{if(d<n)setBusy('Загружаю картинки карточек '+(d+1)+' из '+n+'…');});

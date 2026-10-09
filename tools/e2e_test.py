@@ -147,7 +147,8 @@ def anki_file(path):
         im = Image.new('RGB', (w, h), color); d = ImageDraw.Draw(im); d.rectangle([w * .1, h * .2, w * .3, h * .3], outline=(0, 0, 0), width=4)
         buf = io.BytesIO(); im.save(buf, 'JPEG', quality=80); return buf.getvalue()
     media = {'skull1.jpg': jpeg(800, 600, (240, 230, 220)), 'skull2.jpg': jpeg(640, 480, (230, 240, 220)),
-             'skull3.jpg': jpeg(700, 500, (220, 230, 240)), 'small.png': None}
+             'skull3.jpg': jpeg(700, 500, (220, 230, 240)), 'small.png': None,
+             'scheme.svg': b'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect x="10" y="10" width="60" height="40" fill="#c33"/><script>alert(1)</script></svg>'}
     im = Image.new('RGB', (60, 40), (200, 100, 100)); buf = io.BytesIO(); im.save(buf, 'PNG'); media['small.png'] = buf.getvalue()
     db_path = pathlib.Path(path).with_suffix('.sqlite')
     if db_path.exists(): db_path.unlink()
@@ -176,7 +177,7 @@ def anki_file(path):
         (3, MID_IO, sep.join(['{{c1::image-occlusion:rect:left=.3:top=.4:width=.2:height=.1:oi=1}}', '<img src="skull3.jpg">', '', '', ''])),
         (4, MID_B, sep.join(['os frontale', 'otsmikuluu'])),
         (5, MID_B, sep.join(['maxilla', 'ülalõualuu <img src="small.png">'])),
-        (6, MID_B, sep.join(['mandibula', 'alalõualuu']))]
+        (6, MID_B, sep.join(['mandibula', 'alalõualuu <img src="scheme.svg">']))]
     cid = 100
     for nid, mid, flds in notes:
         db.execute('insert into notes values (?, ?, ?, 0, 0, "", ?, "", 0, 0, "")', (nid, str(nid), mid, flds))
@@ -458,18 +459,19 @@ async def main():
             await pg.wait_for_function('S.plates.length===9 && S.cards.length===14', timeout=40000)
             await pg.wait_for_selector('#layer .dlg', timeout=10000)   # "read the labels under the frames?"
             await pg.click('#layer [data-s="0"]')
-            st = await state_when(lambda st: sum(1 for d in st['docs'] if d['coll'] == 'plates') == 9 and sum(1 for o in st['objects']) == 10)
+            st = await state_when(lambda st: sum(1 for d in st['docs'] if d['coll'] == 'plates') == 9 and sum(1 for o in st['objects']) == 11)
             log = json.loads(urllib.request.urlopen(API + '/__log').read())
             posts = [l for l in log if l == 'POST /rest/v1/docs']
-            check('Anki import: 3 photos + 1 picture inside a text card uploaded', sum(1 for o in st['objects']) == 10)
+            check('Anki import: 3 photos + 2 pictures inside text cards uploaded', sum(1 for o in st['objects']) == 11)
+            check('Anki import: an SVG picture is stored as JPEG, never as SVG', not any('svg' in o['type'] for o in st['objects']), json.dumps(sorted(set(o['type'] for o in st['objects']))))
             check('Anki import: documents written in batches, not one request per document', 0 < len(posts) <= 3, f'{len(posts)} POST /rest/v1/docs')
             anki = await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.ad);const ph=ds.find(d=>!d.kind),tx=ds.find(d=>d.kind==='text');
                 const cs=cardsOfDeck(ph.id).sort((a,b)=>a.createdAt-b.createdAt);const c0=cs[0];const t=cardsOfDeck(tx.id).map(c=>c.front+'|'+c.back);
-                return {names:ds.map(d=>d.name),frames:cs.length,photos:platesOf(ph.id).map(p=>[p.w,p.h]),rect:[c0.x,c0.y,c0.w,c0.h],note:c0.note,extra:(c0.extra||[]).length,text:t,img:/_blob\\//.test(cardsOfDeck(tx.id).find(c=>c.front==='maxilla').bh)};})()""")
+                return {names:ds.map(d=>d.name),frames:cs.length,photos:platesOf(ph.id).map(p=>[p.w,p.h]),rect:[c0.x,c0.y,c0.w,c0.h],note:c0.note,extra:(c0.extra||[]).length,text:t,img:/_blob\\//.test(cardsOfDeck(tx.id).find(c=>c.front==='maxilla').bh),svg:/_blob\\//.test(cardsOfDeck(tx.id).find(c=>c.front==='mandibula').bh)};})()""")
             check('Anki import: one photo deck and one text deck', anki['names'] == ['Kolju', 'Kolju — текст'], json.dumps(anki['names']))
             check('Anki import: masks became frames in percent of the photo', anki['frames'] == 4 and anki['rect'] == [10, 20, 20, 10] and anki['extra'] == 0 and anki['note'] == 'Os frontale', json.dumps(anki))
             check('Anki import: photos kept their size and order', anki['photos'] == [[800, 600], [640, 480], [700, 500]], json.dumps(anki['photos']))
-            check('Anki import: text cards with the picture moved into storage', sorted(anki['text']) == ['mandibula|alalõualuu', 'maxilla|ülalõualuu', 'os frontale|otsmikuluu'] and anki['img'], json.dumps(anki))
+            check('Anki import: text cards with the picture moved into storage', sorted(anki['text']) == ['mandibula|alalõualuu', 'maxilla|ülalõualuu', 'os frontale|otsmikuluu'] and anki['img'] and anki['svg'], json.dumps(anki))
             await pg.reload()
             await app_ready(pg)
             check('Anki import: everything is there after a reload', await pg.evaluate('S.plates.length===9 && S.cards.length===14 && S.decks.filter(d=>d.ad).length===2'))
@@ -559,7 +561,7 @@ async def main():
             await app_ready(pg)
             await pg.wait_for_selector('#layer .dlg', timeout=15000)
             dlg = await pg.inner_text('#layer .dlg')
-            check('share link: the folder is offered with its contents and the sender', 'Kolju' in dlg and 'lev@test.ee' in dlg and 'Jagaja' in dlg, dlg.replace('\n', ' ')[:200])
+            check('share link: the folder is offered with its contents and the sender', 'Kolju' in dlg and 'le***@test.ee' in dlg and 'lev@test.ee' not in dlg and 'Jagaja' in dlg, dlg.replace('\n', ' ')[:200])
             await pg.click('#layer [data-s="1"]')
             await pg.wait_for_function('S.plates.length===1 && S.cards.length===2 && S.folders.length===1', timeout=20000)
             check('share link: folder, photo and cards copied', (await pg.evaluate('view.name')) == 'folder')
@@ -739,7 +741,7 @@ async def main():
             me = await pg.evaluate('CORPUS_WEB.uid')
             objs = state()['objects']
             check("friend's import made the friend's own photo copy; Lev's photos untouched",
-                  sum(o['owner'] == me for o in objs) == 2 and sum(o['owner'] != me for o in objs) == 11, json.dumps([o['owner'][:8] for o in objs]))
+                  sum(o['owner'] == me for o in objs) == 2 and sum(o['owner'] != me for o in objs) == 12, json.dumps([o['owner'][:8] for o in objs]))
             await ctx.close()
 
             # ---------- guest: look around without an account, nothing reaches the server ----------

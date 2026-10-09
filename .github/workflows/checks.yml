@@ -1,0 +1,40 @@
+name: checks
+
+# The same checks as the corpus-verify skill: the page is built from src/, the browser test runs against the stand-in Supabase,
+# the push function and the SQL limits are tested. Nothing here deploys: the site is published by pushing main to gh-pages.
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Install browser test dependencies
+        run: |
+          pip install playwright pillow
+          python -m playwright install --with-deps chromium
+      - name: index.html is built from src/corpus.html
+        run: python3 build.py --check
+      - name: Browser test (E2E)
+        run: python3 tools/e2e_test.py
+      - name: Push function
+        run: CORPUS_PUSH_NO_SERVE=1 deno run --allow-net --allow-env --allow-read --allow-sys tools/push_test.ts
+      - name: SQL limits on a real Postgres
+        run: deno run --allow-read --allow-env --allow-net --allow-sys --allow-ffi tools/quota_test.ts

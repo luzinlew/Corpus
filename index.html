@@ -3894,7 +3894,8 @@ async function importData(data,opts){
   }
   if(full)examMigrate();PQ.clear();
   const lastT={};const nextT=(did,t)=>(lastT[did]=Math.max(t||t0,(lastT[did]||0)+1));
-  inOrder(Object.keys(pmap).map(oid=>pmap[oid].src),'createdAt').forEach(x=>{
+  /* the file's own order breaks ties between equal times (pmap is filled in the order the parallel uploads finish, which is random) */
+  inOrder(data.plates.filter(sp=>sp&&pmap[sp.id]),'createdAt').forEach(x=>{
     const sp=x.o,m=pmap[sp.id];if(!dmap[sp.deckId])return;
     const p={id:newId('plates'),deckId:dmap[sp.deckId],assetId:m.assetId,w:sp.w||0,h:sp.h||0,createdAt:nextT('p'+dmap[sp.deckId],x.t)};
     if(full&&sp.excluded)p.excluded=true;

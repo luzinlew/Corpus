@@ -602,7 +602,7 @@ async def main():
             check('share link: folder, photo and cards copied', (await pg.evaluate('view.name')) == 'folder')
             check('share link: the code is removed from the address', 's=' not in pg.url, pg.url)
             me = await pg.evaluate('CORPUS_WEB.uid')
-            st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == 1)
+            st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == 1 and any(d['coll'] == 'plates' and d['owner'] == me for d in st['docs']))   # the photo, then its document
             check("share link: the photo is the friend's own copy", sum(1 for o in st['objects'] if o['owner'] == me) == 1 and
                   any(d['coll'] == 'plates' and d['owner'] == me for d in st['docs']))
             ph = await photo_check(pg)

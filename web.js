@@ -373,6 +373,7 @@
     function shareFail(res) {
       var e = (res && res.error) || {}, m = String(e.message || '');
       if (e.code === 'P0002' || /share_not_found/.test(m)) return { code: 'not_found', message: 'no such share' };
+      if (e.code === '53400' || /user_quota_exceeded/.test(m)) return { code: 'quota_exceeded', message: m || 'too many share codes' };   // supabase/quota.sql
       if (e.code === '54000' || /share_too_large/.test(m) || (res && res.status === 413)) return { code: 'too_large', message: m || 'too large' };
       if (e.code === '42883' || e.code === 'PGRST202' || e.code === '42P01' || /could not find the function|does not exist/i.test(m)) return { code: 'not_set_up', message: m };
       return { code: 'unavailable', message: m || 'network error' };

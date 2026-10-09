@@ -1,6 +1,6 @@
 // Run: npx --yes deno run --allow-read --allow-env --allow-net --allow-sys --allow-ffi tools/quota_test.ts   (or deno run …)
 // Checks supabase/quota.sql on a real Postgres (PGlite, in memory): the limits per account on documents and photos, and that the
-// docs / storage policies of setup.sql still keep people apart. Only auth.* and storage.* are stand-ins; the policies and tables
+// docs / storage policies of setup.sql still keep people apart; share codes use the real share.sql. Only auth.* and storage.* are stand-ins; the policies and tables
 // under test are taken from setup.sql itself.
 import { PGlite } from "npm:@electric-sql/pglite@0.5.8";
 
@@ -27,6 +27,7 @@ await db.exec(`
 `);
 await db.exec(slice(setup, "create table if not exists public.docs", "-- Recursive merge"));            // the real docs table + its policy
 await db.exec(slice(setup, 'drop policy if exists "corpus plates insert"', "-- 3. Sign-up"));            // the real photo policies
+await db.exec(read("share.sql"));                                                                         // the real share codes table, policy and functions
 await db.exec(quota);
 await db.exec(quota);                                                                                     // safe to run again
 
@@ -129,6 +130,34 @@ r = await run(null, `select public.corpus_photo_room() as room`);
 ok("…and says no without a signed-in person", r.ok && r.rows![0].room === false);
 r = await run(A, `insert into storage.objects (bucket_id, name, owner_id, metadata) values ('other', 'o1', '${A}', '{"size": 1}')`);
 ok("the policy still refuses other buckets", !r.ok && r.code === "42501", r.code);
+
+// ---- share codes (share.sql) ----
+const put = (uid: string, src: string, bytes = 10) => run(uid, `select public.corpus_share_put('${src}', 'deck', 'n', jsonb_build_object('p', ${hex(bytes)}))`);
+await set("quota_shares_count", "2");
+r = await put(A, "deck:1"); const rs2 = await put(A, "deck:2");
+ok("share codes under the limit are made", r.ok && rs2.ok, r.msg);
+r = await put(A, "deck:3");
+ok("a third share code is refused (53400)", !r.ok && r.code === "53400" && /user_quota_exceeded/.test(r.msg!), r.code + " " + r.msg);
+const code1 = (await run(null, `select code from public.shares where src = 'deck:1'`)).rows![0].code;
+r = await put(A, "deck:1");
+ok("refreshing a snapshot at the limit still works, the code stays", r.ok && (await run(null, `select code from public.shares where src = 'deck:1'`)).rows![0].code === code1, r.msg);
+r = await put(B, "deck:1");
+ok("another account can still make codes", r.ok, r.msg);
+await run(A, `delete from public.shares where src = 'deck:2'`);
+r = await put(A, "deck:3");
+ok("after revoking one, a new code is made", r.ok, r.msg);
+await run(null, `delete from public.shares`);
+await set("quota_shares_count", "100");
+await set("quota_shares_mb", "1");
+await put(A, "deck:1", 400_000); await put(A, "deck:2", 400_000);
+r = await put(A, "deck:3", 400_000);
+ok("snapshots over the total size are refused (53400)", !r.ok && r.code === "53400", r.code);
+r = await put(A, "deck:1", 700_000);
+ok("refreshing a snapshot so that it grows past the total size is refused (53400)", !r.ok && r.code === "53400", r.code);
+r = await run(null, `insert into public.shares (owner, src, code, kind, data) values ('${A}', 'deck:svc', 'svccode001', 'deck', ${"'{}'"})`);
+ok("a share written without a signed-in person is not limited", r.ok, r.msg);
+await run(null, `delete from public.shares`);
+await set("quota_shares_mb", "20");
 
 console.log(fails ? "FAILED " + fails : "ALL QUOTA TESTS PASSED");
 Deno.exit(fails ? 1 : 0);

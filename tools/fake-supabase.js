@@ -22,7 +22,7 @@ const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) 
 const activity = new Map();   // uid -> Map(day -> {opens, last})
 const log = [];
 /* per-account limits, as in supabase/quota.sql (defaults too); the tests change them through /__quota */
-const Q0 = { docKb: 1024, docs: 20000, docsMb: 50, photos: 6000, photosMb: 300 };
+const Q0 = { docKb: 1024, docs: 20000, docsMb: 50, photos: 6000, photosMb: 300, shares: 100, sharesMb: 20 };
 const Q = { ...Q0 };
 const sizeOf = (d) => Buffer.byteLength(JSON.stringify(d));
 /* what the database refuses when `items` ([{key, data}]) are written for uid: a document over the limit (unless it does not grow),
@@ -212,6 +212,12 @@ http.createServer(async (req, res) => {
     if (JSON.stringify(body.p_data).length > 6 * 1024 * 1024) { send(res, 400, { code: '54000', message: 'share_too_large' }); return; }
     const k = uid + '|' + body.p_src;
     let row = shares.get(k);
+    {   // the limit of share codes per account (supabase/quota.sql): refused when it adds a code or makes a snapshot bigger
+      let n = 0, b = 0;
+      for (const r of shares.values()) if (r.owner === uid) { n++; b += sizeOf(r.data); }
+      const nn = row ? n : n + 1, nb = (row ? b - sizeOf(row.data) : b) + sizeOf(body.p_data);
+      if ((nn > n || nb > b) && (nn > Q.shares || nb > Q.sharesMb * 1048576)) { send(res, 503, { code: '53400', message: 'user_quota_exceeded', details: null, hint: null }); return; }
+    }
     const now = new Date().toISOString();
     if (!row) {
       const a = '23456789abcdefghjkmnpqrstuvwxyz', b = crypto.randomBytes(10); let code = '';

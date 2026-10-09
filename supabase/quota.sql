@@ -10,6 +10,8 @@
 --   quota_docs_mb       all documents of an account together, MB                       50
 --   quota_photos_mb     all photos of an account together, MB                          300
 --   quota_photos_count  photos per account                                             6000
+--   quota_shares_count  share codes per account (supabase/share.sql)                       100
+--   quota_shares_mb     all share snapshots of an account together, MB                     20
 -- A value that is not a plain number is ignored and the default is used. Use a huge number to switch a limit off.
 --
 -- What it does and does not do:
@@ -31,6 +33,8 @@
 --   drop trigger if exists corpus_docs_size on public.docs;
 --   drop trigger if exists corpus_docs_total_ins on public.docs;
 --   drop trigger if exists corpus_docs_total_upd on public.docs;
+--   drop trigger if exists corpus_shares_total_ins on public.shares;
+--   drop trigger if exists corpus_shares_total_upd on public.shares;
 --   drop policy if exists "corpus plates insert" on storage.objects;
 --   create policy "corpus plates insert" on storage.objects for insert to authenticated with check (bucket_id = 'plates');
 -- (the functions can stay; they do nothing without the triggers and the policy)
@@ -39,7 +43,7 @@ create schema if not exists private;
 create table if not exists private.settings (key text primary key, value text not null);
 insert into private.settings (key, value) values
   ('quota_doc_kb', '1024'), ('quota_docs_count', '20000'), ('quota_docs_mb', '50'),
-  ('quota_photos_mb', '300'), ('quota_photos_count', '6000')
+  ('quota_photos_mb', '300'), ('quota_photos_count', '6000'), ('quota_shares_count', '100'), ('quota_shares_mb', '20')
 on conflict (key) do nothing;
 
 -- A limit from the settings; anything but a plain number falls back to the default (a typo must never block every write).
@@ -120,3 +124,49 @@ grant execute on function public.corpus_photo_room() to authenticated;
 drop policy if exists "corpus plates insert" on storage.objects;
 create policy "corpus plates insert" on storage.objects for insert to authenticated
   with check (bucket_id = 'plates' and public.corpus_photo_room());
+
+-- 4. Share codes (supabase/share.sql). One snapshot is at most 6 MB (corpus_share_put), but nothing limited how many codes one account could make.
+-- Same rules as documents: checked once per statement, only when a statement adds a code or makes a snapshot bigger; an account over the limit
+-- can still refresh a snapshot without growing it and revoke codes. Skipped when share.sql has not been run.
+create or replace function private.corpus_shares_check(p_owner uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare n bigint; b bigint;
+begin
+  select count(*), coalesce(sum(pg_column_size(data)), 0) into n, b from public.shares where owner = p_owner;
+  if n > private.corpus_quota('quota_shares_count', 100) or b > private.corpus_quota('quota_shares_mb', 20) * 1048576 then
+    raise exception 'user_quota_exceeded' using errcode = '53400';
+  end if;
+end $$;
+
+create or replace function private.corpus_shares_total_ins() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare o uuid;
+begin
+  if auth.uid() is null then return null; end if;
+  for o in select distinct owner from newrows loop perform private.corpus_shares_check(o); end loop;
+  return null;
+end $$;
+
+create or replace function private.corpus_shares_total_upd() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare o uuid;
+begin
+  if auth.uid() is null then return null; end if;
+  for o in
+    select n.owner from newrows n join oldrows p on p.owner = n.owner and p.src = n.src
+     group by n.owner having sum(pg_column_size(n.data)) > sum(pg_column_size(p.data))
+  loop perform private.corpus_shares_check(o); end loop;
+  return null;
+end $$;
+
+do $$
+begin
+  if to_regclass('public.shares') is not null then
+    drop trigger if exists corpus_shares_total_ins on public.shares;
+    create trigger corpus_shares_total_ins after insert on public.shares
+      referencing new table as newrows for each statement execute function private.corpus_shares_total_ins();
+    drop trigger if exists corpus_shares_total_upd on public.shares;
+    create trigger corpus_shares_total_upd after update on public.shares
+      referencing old table as oldrows new table as newrows for each statement execute function private.corpus_shares_total_upd();
+  end if;
+end $$;

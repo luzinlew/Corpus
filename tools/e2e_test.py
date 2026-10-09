@@ -519,13 +519,21 @@ async def main():
             uid = await pg.evaluate('CORPUS_WEB.uid')
             n_docs = sum(d['owner'] == uid for d in state()['docs']); n_obj = sum(o['owner'] == uid for o in state()['objects'])
             quota_window['on'] = True
-            urllib.request.urlopen(API + f'/__quota?docs={n_docs + 1}&photos={n_obj}')
+            n_sh = sum(sh['owner'] == uid for sh in state()['shares'])
+            urllib.request.urlopen(API + f'/__quota?docs={n_docs + 1}&photos={n_obj}&shares={n_sh + 1}')
             qa = await pg.evaluate("""(async()=>{
                 const db=await claude.use('db'),as=await claude.use('assets'),out={};
                 const code=async f=>{try{await f();return 'ok';}catch(e){return e&&e.code||String(e);}};
                 out.first=await code(()=>db.doc('qa/one').set({n:1}));
                 out.second=await code(()=>db.doc('qa/two').set({n:2}));
                 out.photo=await code(()=>as.upload(new Blob([new Uint8Array(100)],{type:'image/png'})));
+                const sh=window.CORPUS_WEB.shares;
+                out.share1=await code(()=>sh.put('deck:qa1','deck','QA',{n:1}));
+                out.share2=await code(()=>sh.put('deck:qa2','deck','QA',{n:2}));
+                out.share1b=await code(()=>sh.put('deck:qa1','deck','QA',{n:2}));
+                await sh.drop('deck:qa1');
+                out.share2b=await code(()=>sh.put('deck:qa2','deck','QA',{n:2}));
+                await sh.drop('deck:qa2');
                 await db.doc('qa/one').delete();
                 out.again=await code(()=>db.doc('qa/two').set({n:2}));
                 await db.doc('qa/two').delete();
@@ -537,11 +545,13 @@ async def main():
             quota_window['on'] = False
             await pg.evaluate("(async()=>{const db=await claude.use('db');await db.doc('qa/ok').delete();})()")
             check('limits: a document over the account limit gets quota_exceeded, one that fits is saved', qa['first'] == 'ok' and qa['second'] == 'quota_exceeded' and qa['again'] == 'ok', json.dumps(qa))
+            check('limits: share codes: one more over the account limit gets quota_exceeded, a refresh of an existing one still works',
+                  qa['share1'] == 'ok' and qa['share2'] == 'quota_exceeded' and qa['share1b'] == 'ok' and qa['share2b'] == 'ok', json.dumps(qa))
             check('limits: a photo over the account limit gets quota_or_state (the app says there is no room)', qa['photo'] == 'quota_or_state', json.dumps(qa))
             check('limits: a document over the size limit is refused, also when it grows by an update', qa['big'] == 'invalid_argument' and qa['grow'] == 'invalid_argument', json.dumps(qa))
             st = state()
             check('limits: refused writes stored nothing and the test documents are gone',
-                  sum(d['owner'] == uid for d in st['docs']) == n_docs and sum(o['owner'] == uid for o in st['objects']) == n_obj and not any(d['coll'] == 'qa' for d in st['docs']))
+                  sum(d['owner'] == uid for d in st['docs']) == n_docs and sum(o['owner'] == uid for o in st['objects']) == n_obj and not any(d['coll'] == 'qa' for d in st['docs']) and sum(sh['owner'] == uid for sh in st['shares']) == n_sh)
 
             # account section and sign out
             await pg.evaluate("go({name:'settings'})")

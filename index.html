@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="web.css?v=8a909949eb">
 <script src="config.js?v=d007ae7e35"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=e202e15173"></script>
+<script src="web.js?v=01f9f6520a"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1128,6 +1128,7 @@ const I18N_PLU={
 };
 const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],et:['jaan','veebr','märts','apr','mai','juuni','juuli','aug','sept','okt','nov','dets']};
 const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
+I18N_DICT.push(["Слишком много кодов обмена — отзовите ненужные.","Too many share codes — revoke the ones you no longer need.","Liiga palju jagamiskoode — tühista mittevajalikud."]);
 let LANG='ru',I18N=null;const TRC=new Map();
 const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const isLetter=ch=>!!ch&&/[A-Za-zА-Яа-яЁёÕÄÖÜõäöü]/.test(ch);
@@ -3946,7 +3947,7 @@ async function shareByCode(kind,id){
   let res,sh;
   try{res=await buildExport(ids,false,kind==='folder'?id:null,true);}catch(e){hideBusy();toast('Не удалось подготовить колоду.');return;}
   try{sh=await api.put(src,kind,obj.name,res.out);}
-  catch(e){hideBusy();const c=e&&e.code;toast(c==='not_set_up'?'Обмен по коду ещё не настроен на сайте.':c==='too_large'?'Колода слишком большая для передачи по коду — поделитесь файлом.':'Не удалось создать код. Проверьте соединение.',5000);return;}
+  catch(e){hideBusy();const c=e&&e.code;toast(c==='not_set_up'?'Обмен по коду ещё не настроен на сайте.':c==='too_large'?'Колода слишком большая для передачи по коду — поделитесь файлом.':c==='quota_exceeded'?'Слишком много кодов обмена — отзовите ненужные.':'Не удалось создать код. Проверьте соединение.',5000);return;}
   let svg='';try{svg=await qrSvg(sh.url);}catch(e){}
   hideBusy();
   const n=res.out.cards.length,np=res.out.plates.length;

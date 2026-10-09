@@ -21,10 +21,10 @@
 |---|---|---|---|---|
 | T-001 | P1 | e2e: убивать группу процессов (deno через npx остаётся висеть на :8000 даже после успешного прогона — проверено 2026-10-09), падать, если порты заняты | merged в main (не выложено) | claude/T-001-e2e-processes |
 | T-002 | P1 | Перенести из claude/corpus-audit-y6w55v: MIME бакета, маска email автора, SVG→JPEG в Anki (без Cloudflare) | deployed 4622347; SQL ещё не выполнен | claude/T-002-raster-mask |
-| T-003 | P1 | Регистрация: setup.sql не перезаписывает invite (`do nothing`), код убрать из src и тестов; переход к открытой регистрации — после T-006, с отдельным одобрением | merged в main (не выложено; код в проде сменит Лев) | claude/T-003-invite-code |
+| T-003 | P1 | Регистрация: setup.sql не перезаписывает invite (`do nothing`), код убрать из src и тестов; переход к открытой регистрации — после T-006, с отдельным одобрением | deployed 724b909; код в проде сменит Лев | claude/T-003-invite-code |
 | T-004 | P2 | CI: .github/workflows/checks.yml (build --check, e2e, push_test) | planned | — |
 | T-005 | P2 | i18n: «Вам передали колоду Corpus…» + проверка e2e, что строки web.js есть в словаре | planned | — |
-| T-006 | P2 | Квота хранилища и размера docs на пользователя (нужна до открытой регистрации) | merged в main (не выложено; порядок: проверить лимиты → сайт → quota.sql) | claude/T-006-quotas |
+| T-006 | P2 | Квота хранилища и размера docs на пользователя (нужна до открытой регистрации) | deployed 724b909; дальше: проверить лимиты → quota.sql | claude/T-006-quotas |
 | T-007 | P3 | corpus-push: принимать endpoint только известных push-сервисов | planned | — |
 | T-008 | P3 | corpus_demo_take: атомарный общий лимит | planned | — |
 | T-009 | P3 | Edge Functions: версия в ответе GET, чтобы видеть, что развёрнуто | planned | — |
@@ -71,7 +71,7 @@
 - расход: implementer 35 480 токенов (Sonnet), 1 вызов субагента, 1 прогон e2e
 
 ### T-003 Код приглашения не хранится в репозитории и не сбрасывается setup.sql
-- статус: merged в main (перемоткой, c470614), не выложено, SQL в проде не выполнялся
+- статус: deployed — gh-pages = 724b909 (2026-10-09, Pages run #26 success; откат 4622347); SQL в проде не выполнялся
 - ветка / файлы: claude/T-003-invite-code от main f8b975a; supabase/setup.sql, src/corpus.html (+ index.html), tools/fake-supabase.js, tools/e2e_test.py, tools/patch_foreign_site.py
 - что изменено: setup.sql — `on conflict do nothing` вместо `do update` (повторный запуск больше не сбрасывает код), новый проект получает случайный код `encode(extensions.gen_random_bytes(6),'hex')`; ссылка «Открыть Corpus» на экране чужого Corpus в claude.ai теперь `https://corpusapp.ee/` без `?i=`; тесты используют `test-invite`
 - НЕ изменено намеренно: регистрация в проде (код в базе остаётся прежним, пока Лев сам его не сменит); открытая регистрация — только после T-006 (квоты) и отдельного одобрения Льва
@@ -82,7 +82,7 @@
 - агенты: ни одного (шесть точечных правок, субагент обошёлся бы дороже)
 
 ### T-006 Лимиты на аккаунт: размер документа, число и объём документов, число и объём фото
-- статус: merged в main (merge-коммит), не выложено, SQL в проде не выполнялся
+- статус: deployed — gh-pages = 724b909 (2026-10-09, Pages run #26 success; откат 4622347). quota.sql в проде НЕ выполнен: сначала запросы на чтение из шапки файла, потом сам файл; живой сайт отсюда не проверялся (сеть контейнера)
 - ветка / файлы: claude/T-006-quotas от main f8b975a; supabase/quota.sql (новый), tools/quota_test.ts (новый), web.js, tools/fake-supabase.js, tools/e2e_test.py, README.md, supabase/setup.sql (только комментарий), index.html (сборка)
 - как устроено: лимиты в private.settings (quota_doc_kb 1024, quota_docs_count 20000, quota_docs_mb 50, quota_photos_mb 300, quota_photos_count 6000), нечисловое значение игнорируется. Документ: триггер BEFORE на docs (54000). Аккаунт целиком: триггеры AFTER INSERT/UPDATE на уровне оператора, одна проверка на пакет (53400). Фото: политика загрузки в storage.objects вызывает public.corpus_photo_room(). Аккаунт сверх лимита читает/удаляет/сохраняет без роста документа — повторение карточек не ломается. Записи без пользователя (service key, SQL Editor) не ограничены
 - web.js: 53400 → quota_exceeded («Хранилище заполнено»), отказ политики загрузки → quota_or_state («Место для фото закончилось»); новых строк интерфейса нет

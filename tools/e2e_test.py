@@ -18,7 +18,7 @@ The test itself checks that its ports are free and stops all its servers (deno u
 import asyncio, base64, io, json, os, pathlib, re, shutil, signal, socket, sqlite3, subprocess, sys, tempfile, time, urllib.request, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SITE_PORT, API_PORT, FN_PORT, INVITE, AI_LIMIT = 8765, 54321, 8000, 'p8wyzmtw', 6
+SITE_PORT, API_PORT, FN_PORT, INVITE, AI_LIMIT = 8765, 54321, 8000, 'test-invite', 6
 API = f'http://localhost:{API_PORT}'
 SITE = f'http://localhost:{SITE_PORT}/corpus/'
 

@@ -70,13 +70,16 @@ create policy "corpus plates delete own" on storage.objects for delete to authen
   using (bucket_id = 'plates' and owner_id = (select auth.uid()::text));
 
 -- 3. Sign-up only with the invite code from the link (?i=...).
+--    A new project gets a random code (this repository is public, so no real code is kept here); running this
+--    file again never changes the code that is already set.
+--    See it:  select value from private.settings where key = 'invite';
 --    Change it later:  update private.settings set value = 'new-code' where key = 'invite';
 --    Open sign-up to anyone:  update private.settings set value = '' where key = 'invite';
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 create table if not exists private.settings (key text primary key, value text not null);
-insert into private.settings (key, value) values ('invite', 'p8wyzmtw')
-on conflict (key) do update set value = excluded.value;
+insert into private.settings (key, value) values ('invite', encode(extensions.gen_random_bytes(6), 'hex'))
+on conflict (key) do nothing;
 
 create or replace function private.corpus_check_invite() returns trigger
 language plpgsql security definer set search_path = '' as $$

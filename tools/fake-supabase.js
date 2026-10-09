@@ -6,7 +6,7 @@ const http = require('http');
 const crypto = require('crypto');
 
 const PORT = +(process.argv[2] || 54321);
-const INVITE = process.argv[3] === undefined ? 'p8wyzmtw' : process.argv[3];
+const INVITE = process.argv[3] === undefined ? 'test-invite' : process.argv[3];
 const users = new Map();      // email -> {id,email,password,meta,created}
 const access = new Map();     // access token -> uid
 const refresh = new Map();    // refresh token -> uid

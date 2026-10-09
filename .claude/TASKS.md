@@ -19,7 +19,7 @@
 ## Очередь
 | id | пр. | задача | статус | ветка |
 |---|---|---|---|---|
-| T-001 | P1 | e2e: убивать группу процессов (deno через npx остаётся висеть на :8000 даже после успешного прогона — проверено 2026-10-09), падать, если порты заняты | ready (ждёт Льва) | claude/T-001-e2e-processes |
+| T-001 | P1 | e2e: убивать группу процессов (deno через npx остаётся висеть на :8000 даже после успешного прогона — проверено 2026-10-09), падать, если порты заняты | merged в main (не выложено) | claude/T-001-e2e-processes |
 | T-002 | P1 | Перенести из claude/corpus-audit-y6w55v: MIME бакета, маска email автора, SVG→JPEG в Anki (без Cloudflare) | planned | — |
 | T-003 | P1 | Регистрация: setup.sql не перезаписывает invite (`do nothing`), код убрать из src и тестов; переход к открытой регистрации — после T-006, с отдельным одобрением | planned, решение Льва | — |
 | T-004 | P2 | CI: .github/workflows/checks.yml (build --check, e2e, push_test) | planned | — |
@@ -29,11 +29,12 @@
 | T-008 | P3 | corpus_demo_take: атомарный общий лимит | planned | — |
 | T-009 | P3 | Edge Functions: версия в ответе GET, чтобы видеть, что развёрнуто | planned | — |
 | T-010 | P3 | README/CLAUDE.md: публичный бакет, сброс пароля, список SQL-файлов, адрес в push_test | planned | — |
+| T-011 | P2 | Нестабильный e2e: (1) «import keeps the order…» — два фото с одинаковым createdAt пришли как [411, 414, 412, 413]; (2) таймаут app_ready (стр. 798, вход с новым паролем). По одному разу из 3 прогонов на main 7e7556b; код приложения не менялся | planned | — |
 
 ## Журнал
 
 ### T-000 Конфигурация агентного процесса (этап 1)
-- статус: ready (ждёт решения Льва о слиянии)
+- статус: merged в main 2026-10-09 (перемотка до c5a632b), не выложено
 - шаг: 8
 - ветка / файлы: claude/agent-workflow — CLAUDE.md, .claude/settings.json, .claude/hooks/guard.py, .claude/agents/*.md, .claude/skills/*/SKILL.md, .claude/TASKS.md
 - проверки (2026-10-09, Claude Code 2.1.295): settings.json — валидный JSON; guard.py — 33/33 случаев (deny/ask/pass) + ask для `git push` с main и detached HEAD; хук сработал вживую в сессии; `claude -p` init: 4 агента и 3 скилла загружены; build --check → up to date; e2e → 126 PASS, ALL PASSED; push_test → ALL PUSH TESTS PASSED

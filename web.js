@@ -245,6 +245,7 @@
       var e = (res && res.error) || {}, st = (res && res.status) | 0, m = String(e.message || '');
       if (e.code === 'P0002' || /doc_missing/.test(m)) return { code: 'invalid_argument', message: 'document does not exist' };
       if (e.code === '25006' || /read-only/i.test(m)) return { code: 'quota_exceeded', message: m || 'database is read-only' };
+      if (e.code === '53400' || /user_quota_exceeded/.test(m)) return { code: 'quota_exceeded', message: m || 'storage limit of this account reached' };   // supabase/quota.sql
       if (st === 413 || e.code === '54000') return { code: 'invalid_argument', message: m || 'too large' };
       return { code: 'unavailable', message: m || 'network error' };
     }
@@ -419,6 +420,7 @@
       if (sc === '413' || /maximum allowed size|too large/i.test(m)) return { code: 'too_large', message: m };
       if (sc === '415' || /mime type/i.test(m)) return { code: 'unsupported_type', message: m };
       if (sc === '429' || /rate limit/i.test(m)) return { code: 'rate_limited', message: m };
+      if (/row-level security/i.test(m)) return { code: 'quota_or_state', message: m };   // the upload policy of supabase/quota.sql: no room left
       if (/quota|exceed/i.test(m)) return { code: 'quota_or_state', message: m };
       return { code: 'unavailable', message: m || 'upload failed' };
     }

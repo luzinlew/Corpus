@@ -235,6 +235,8 @@ async def main():
         async with async_playwright() as p:
             b = await p.chromium.launch()
 
+            quota_window = {'on': False}   # True only while the test provokes refusals from the account limits
+
             async def open_ctx(**kw):
                 ctx = await b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True, **kw)
                 await ctx.add_init_script('window.__TEST__=true;')
@@ -251,6 +253,7 @@ async def main():
                 pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url)
                       and not ('/functions/v1/corpus-ai' in r.url and r.status in (404, 429))   # provoked: function off, daily limit
                       and not ('/rpc/corpus_share_open' in r.url and r.status == 404)             # provoked: a wrong share code
+                      and not (quota_window['on'] and r.status in (400, 413, 503))                 # provoked: the account limits (see «limits» below)
                       and errs.append(f'http {r.status}: {r.url}'))
                 return ctx, pg, errs
 
@@ -507,6 +510,38 @@ async def main():
             await app_ready(pg)
             await pg.wait_for_function("view.name==='calendar'", timeout=5000)
             check('a reminder link opens the calendar, then leaves the address clean', '?v=' not in pg.url, pg.url)
+
+            # ---------- limits per account (supabase/quota.sql): the database refuses, the app gets clear error codes ----------
+            for _ in range(20):   # let the app finish its background saves: the number of stored documents stops changing
+                before = len(state()['docs']); await asyncio.sleep(0.7)
+                if len(state()['docs']) == before:
+                    break
+            uid = await pg.evaluate('CORPUS_WEB.uid')
+            n_docs = sum(d['owner'] == uid for d in state()['docs']); n_obj = sum(o['owner'] == uid for o in state()['objects'])
+            quota_window['on'] = True
+            urllib.request.urlopen(API + f'/__quota?docs={n_docs + 1}&photos={n_obj}')
+            qa = await pg.evaluate("""(async()=>{
+                const db=await claude.use('db'),as=await claude.use('assets'),out={};
+                const code=async f=>{try{await f();return 'ok';}catch(e){return e&&e.code||String(e);}};
+                out.first=await code(()=>db.doc('qa/one').set({n:1}));
+                out.second=await code(()=>db.doc('qa/two').set({n:2}));
+                out.photo=await code(()=>as.upload(new Blob([new Uint8Array(100)],{type:'image/png'})));
+                await db.doc('qa/one').delete();
+                out.again=await code(()=>db.doc('qa/two').set({n:2}));
+                await db.doc('qa/two').delete();
+                return out;})()""")
+            urllib.request.urlopen(API + '/__quota?reset=1&docKb=1')
+            qa['big'] = await pg.evaluate("(async()=>{const db=await claude.use('db');try{await db.doc('qa/big').set({p:'x'.repeat(5000)});return 'ok';}catch(e){return e.code;}})()")
+            qa['grow'] = await pg.evaluate("(async()=>{const db=await claude.use('db');await db.doc('qa/ok').set({n:1});try{await db.doc('qa/ok').update({p:'x'.repeat(5000)});return 'ok';}catch(e){return e.code;}})()")
+            urllib.request.urlopen(API + '/__quota?reset=1')
+            quota_window['on'] = False
+            await pg.evaluate("(async()=>{const db=await claude.use('db');await db.doc('qa/ok').delete();})()")
+            check('limits: a document over the account limit gets quota_exceeded, one that fits is saved', qa['first'] == 'ok' and qa['second'] == 'quota_exceeded' and qa['again'] == 'ok', json.dumps(qa))
+            check('limits: a photo over the account limit gets quota_or_state (the app says there is no room)', qa['photo'] == 'quota_or_state', json.dumps(qa))
+            check('limits: a document over the size limit is refused, also when it grows by an update', qa['big'] == 'invalid_argument' and qa['grow'] == 'invalid_argument', json.dumps(qa))
+            st = state()
+            check('limits: refused writes stored nothing and the test documents are gone',
+                  sum(d['owner'] == uid for d in st['docs']) == n_docs and sum(o['owner'] == uid for o in st['objects']) == n_obj and not any(d['coll'] == 'qa' for d in st['docs']))
 
             # account section and sign out
             await pg.evaluate("go({name:'settings'})")

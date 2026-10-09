@@ -96,3 +96,5 @@ create trigger corpus_check_invite before insert on auth.users
 
 -- 4. AI plans and daily limits: run supabase/ai.sql as well.
 -- 5. Site statistics for admins: run supabase/stats.sql as well.
+-- 6. Limits per account (documents and photos): run supabase/quota.sql as well. Running THIS file again puts the plain photo upload
+--    policy back (section 2), which removes the photo limit, so run quota.sql again after it.

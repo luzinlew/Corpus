@@ -21,6 +21,24 @@ const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude 
 const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const activity = new Map();   // uid -> Map(day -> {opens, last})
 const log = [];
+/* per-account limits, as in supabase/quota.sql (defaults too); the tests change them through /__quota */
+const Q0 = { docKb: 1024, docs: 20000, docsMb: 50, photos: 6000, photosMb: 300 };
+const Q = { ...Q0 };
+const sizeOf = (d) => Buffer.byteLength(JSON.stringify(d));
+/* what the database refuses when `items` ([{key, data}]) are written for uid: a document over the limit (unless it does not grow),
+   and, when the write adds documents or makes them bigger, an account over its total */
+function docsRefusal(uid, items) {
+  let count = 0, bytes = 0;
+  for (const r of docs.values()) if (r.owner === uid) { count++; bytes += sizeOf(r.data); }
+  const before = { count, bytes };
+  for (const it of items) {
+    const old = docs.get(it.key), sz = sizeOf(it.data);
+    if (sz > Q.docKb * 1024 && (!old || sz > sizeOf(old.data))) return { status: 413, code: '54000', message: 'doc_too_large' };
+    if (old) bytes += sz - sizeOf(old.data); else { count++; bytes += sz; }
+  }
+  if ((count > before.count || bytes > before.bytes) && (count > Q.docs || bytes > Q.docsMb * 1048576)) return { status: 503, code: '53400', message: 'user_quota_exceeded' };
+  return null;
+}
 
 const b64u = (s) => Buffer.from(s).toString('base64url');
 function jwt(u) {
@@ -104,6 +122,11 @@ http.createServer(async (req, res) => {
   /* ---------- test helpers ---------- */
   if (p === '/__state') { send(res, 200, { users: users.size, docs: Array.from(docs.values()), objects: Array.from(objects.entries()).map(([k, v]) => ({ name: k, owner: v.owner, type: v.type, size: v.buf.length })), shares: Array.from(shares.values()) }); return; }
   if (p === '/__log') { send(res, 200, log.splice(0)); return; }
+  if (p === '/__quota') {   // ?reset=1, or any of docKb, docs, docsMb, photos, photosMb
+    if (u.searchParams.get('reset') === '1') Object.assign(Q, Q0);
+    for (const k of Object.keys(Q)) if (u.searchParams.has(k)) Q[k] = +u.searchParams.get(k);
+    send(res, 200, Q); return;
+  }
   if (p === '/__fn') { FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; send(res, 200, { fn: FN_URL }); return; }
 
   /* ---------- auth ---------- */
@@ -163,6 +186,8 @@ http.createServer(async (req, res) => {
       for (const r of arr) {
         if (!uid || r.owner !== uid) { send(res, 403, { code: '42501', message: 'new row violates row-level security policy for table "docs"', details: null, hint: null }); return; }
       }
+      const refused = docsRefusal(uid, arr.map((r) => ({ key: r.owner + '|' + r.coll + '|' + r.id, data: r.data })));
+      if (refused) { send(res, refused.status, { code: refused.code, message: refused.message, details: null, hint: null }); return; }
       for (const r of arr) docs.set(r.owner + '|' + r.coll + '|' + r.id, { owner: r.owner, coll: r.coll, id: r.id, data: r.data, updated_at: r.updated_at || new Date().toISOString() });
       send(res, 201); return;
     }
@@ -209,7 +234,9 @@ http.createServer(async (req, res) => {
     const uid = uidOf(req);
     const k = uid + '|' + body.p_coll + '|' + body.p_id, row = docs.get(k);
     if (!uid || !row) { send(res, 404, { code: 'P0002', message: 'doc_missing', details: null, hint: null }); return; }
-    row.data = merge(row.data, body.p_patch); row.updated_at = new Date().toISOString();
+    const merged = merge(row.data, body.p_patch), refused = docsRefusal(uid, [{ key: k, data: merged }]);
+    if (refused) { send(res, refused.status, { code: refused.code, message: refused.message, details: null, hint: null }); return; }
+    row.data = merged; row.updated_at = new Date().toISOString();
     send(res, 204); return;
   }
 
@@ -300,6 +327,9 @@ http.createServer(async (req, res) => {
     if (!file) { send(res, 400, { statusCode: '400', error: 'invalid', message: 'no file' }); return; }
     if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) { send(res, 400, { statusCode: '415', error: 'invalid_mime_type', message: 'mime type ' + file.type + ' is not supported' }); return; }
     if (file.buf.length > 26214400) { send(res, 400, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' }); return; }
+    let nPhotos = 0, bPhotos = 0;
+    for (const o of objects.values()) if (o.owner === uid) { nPhotos++; bPhotos += o.buf.length; }
+    if (nPhotos >= Q.photos || bPhotos >= Q.photosMb * 1048576) { send(res, 400, { statusCode: '403', error: 'Unauthorized', message: 'new row violates row-level security policy' }); return; }   // the upload policy of supabase/quota.sql
     if (objects.has(name)) { send(res, 400, { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' }); return; }
     objects.set(name, { owner: uid, type: file.type, buf: file.buf });
     send(res, 200, { Key: 'plates/' + name, Id: crypto.randomUUID() }); return;

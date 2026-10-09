@@ -1122,6 +1122,7 @@ const I18N_PLU={
 const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],et:['jaan','veebr','märts','apr','mai','juuni','juuli','aug','sept','okt','nov','dets']};
 const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
+I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
 let LANG='ru',I18N=null;const TRC=new Map();
 const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const isLetter=ch=>!!ch&&/[A-Za-zА-Яа-яЁёÕÄÖÜõäöü]/.test(ch);
@@ -1815,9 +1816,10 @@ SCREENS.home={
       (S.loadErr?'<div class="banner">Не удалось загрузить сохранённые данные. Обновите страницу.</div>':'');
     const head='<header class="svhead"><div class="brand"><span class="sv-logo" aria-hidden="true"></span>Corpus</div><div class="hbtns"><button class="ibtn sv-round" data-act="tour" aria-label="Что умеет Corpus" title="Что умеет Corpus">'+ic('help')+'</button><button class="ibtn sv-round" data-act="settings" aria-label="Настройки и резервная копия">'+ic('gear')+'</button></div></header>';
     if(!S.decks.length){
+      const st=starterBtn(true);   // a ready-made folder to start with: the one obvious first step; making a deck or importing stays next to it
       return '<div class="page tabbed svhome">'+head+banners+
-        '<div class="sv-empty">'+kostik(60,'hi','kk-float')+'<div class="kbubble big" data-noi18n>'+T3('Привет! Я <b>Костик</b> — помогу выучить анатомию. Создадим первую колоду?','Hi! I’m <b>Kostik</b> — I’ll help you learn anatomy. Shall we create your first deck?','Tere! Mina olen <b>Kostik</b> — aitan sul anatoomiat õppida. Loome esimese paki?')+'</div>'+
-        '<button class="btn primary big" data-act="newDeck">'+ic('plus',18)+'Создать колоду</button>'+starterBtn()+'<button class="btn line" data-act="ankiPick">'+ic('import',18)+'Импорт из Anki</button><button class="btn quiet" data-act="settings" data-noi18n>'+T3('Восстановить из файла','Restore from a file','Taasta failist')+'</button><button class="btn quiet" data-act="tour">Что умеет Corpus?</button></div></div>';
+        '<div class="sv-empty">'+kostik(60,'hi','kk-float')+'<div class="kbubble big" data-noi18n>'+T3('Привет! Я <b>Костик</b> — помогу выучить анатомию. '+(st?'Начнём с готовой папки или создадим свою колоду?':'Создадим первую колоду?'),st?'Hi! I’m <b>Kostik</b> — I’ll help you learn anatomy. Shall we start with a ready-made folder, or make your own deck?':'Hi! I’m <b>Kostik</b> — I’ll help you learn anatomy. Shall we create your first deck?',st?'Tere! Mina olen <b>Kostik</b> — aitan sul anatoomiat õppida. Alustame valmis kaustaga või teeme oma paki?':'Tere! Mina olen <b>Kostik</b> — aitan sul anatoomiat õppida. Loome esimese paki?')+'</div>'+
+        st+'<button class="btn '+(st?'line':'primary big')+'" data-act="newDeck">'+ic('plus',18)+'Создать колоду</button>'+'<button class="btn line" data-act="ankiPick">'+ic('import',18)+'Импорт из Anki</button><button class="btn quiet" data-act="settings" data-noi18n>'+T3('Восстановить из файла','Restore from a file','Taasta failist')+'</button><button class="btn quiet" data-act="tour">Что умеет Corpus?</button></div></div>';
     }
     const exE=examsUpcoming()[0];const ex=exE&&exDays(exE)<=30?exStat(exE):null;
     const exName=ex?exTitle(exE):'';
@@ -3934,7 +3936,7 @@ async function importData(data,opts){
    short code; the other person's Corpus copies it — photos included — on import. Not on claude.ai. ---------- */
 function sharesApi(){const W=window.CORPUS_WEB;return W&&W.shares?W.shares:null;}
 /* website only: a ready-made folder for an empty account (CORPUS_CONFIG.starter = its share code) */
-function starterBtn(){return sharesApi()&&window.CORPUS_WEB.starter?'<button class="btn line" data-act="starter">'+ic('import',18)+'Взять готовую папку «Kolju»</button>':'';}
+function starterBtn(first){return sharesApi()&&window.CORPUS_WEB.starter?(first?'<button class="btn primary big" data-act="starter">'+ic('play',18)+'Начать с готовой папки «Kolju»</button>':'<button class="btn line" data-act="starter">'+ic('import',18)+'Взять готовую папку «Kolju»</button>'):'';}
 function shareCodeText(c){return String(c||'').replace(/(.{5})(?=.)/g,'$1 ');}
 async function qrSvg(text){
   if(!window.qrcode)await loadScript(window.CORPUS_WEB.qrScript);

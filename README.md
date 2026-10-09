@@ -18,6 +18,7 @@ Corpus — карточки по анатомии из фото атласа: р
 | `supabase/ai.sql` | Тарифы и дневные лимиты ИИ: `ai_plans`, `ai_usage`, функция `corpus_ai_take` |
 | `supabase/reward.sql` | Награда недели: самому активному и точному +20 запросов ИИ (`corpus_week_award`, баланс в `ai_bonus`) |
 | `supabase/share.sql` | Обмен колодами по коду / QR: таблица `shares`, функции `corpus_share_put`, `corpus_share_open` |
+| `supabase/quota.sql` | Лимиты на аккаунт: размер документа, число и общий объём документов, число и объём фото. Проверяет сама база, значения в `private.settings` |
 | `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
 | `supabase/push.sql`, `supabase/functions/corpus-push/` | Push-уведомления: ключи VAPID, расписание каждые 15 минут (pg_cron), рассылка |
 | `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js, qrcode-generator |
@@ -140,6 +141,29 @@ select email, created_at, last_sign_in_at from auth.users order by created_at;
 ```sql
 update private.settings set value = 'you@example.com, other@example.com' where key = 'admins';
 ```
+
+## Лимиты на аккаунт
+
+`supabase/quota.sql` не даёт одному аккаунту занять всю базу и все фото. Лимиты хранятся в `private.settings` и применяются к следующей записи без передеплоя:
+
+| Ключ | Что ограничивает | По умолчанию |
+|---|---|---|
+| `quota_doc_kb` | один документ, КБ (пачка карточек не больше ~100 КБ) | 1024 |
+| `quota_docs_count` | документов на аккаунт | 20000 |
+| `quota_docs_mb` | все документы аккаунта вместе, МБ | 50 |
+| `quota_photos_mb` | все фото аккаунта вместе, МБ | 300 |
+| `quota_photos_count` | фото на аккаунт | 6000 |
+
+Ничего уже сохранённого не удаляется. Аккаунт, который уперся в лимит, по-прежнему читает, удаляет и сохраняет изменения, не увеличивающие документ (повторение карточек продолжает работать); новые документы и фото добавить нельзя, пока не освободится место. Приложение показывает «Хранилище заполнено» / «Место для фото закончилось». Фото считаются при загрузке по уже сохранённым, поэтому несколько загрузок одновременно могут превысить лимит на пару фото.
+
+Это лимиты **на аккаунт**, а не на весь проект: много аккаунтов в сумме всё ещё могут заполнить 500 МБ базы и 1 ГБ фото. Перед открытой регистрацией нужен ещё предел на число новых аккаунтов (ограничение частоты регистраций в Supabase → Authentication, капча).
+
+```sql
+update private.settings set value = '500' where key = 'quota_photos_mb';   -- поменять лимит
+-- кто сколько занимает сейчас (только чтение) — запросы в шапке supabase/quota.sql
+```
+
+Проверка SQL на настоящем Postgres (PGlite): `npx --yes deno run --allow-read --allow-env --allow-net --allow-sys --allow-ffi tools/quota_test.ts`.
 
 ## Ограничения бесплатного Supabase
 

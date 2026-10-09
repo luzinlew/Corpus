@@ -371,6 +371,13 @@ button:disabled{cursor:default;opacity:.38}
 .donebox{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:6px}
 .donebox h2{margin:8px 0 0;font-size:22px}
 .donebox p{margin:0;max-width:340px}
+.sumrow{display:flex;gap:10px;justify-content:center;margin:14px 0 4px}
+.sumc{min-width:84px;padding:10px 12px;border-radius:14px;background:var(--surface2);border:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.sumc b{font-size:22px;font-variant-numeric:tabular-nums}.sumc span{font-size:12px;color:var(--ink2)}
+.sumhead{margin:14px 0 0;font-size:13px;font-weight:600;color:var(--ink2)}
+.sumhard{list-style:none;margin:6px 0 0;padding:0;width:100%;max-width:340px;text-align:left;display:flex;flex-direction:column;gap:4px}
+.sumhard li{display:flex;justify-content:space-between;gap:10px;padding:8px 12px;border-radius:10px;background:var(--surface2);font-size:14px}
+.sumhard li i{font-style:normal;color:var(--bad);font-weight:600}
 .done-mark{width:64px;height:40px;border-radius:6px;box-shadow:inset 0 0 0 3px var(--ok);display:flex;align-items:center;justify-content:center;color:var(--ok)}
 .done-btns{display:flex;flex-direction:column;gap:8px;margin-top:16px;min-width:240px}
 
@@ -1114,6 +1121,7 @@ const I18N_PLU={
 };
 const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],et:['jaan','veebr','märts','apr','mai','juuni','juuli','aug','sept','okt','nov','dets']};
 const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
+I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
 let LANG='ru',I18N=null;const TRC=new Map();
 const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const isLetter=ch=>!!ch&&/[A-Za-zА-Яа-яЁёÕÄÖÜõäöü]/.test(ch);
@@ -2477,14 +2485,23 @@ function studyPanel(){
   const name=c.term?'<div class="latin">'+esc(c.term)+'</div>'+spkBtn(c.term):'<div class="sub">Подпись открыта на рисунке</div>';
   return top+'<div class="ans">'+name+(c.note?'<div class="anote">'+esc(c.note)+'</div>':'')+'</div>'+rateHtml(c);
 }
+/* what the finished session looked like: answers, share of good ones, day streak and the cards missed most often (from this session's own log) */
+function sessHardList(){const m={};(SS.log||[]).forEach((x,i)=>{if(!x.ok){const e=m[x.id]||(m[x.id]={id:x.id,n:0,i:0});e.n++;e.i=i;}});return Object.values(m).filter(e=>{const c=cardById(e.id);return c&&!cardExcluded(c);}).sort((a,b)=>b.n-a.n||b.i-a.i).slice(0,5);}
+function sessSummary(){
+  const L=SS.log||[];if(!L.length)return {html:'',hard:0};
+  const ok=L.filter(x=>x.ok).length,sk=streakOf(dayStats(sessionDeckIds())),hard=sessHardList();
+  return {hard:hard.length,html:'<div class="sumrow"><div class="sumc"><b>'+L.length+'</b><span>ответов</span></div><div class="sumc"><b>'+Math.round(ok/L.length*100)+'%</b><span>верно</span></div>'+(sk>0?'<div class="sumc"><b>'+sk+'</b><span>серия, дн.</span></div>':'')+'</div>'+
+    (hard.length?'<div class="sumhead">Чаще всего ошибались</div><ul class="sumhard">'+hard.map(e=>'<li><span data-noi18n>'+esc(cardTitle(cardById(e.id)))+'</span><i>×'+e.n+'</i></li>').join('')+'</ul>':'')};
+}
 function doneHtml(){
+  const sm=sessSummary();
   const scope=SS.examId&&examById(SS.examId)?{name:exTitle(examById(SS.examId))}:SS.folderId?folderById(SS.folderId):deckById(SS.deckId);let next='';
   if(!SS.cram){const ids=sessionDeckIds();const l=S.cards.filter(c=>ids.indexOf(c.deckId)>=0&&!cardExcluded(c)&&(c.type==='learn'||c.type==='relearn')).sort((a,b)=>a.due-b.due)[0];if(l)next=' Следующая карточка будет готова через '+fmtDelay(l.due-Date.now())+'.';}
   return '<div class="full"><header class="bar"><button class="ibtn plain" data-act="studyExit" aria-label="Закрыть">'+ic('close')+'</button><div class="bar-title"><b data-noi18n>'+esc(scope?scope.name:'')+'</b></div>'+gearBtn(1)+'</header>'+
-    (SS.limitHit?'<div class="donebox">'+doneMark()+'<h2>Сессия завершена</h2><p class="muted">'+pl(SS.done,'ответ','ответа','ответов')+' за '+pl(Math.max(1,Math.round((Date.now()-SS.t0)/MIN)),'минуту','минуты','минут')+'. Хорошая работа — можно передохнуть или продолжить.</p>'+
+    (SS.limitHit?'<div class="donebox">'+doneMark()+'<h2>Сессия завершена</h2><p class="muted">'+pl(SS.done,'ответ','ответа','ответов')+' за '+pl(Math.max(1,Math.round((Date.now()-SS.t0)/MIN)),'минуту','минуты','минут')+'. Хорошая работа — можно передохнуть или продолжить.</p>'+sm.html+
     '<div class="done-btns"><button class="btn primary" data-act="sessMore">'+(SS.limit==='t10'?'Ещё 10 минут':'Ещё 20 карточек')+'</button><button class="btn line" data-act="studyExit">Закончить</button>':
-    '<div class="donebox">'+doneMark()+'<h2>'+(SS.cram?'Тренировка завершена':'На сегодня всё')+'</h2><p class="muted">'+(SS.done?'Ответов за сессию: '+SS.done+'.':'Карточек к повтору нет.')+next+'</p>'+
-    '<div class="done-btns"><button class="btn primary" data-act="studyExit">'+(SS.examId?'К календарю':'К колоде')+'</button>')+(SS.undo.length?'<button class="btn line" data-act="studyUndo">Отменить последний ответ</button>':'')+'</div></div></div>';
+    '<div class="donebox">'+doneMark()+'<h2>'+(SS.cram?'Тренировка завершена':'На сегодня всё')+'</h2><p class="muted">'+(sm.html?'':(SS.done?'Ответов за сессию: '+SS.done+'.':'Карточек к повтору нет.'))+next+'</p>'+sm.html+
+    '<div class="done-btns">'+(sm.hard?'<button class="btn primary" data-act="sessHard">Повторить трудные</button>':'')+'<button class="btn '+(sm.hard?'line':'primary')+'" data-act="studyExit">'+(SS.examId?'К календарю':'К колоде')+'</button><button class="btn line" data-act="studyHome">На главную</button>')+(SS.undo.length?'<button class="btn line" data-act="studyUndo">Отменить последний ответ</button>':'')+'</div></div></div>';
 }
 SCREENS.study={
   html(){
@@ -2539,6 +2556,7 @@ function rate(r){
   const d=deckById(c.deckId);
   try{
     SS.undo.push({id:c.id,deckId:c.deckId,card:JSON.parse(JSON.stringify(c)),mates:SS.cram?null:grpMates(c).map(o=>JSON.parse(JSON.stringify(o))),newToday:d.newToday?Object.assign({},d.newToday):null,cramQueue:SS.cramQueue.slice(),done:SS.done,ok:r>1,counted:!SS.cram});
+    (SS.log=SS.log||[]).push({id:c.id,ok:r>1});
     if(SS.undo.length>30)SS.undo.shift();
     SS.streak=r>1?(SS.streak||0)+1:0;
     if(SS.cram){if(r===1)SS.cramQueue.splice(Math.min(3,SS.cramQueue.length),0,c.id);}
@@ -2584,7 +2602,7 @@ function nextCard(){
 }
 function undoStudy(){
   cancelAuto();
-  const s=SS&&SS.undo.pop();if(!s)return;const c=cardById(s.id);if(!c){render();return;}
+  const s=SS&&SS.undo.pop();if(!s)return;if(SS.log)SS.log.pop();const c=cardById(s.id);if(!c){render();return;}
   const d=deckById(s.deckId||SS.deckId);
   if(s.counted){const hk=c.hint&&!s.card.hint?c.hint:null;Object.keys(c).forEach(k=>{if(!(k in s.card))delete c[k];});Object.assign(c,s.card);if(hk){c.hint=hk;c.hintLeft=hintShows();}persist('terms',c.id);
     (s.mates||[]).forEach(m=>{const o=cardById(m.id);if(!o)return;SCHED_KEYS.forEach(k=>{if(m[k]===undefined)delete o[k];else o[k]=m[k];});persist('terms',o.id);});
@@ -5835,6 +5853,8 @@ const A={
   openCard:el=>{const c=cardById(el.dataset.id);if(c)openEditor(c.plateId,c.id,{name:'deck',deckId:view.deckId,tab:'cards',q:view.q});},
   zoomIn:()=>{const z=setZoom(zoomStep(1));if(SS&&view.name==='study'){SS.zoom=z;focusTarget();}},
   zoomOut:()=>{const z=setZoom(zoomStep(-1));if(SS&&view.name==='study')SS.zoom=z;},
+  studyHome:()=>{SS=Object.assign({},{zoom:SS?SS.zoom:1});go({name:'home'});},
+  sessHard:()=>{if(!SS||!SS.log)return;const sub=sessHardList().map(e=>cardById(e.id));if(!sub.length){toast('Трудных карточек пока нет');return;}const sc={deckId:SS.deckId,deckIds:SS.deckIds,folderId:SS.folderId,examId:SS.examId};startSession(sc,true,sub,SS.mode);},
   studyExit:()=>{const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
   studyUndo:()=>undoStudy(),
   introNext:()=>introGo(1),
@@ -6015,7 +6035,7 @@ if(window.__TEST__){
   window.doReveal=doReveal;window.doCheck=doCheck;window.doPick=doPick;window.rate=rate;
   window.undoStudy=undoStudy;window.updStudy=updStudy;window.render=render;window.go=go;window.diffHtml=diffHtml;
   window.select=select;window.openEditor=openEditor;window.recoverFromError=recoverFromError;
-  window.nextCard=nextCard;window.nearestUnnamed=nearestUnnamed;
+  window.nextCard=nextCard;window.sessSummary=sessSummary;window.nearestUnnamed=nearestUnnamed;
   window.platesOf=platesOf;window.cardsOfDeck=cardsOfDeck;window.cardsOfPlate=cardsOfPlate;
   window.plateExcluded=plateExcluded;window.cardExcluded=cardExcluded;window.weakness=weakness;window.weakOrder=weakOrder;
   window.schedule=schedule;window.deckCounts=deckCounts;window.sessCounts=sessCounts;

@@ -602,7 +602,7 @@ async def main():
             check('share link: folder, photo and cards copied', (await pg.evaluate('view.name')) == 'folder')
             check('share link: the code is removed from the address', 's=' not in pg.url, pg.url)
             me = await pg.evaluate('CORPUS_WEB.uid')
-            st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == 1)
+            st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == 1 and any(d['coll'] == 'plates' and d['owner'] == me for d in st['docs']))   # the photo, then its document
             check("share link: the photo is the friend's own copy", sum(1 for o in st['objects'] if o['owner'] == me) == 1 and
                   any(d['coll'] == 'plates' and d['owner'] == me for d in st['docs']))
             ph = await photo_check(pg)
@@ -735,6 +735,43 @@ async def main():
 
             urllib.request.urlopen(API + '/__fn?off=0')
             errs_b = list(errs)
+            # ---------- summary after a study session: answers, accuracy, the cards missed, review them, back to home ----------
+            did_s = await pg.evaluate("""(()=>{const p0=S.plates[0],t0=Date.now(),did=newId('decks');
+              S.decks.push({id:did,name:'Kokkuvõte',newPerDay:100,mode:'hideAll',createdAt:t0});persist('decks',did);
+              const pid=newId('plates');S.plates.push({id:pid,deckId:did,assetId:p0.assetId,w:p0.w,h:p0.h,createdAt:t0});persist('plates',pid);
+              for(let i=1;i>=0;i--){const c=normCard({id:newId('terms'),deckId:did,plateId:pid,term:'pars '+(i+1),note:'osa '+(i+1),x:2+i*24,y:2,w:18,h:5,type:'new',createdAt:t0+i});S.cards.push(c);persist('terms',c.id);}
+              return did;})()""")
+            await pg.evaluate(f"startStudy('{did_s}')")
+            await pg.wait_for_selector('.full.study')
+            for n in range(8):   # the first answer is wrong ("again"), every later one is "easy", until the queue is empty
+                if not await pg.evaluate('!!SS.cur'):
+                    break
+                await pg.evaluate('doReveal()')
+                await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+                await pg.evaluate(f'rate({1 if n == 0 else 4})')
+                await asyncio.sleep(0.4)
+            await pg.wait_for_selector('.donebox .sumrow', timeout=10000)
+            tiles = await pg.eval_on_selector_all('.sumc', 'els => els.map(e => e.innerText.replace(/\\s+/g, " ").trim())')
+            check('summary: 3 answers, 67% correct (one wrong, two easy)', len(tiles) >= 2 and tiles[0].startswith('3 ') and tiles[1].startswith('67%'), json.dumps(tiles, ensure_ascii=False))
+            hard = await pg.eval_on_selector_all('.sumhard li', 'els => els.map(e => e.innerText.replace(/\\s+/g, " ").trim())')
+            check('summary: the missed card is listed once with how often', len(hard) == 1 and hard[0].endswith('×1'), json.dumps(hard, ensure_ascii=False))
+            btns = await pg.eval_on_selector_all('.done-btns button', 'els => els.map(e => e.innerText.trim())')
+            check('summary: buttons are translated (review difficult cards, back to home)', 'Korda rasked kaarte' in btns and 'Avalehele' in btns, json.dumps(btns, ensure_ascii=False))
+            before = await pg.evaluate(f"JSON.stringify(cardsOfDeck('{did_s}').map(c=>[c.id,c.type,c.reps,c.due,c.ivl,c.ease,c.step,c.lapses]))")
+            await pg.click('[data-act=sessHard]')
+            await pg.wait_for_selector('.full.study')
+            check('summary: «review difficult cards» starts a practice session on exactly that card', await pg.evaluate('SS.cram===true && SS.cramQueue.length+(SS.cur?1:0)===1'))
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            await pg.evaluate('rate(3)')
+            await pg.wait_for_selector('.donebox .sumrow', timeout=10000)
+            check('summary: practice does not touch the schedule', await pg.evaluate(f"JSON.stringify(cardsOfDeck('{did_s}').map(c=>[c.id,c.type,c.reps,c.due,c.ivl,c.ease,c.step,c.lapses]))") == before)
+            check('summary: nothing missed → no «review» button', not await pg.query_selector('[data-act=sessHard]'))
+            await pg.click('[data-act=studyHome]')
+            await pg.wait_for_function("view.name==='home'", timeout=5000)
+            check('summary: «back to home» leads to the home screen', True)
+            check('summary: a session without answers shows no summary', await pg.evaluate("(()=>{const o=SS;SS={log:[],deckIds:[]};const r=sessSummary();SS=o;return r.html===''&&r.hard===0;})()"))
+
             await ctx.close()
 
             # ---------- storage blocked: the code from the link still works ----------

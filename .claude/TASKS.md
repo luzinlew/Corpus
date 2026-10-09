@@ -20,7 +20,7 @@
 | id | пр. | задача | статус | ветка |
 |---|---|---|---|---|
 | T-001 | P1 | e2e: убивать группу процессов (deno через npx остаётся висеть на :8000 даже после успешного прогона — проверено 2026-10-09), падать, если порты заняты | merged в main (не выложено) | claude/T-001-e2e-processes |
-| T-002 | P1 | Перенести из claude/corpus-audit-y6w55v: MIME бакета, маска email автора, SVG→JPEG в Anki (без Cloudflare) | ready (ждёт Льва: SQL + деплой) | claude/T-002-raster-mask |
+| T-002 | P1 | Перенести из claude/corpus-audit-y6w55v: MIME бакета, маска email автора, SVG→JPEG в Anki (без Cloudflare) | deployed 4622347; SQL ещё не выполнен | claude/T-002-raster-mask |
 | T-003 | P1 | Регистрация: setup.sql не перезаписывает invite (`do nothing`), код убрать из src и тестов; переход к открытой регистрации — после T-006, с отдельным одобрением | planned, решение Льва | — |
 | T-004 | P2 | CI: .github/workflows/checks.yml (build --check, e2e, push_test) | planned | — |
 | T-005 | P2 | i18n: «Вам передали колоду Corpus…» + проверка e2e, что строки web.js есть в словаре | planned | — |
@@ -57,7 +57,7 @@
 - замечание к конфигурации: если в основной папке переключиться на ветку без .claude/, загруженный хук вызывает несуществующий guard.py → код 2 → блокирует весь Bash; поэтому ветки задач — в отдельном worktree, пока конфигурация не в main
 
 ### T-002 Только растровые фото в бакете, маска email автора обмена
-- статус: ready — не слито, не выложено, SQL не выполнялся
+- статус: deployed — main и gh-pages = 4622347 (2026-10-09, Pages run #25 success); откат: 97585aa. SQL не выполнялся: блок corpus_share_open — в любой момент, бакет — только после выкладки (уже можно, лучше через несколько часов)
 - шаг: 8
 - ветка / файлы: claude/T-002-raster-mask от main ff4f4c9; supabase/setup.sql, supabase/share.sql, src/corpus.html (akPrepImage + вызов), index.html (build.py), tools/fake-supabase.js, tools/e2e_test.py
 - источник: часть коммита fa1cead (ветка claude/corpus-audit-y6w55v) без Cloudflare/_redirects/README

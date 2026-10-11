@@ -3712,22 +3712,26 @@ const crShown=L=>L.items.length>0||(!L.hasCards&&L.link.length>0);
 function crParts(fid,pf){
   return decksInFolder(fid).map(d=>{const ps=platesOf(d.id).filter(hasLesson);return {d:d,n:ps.length,ls:ps.map(p=>crLesson(p,pf)).filter(crShown)};}).filter(x=>x.n);
 }
-const CR_OPEN={};   // part id -> opened (true) or closed (false) by the reader; lives while the app runs
+const CR_OPEN=Object.create(null);   // part id -> opened (true) or closed (false) by the reader; lives while the app runs
 const crSteps=L=>LSKEYS.filter(k=>k==='ov'||(k==='se'?L.link.length>0:L.items.length>0));
 const crNL=n=>plx(n,['урок','урока','уроков'],['lesson','lessons'],['õppetund','õppetundi']);
 const crNS=n=>plx(n,['структура','структуры','структур'],['structure','structures'],['struktuur','struktuuri']);
 const crNQ=n=>plx(n,['вопрос','вопроса','вопросов'],['question','questions'],['küsimus','küsimust']);
 const crDue=c=>c.type!=='new'&&c.due<addDays(Date.now(),1);
 const crPass=s=>s.st==='done'||s.st==='due';
+/* cards of a group count once: a rating applies to all of them */
+const crDueList=items=>uniqGrp(items.filter(crDue));
+/* a lesson with structures is passed when none of them is new; a lesson with questions only — when its last question was answered (lsDone on the photo) */
+const crPassed=L=>L.items.length?!L.items.some(c=>c.type==='new'):!!(L.link.length&&L.p.lsDone);
 /* where a lesson stands: new; cur (started, or left on a step); due (every card seen, some to repeat today); done */
 function crStatus(L){
-  const nNew=L.items.filter(c=>c.type==='new').length,nDue=L.items.filter(crDue).length,lc=META.courseLast,ss=crSteps(L),k=lc&&lc.pid===L.id?ss.indexOf(lc.step)+1:0;
-  return {st:L.items.length&&!nNew?(nDue?'due':'done'):(k||(nNew&&nNew<L.items.length))?'cur':'new',nDue:nDue,k:k,n:ss.length,step:k?ss[k-1]:null};
+  const nNew=L.items.filter(c=>c.type==='new').length,nDue=crDueList(L.items).length,lc=META.courseLast,ss=crSteps(L),k=lc&&lc.pid===L.id?ss.indexOf(lc.step)+1:0;
+  return {st:crPassed(L)?(nDue?'due':'done'):(k||(nNew&&nNew<L.items.length))?'cur':'new',nDue:nDue,k:k,n:ss.length,step:k?ss[k-1]:null};
 }
 function crRow(L,s){
   const u=plateUrl(L.p),pill={done:ic('check',13)+T3('Пройден','Done','Läbitud'),due:ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+s.nDue,
     cur:s.k?T3('Шаг '+s.k+' из '+s.n,'Step '+s.k+' of '+s.n,'Samm '+s.k+' / '+s.n):T3('Начат','Started','Alustatud'),new:T3('Новый','New','Uus')}[s.st];
-  return '<button class="clrow" data-pid="'+L.id+'" data-st="'+s.st+'"><span class="cth">'+(u?'<img src="'+esc(u)+'" alt="" loading="lazy" data-fb>':'<span class="latin" data-noi18n>?</span>')+'</span>'+
+  return '<button class="clrow" data-pid="'+esc(L.id)+'" data-st="'+s.st+'"><span class="cth">'+(u?'<img src="'+esc(u)+'" alt="" loading="lazy" data-fb>':'<span class="latin" data-noi18n>?</span>')+'</span>'+
     '<span class="clmid"><span class="cln latin" data-noi18n>'+esc(L.title)+'</span><span class="clsub">'+(L.items.length?crNS(L.items.length)+' · ':'')+crNQ(L.link.length)+'</span>'+
     (s.k?'<span class="cbar"><i style="width:'+Math.round(s.k/s.n*100)+'%"></i></span>':'')+'</span><span class="cpill '+s.st+'">'+pill+'</span></button>';
 }
@@ -3735,26 +3739,26 @@ const crBar=(a,b)=>'<span class="cbar"><i style="width:'+(b?Math.round(a/b*100):
 function crHomeHtml(f,multi){
   const pf=crPrio(),parts=crParts(f.id,pf),all=[];
   parts.forEach(x=>{x.ss=x.ls.map(crStatus);x.ls.forEach((L,i)=>all.push({L:L,d:x.d,s:x.ss[i]}));});
-  const items=all.reduce((a,x)=>a.concat(x.L.items),[]),rev=items.filter(crDue),nP=all.filter(x=>crPass(x.s)).length,lc=META.courseLast;
+  const items=all.reduce((a,x)=>a.concat(x.L.items),[]),rev=crDueList(items),nP=all.filter(x=>crPass(x.s)).length,lc=META.courseLast;
   const cur=all.find(x=>lc&&x.L.id===lc.pid&&x.s.st==='cur')||all.find(x=>x.s.st==='cur')||all.find(x=>x.s.st==='new'),defId=cur?cur.d.id:parts.length?parts[0].d.id:'';
   const lbl=pf===1?'P1':T3('P1 и P2','P1 and P2','P1 ja P2'),hint=[T3('Только главное: P1.','Only the essentials: P1.','Ainult peamine: P1.'),
     T3('Главное и важные детали. P3 скрыты.','The essentials and important details. P3 is hidden.','Peamine ja olulised detailid. P3 on peidetud.'),T3('Все структуры курса.','Every structure of the course.','Kõik kursuse struktuurid.')][pf-1];
   const part=(x,k)=>{
     const n=x.ls.length,dn=x.ss.filter(crPass).length,o=n>0&&(CR_OPEN[x.d.id]!==undefined?CR_OPEN[x.d.id]:x.d.id===defId);
-    return '<div class="cpart'+(o?' open':'')+'" data-did="'+x.d.id+'"><button class="cph" aria-expanded="'+o+'"><span class="cpn">'+(k+1)+'</span><span class="cpx"><b data-noi18n>'+esc(x.d.name)+'</b><small>'+
-      (n?T3('пройдено '+dn+' из '+n,'done '+dn+' of '+n,'läbitud '+dn+' / '+n):pf===3?T3('нет уроков','no lessons','õppetunde pole'):T3('нет уроков '+lbl,'no '+lbl+' lessons','pole '+lbl+' õppetunde'))+'</small></span>'+(n?ic('fwd',18):'')+'</button>'+crBar(dn,n)+
+    return '<div class="cpart'+(o?' open':'')+'" data-did="'+esc(x.d.id)+'">'+(n?'<button class="cph" aria-expanded="'+o+'">':'<div class="cph">')+'<span class="cpn">'+(k+1)+'</span><span class="cpx"><b data-noi18n>'+esc(x.d.name)+'</b><small>'+
+      (n?T3('пройдено '+dn+' из '+n,'done '+dn+' of '+n,'läbitud '+dn+' / '+n):pf===3?T3('нет уроков','no lessons','õppetunde pole'):T3('нет уроков '+lbl,'no '+lbl+' lessons','pole '+lbl+' õppetunde'))+'</small></span>'+(n?ic('fwd',18)+'</button>':'</div>')+crBar(dn,n)+
       (o?'<div class="cllist">'+x.ls.map((L,i)=>crRow(L,x.ss[i])).join('')+'</div>':n?'':'<p class="cempty">'+(pf===3?T3('В этой части пока нет уроков.','No lessons in this part yet.','Selles osas pole veel õppetunde.'):
         T3('В этой части нет структур '+lbl+'. Выберите «Все», чтобы увидеть её уроки.','This part has no '+lbl+' structures. Choose “All” to see its lessons.','Selles osas pole '+lbl+' struktuure. Vali „Kõik“, et näha selle õppetunde.'))+'</p>')+'</div>';
   };
   const rin='<span class="ctn">'+ic('repeat',16)+'<b>'+rev.length+'</b></span><span>'+(rev.length?T3('повторить сегодня','repeat today','korda täna'):T3('повторять сегодня нечего','nothing to repeat today','täna pole midagi korrata'))+'</span>';
-  const cta=cur?'<button class="ccta" data-pid="'+cur.L.id+'"'+(cur.s.step?' data-step="'+cur.s.step+'"':'')+'><span class="cplay">'+ic('play',18)+'</span><span class="cctx"><span class="cct">'+
+  const cta=cur?'<button class="ccta" data-pid="'+esc(cur.L.id)+'"'+(cur.s.step?' data-step="'+esc(cur.s.step)+'"':'')+'><span class="cplay">'+ic('play',18)+'</span><span class="cctx"><span class="cct">'+
     (cur.s.st==='cur'?T3('Продолжить: ','Continue: ','Jätka: '):T3('Начать: ','Start: ','Alusta: '))+'<i class="latin" data-noi18n>'+esc(cur.L.title)+'</i></span><small><span data-noi18n>'+esc(cur.d.name)+'</span> · '+
     (cur.s.k?T3('шаг '+cur.s.k+' из '+cur.s.n,'step '+cur.s.k+' of '+cur.s.n,'samm '+cur.s.k+' / '+cur.s.n):cur.s.st==='cur'?T3('начат','started','alustatud'):T3('новый урок','new lesson','uus õppetund'))+'</small></span></button>':'';
   const leg=(p,a,b)=>'<div class="cleg"><span class="chip p'+p+'">P'+p+'</span><span><b>'+a+'</b> — '+b+'</span></div>';
   return '<div class="page tabbed crs chome"><header class="chead">'+(multi?'<button class="ibtn" data-act="crList" aria-label="'+T3('Все курсы','All courses','Kõik kursused')+'">'+ic('back')+'</button>':'')+
     '<div class="chtt"><div class="chname" data-noi18n>'+esc(f.name)+'</div><div class="chsub">'+plx(parts.length,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(all.length)+'</div></div></header>'+
     '<div class="chero"><div class="chtop"><div><div class="chl">'+T3('Пройдено уроков','Lessons completed','Läbitud õppetunde')+'</div><div class="chn"><b>'+nP+'</b><span>'+T3('из ','of ','/ ')+all.length+'</span></div></div>'+kostik(56,'joy')+'</div>'+crBar(nP,all.length)+
-      '<div class="ctiles">'+(rev.length?'<button class="ctile crev" data-fid="'+f.id+'">'+rin+'</button>':'<div class="ctile crnone">'+rin+'</div>')+
+      '<div class="ctiles">'+(rev.length?'<button class="ctile crev" data-fid="'+esc(f.id)+'">'+rin+'</button>':'<div class="ctile crnone">'+rin+'</div>')+
       '<div class="ctile"><span class="ctn"><b>'+(items.length-items.filter(c=>c.type==='new').length)+'</b><small> / '+items.length+'</small></span><span>'+T3('структур пройдено','structures done','struktuuri läbitud')+'</span></div></div>'+cta+'</div>'+
     '<div class="cfilt"><div class="clab">'+T3('Что учить','What to study','Mida õppida')+'</div><div class="cfbar" role="group">'+[[1,T3('Только P1','Only P1','Ainult P1')],[2,'P1 + P2'],[3,T3('Все','All','Kõik')]].map(a=>'<button data-f="'+a[0]+'" aria-pressed="'+(pf===a[0])+'" class="'+(pf===a[0]?'on':'')+'">'+a[1]+'</button>').join('')+'</div><p class="chint">'+hint+'</p></div>'+
     parts.map(part).join('')+
@@ -3776,10 +3780,11 @@ SCREENS.courses={
         '<button class="btn primary" data-act="importPick">'+ic('import',18)+T3('Импортировать файл курса','Import a course file','Impordi kursuse fail')+'</button>'+starterBtn()+'</div></div>';
     }
     return '<div class="page tabbed crs">'+head+'<div class="ccards">'+fs.map(f=>{
-      const ls=crParts(f.id,3).reduce((a,x)=>a.concat(x.ls),[]),dn=ls.filter(L=>crPass(crStatus(L))).length,due=ls.reduce((a,L)=>a+L.items.filter(crDue).length,0);
+      const ls=crParts(f.id,3).reduce((a,x)=>a.concat(x.ls),[]),dn=ls.filter(L=>crPass(crStatus(L))).length,due=crDueList(ls.reduce((a,L)=>a.concat(L.items),[])).length,
+        started=dn>0||ls.some(L=>L.items.some(c=>c.type!=='new'));
       const cov=ls.filter(L=>plateUrl(L.p)).slice(0,3).map(L=>'<img src="'+esc(plateUrl(L.p))+'" alt="" loading="lazy" data-fb>').join('')||'<span>'+kostik(46,'hi')+'</span>';
-      return '<button class="ccard" data-fid="'+f.id+'"><span class="ccov">'+cov+'</span><span class="ccrow"><span class="ccn"><b data-noi18n>'+esc(f.name)+'</b><small>'+crNL(ls.length)+' · '+T3('пройдено '+dn,'done '+dn,'läbitud '+dn)+'</small></span>'+
-        (due?'<span class="cpill due">'+ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+due+'</span>':'<span class="cpill done">'+ic('check',13)+T3('Всё повторено','All repeated','Kõik korratud')+'</span>')+'</span>'+crBar(dn,ls.length)+'</button>';}).join('')+'</div></div>';
+      return '<button class="ccard" data-fid="'+esc(f.id)+'"><span class="ccov">'+cov+'</span><span class="ccrow"><span class="ccn"><b data-noi18n>'+esc(f.name)+'</b><small>'+crNL(ls.length)+' · '+T3('пройдено '+dn,'done '+dn,'läbitud '+dn)+'</small></span>'+
+        (due?'<span class="cpill due">'+ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+due+'</span>':started?'<span class="cpill done">'+ic('check',13)+T3('Всё повторено','All repeated','Kõik korratud')+'</span>':'<span class="cpill new">'+T3('Не начат','Not started','Alustamata')+'</span>')+'</span>'+crBar(dn,ls.length)+'</button>';}).join('')+'</div></div>';
   },
   mount(){
     mountImgFallbacks();
@@ -3787,10 +3792,10 @@ SCREENS.courses={
     document.querySelectorAll('.crs .clrow').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from()));
     document.querySelectorAll('.crs .ccta').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from(),b.dataset.step));
     document.querySelectorAll('.crs .ccard').forEach(b=>b.onclick=()=>go({name:'courses',fid:b.dataset.fid}));
-    document.querySelectorAll('.crs .cph').forEach(b=>b.onclick=()=>{CR_OPEN[b.closest('.cpart').dataset.did]=b.getAttribute('aria-expanded')!=='true';render();});
+    document.querySelectorAll('.crs button.cph').forEach(b=>b.onclick=()=>{CR_OPEN[b.closest('.cpart').dataset.did]=b.getAttribute('aria-expanded')!=='true';render();});
     document.querySelectorAll('.crs button.crev').forEach(b=>b.onclick=()=>{
-      const parts=crParts(b.dataset.fid,crPrio()),rev=[];parts.forEach(x=>x.ls.forEach(L=>L.items.filter(crDue).forEach(c=>rev.push(c))));
-      startSession({deckIds:parts.map(x=>x.d.id),folderId:b.dataset.fid},false,rev,META.mode||'hideAll');
+      const parts=crParts(b.dataset.fid,crPrio()),rev=[],f=folderById(b.dataset.fid);parts.forEach(x=>x.ls.forEach(L=>L.items.filter(crDue).forEach(c=>rev.push(c))));
+      startSession({deckIds:parts.map(x=>x.d.id),folderId:b.dataset.fid},false,uniqGrp(rev),(f&&f.mode)||META.mode||'hideAll');
     });
     document.querySelectorAll('.cfbar button').forEach(b=>b.onclick=()=>{META.coursePrio=+b.dataset.f;persistMeta();render();});
   }
@@ -3837,7 +3842,8 @@ SCREENS.courseLesson={
   }
 };
 function crGo(s){
-  CL.step=s;META.courseLast={pid:CL.pid,step:s};persistMeta();   // where "Continue" on the course home leads
+  CL.step=s;
+  if(!crPassed(CL.L)){META.courseLast={pid:CL.pid,step:s};persistMeta();}   // where "Continue" on the course home leads; repeating a passed lesson leaves it alone
   document.querySelectorAll('.cseg button').forEach(b=>b.classList.toggle('on',b.dataset.s===s));
   $('#cstep').textContent=lsName(LSKEYS.indexOf(s)+1)+(CL.L.page?' · '+T3('практикум, стр. ','practical, p. ','praktikum lk ')+CL.L.page:'');
   ({ov:crOv,tu:crTu,ha:crHa,me:crMe,se:crSe})[s]();
@@ -3876,7 +3882,10 @@ function crTu(){
 const crMask=it=>{const k=String(it.term||'').replace(/[()]/g,'').split(/[,;]/)[0].trim(),n=it.note||'';return k?n.split(k).join('…'):n;};
 function crFinish(title,text,next,label){
   crDraw('none');crProg(1);
-  if(!next){delete META.courseLast;persistMeta();}   // the lesson is over: nothing to continue
+  if(!next){   // the lesson is over: nothing to continue; a lesson of questions only is passed now
+    if(META.courseLast&&META.courseLast.pid===CL.pid){delete META.courseLast;persistMeta();}
+    const p=plateById(CL.pid);if(p&&!CL.L.items.length&&!p.lsDone){p.lsDone=Date.now();persist('plates',p.id);}
+  }
   crP().innerHTML='<div class="cdone">'+kostik(56,'joy')+'<b>'+esc(title)+'</b><p class="cnote" data-noi18n>'+esc(text)+'</p></div>'+
     '<div class="row"><button class="btn primary" id="cnx">'+(next?label:T3('Другие уроки','Other lessons','Teised õppetunnid'))+'</button></div>';
   $('#cnx').onclick=()=>next?crGo(next):crHome();
@@ -4068,6 +4077,7 @@ async function buildExport(deckIds,full,fid,link){
       po.image=img;
     }
     if(full&&p.excluded)po.excluded=true;
+    if(full&&p.lsDone)po.lsDone=p.lsDone;   // progress of a lesson of questions only
     if(typeof p.title==='string'&&p.title)po.title=p.title;
     if(Array.isArray(p.intro)&&p.intro.length)po.intro=p.intro;
     if(Array.isArray(p.link)&&p.link.length)po.link=p.link;
@@ -4222,6 +4232,7 @@ async function importData(data,opts){
     const sp=x.o,m=pmap[sp.id];if(!dmap[sp.deckId])return;
     const p={id:newId('plates'),deckId:dmap[sp.deckId],assetId:m.assetId,w:sp.w||0,h:sp.h||0,createdAt:nextT('p'+dmap[sp.deckId],x.t)};
     if(full&&sp.excluded)p.excluded=true;
+    if(full&&Number.isFinite(sp.lsDone)&&sp.lsDone>0)p.lsDone=sp.lsDone;
     cleanLessonPlate(sp,p);
     m.nid=p.id;S.plates.push(p);persist('plates',p.id);
   });
@@ -6317,7 +6328,10 @@ async function bootData(){
   if(S.db){
     try{
       const g=await Promise.all(['decks','plates','terms','stats','folders','packs','exams'].map(n=>S.db.collection(n).get().catch(e=>{if(n==='exams')return {docs:[]};throw e;})));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro','coursePrio','courseLast'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro','coursePrio','courseLast'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
+        {const lc=META.courseLast;if(lc!==undefined&&!(lc&&typeof lc==='object'&&typeof lc.pid==='string'&&lc.pid.length<=100&&LSKEYS.indexOf(lc.step)>=0))delete META.courseLast;   // saved data is not trusted
+        if(META.coursePrio!==undefined&&[1,2,3].indexOf(META.coursePrio)<0)delete META.coursePrio;}
+        applyLook();}}catch(e){}
       S.decks=g[0].docs.map(x=>Object.assign({},x.data(),{id:x.id,newToday:x.data()&&x.data().newToday?Object.assign({},x.data().newToday):undefined}));
       S.plates=g[1].docs.map(x=>Object.assign({},x.data(),{id:x.id}));
       S.cards=g[2].docs.map(x=>normCard(Object.assign({},x.data(),{id:x.id})));
@@ -6349,7 +6363,7 @@ async function bootData(){
   }
 }
 if(window.__TEST__){
-  Object.defineProperty(window,'SS',{get:()=>SS});
+  Object.defineProperty(window,'SS',{get:()=>SS});Object.defineProperty(window,'CR_OPEN',{get:()=>CR_OPEN});
   Object.defineProperty(window,'ED',{get:()=>ED});
   Object.defineProperty(window,'CL',{get:()=>CL});window.A=A;window.dropPlate=dropPlate;window.removeDoc=removeDoc;window.WQ=WQ;
   Object.defineProperty(window,'view',{get:()=>view});

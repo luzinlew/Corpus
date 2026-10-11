@@ -311,6 +311,7 @@ async def main():
             b = await p.chromium.launch()
 
             quota_window = {'on': False}   # True only while the test provokes refusals from the account limits
+            refusal_window = {'on': False}   # True only while the test makes the fake model service refuse (the function answers 502)
 
             async def open_ctx(**kw):
                 ctx = await b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True, **kw)
@@ -326,7 +327,7 @@ async def main():
                 #  ERR_ABORTED is a request cut short by the test's own reloads, not a failure)
                 pg.on('requestfailed', lambda r: 'fonts.g' not in r.url and 'ERR_ABORTED' not in str(r.failure) and errs.append('failed: ' + r.url + ' (' + str(r.failure) + ')'))
                 pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url)
-                      and not ('/functions/v1/corpus-ai' in r.url and r.status in (404, 429, 502))   # provoked: function off, daily limit, the model service refuses
+                      and not ('/functions/v1/corpus-ai' in r.url and (r.status in (404, 429) or (r.status == 502 and refusal_window['on'])))   # provoked: function off, daily limit; the model service refuses (only inside refusal_window)
                       and not ('/rpc/corpus_share_open' in r.url and r.status == 404)             # provoked: a wrong share code
                       and not (quota_window['on'] and r.status in (400, 413, 503))                 # provoked: the account limits (see «limits» below)
                       and errs.append(f'http {r.status}: {r.url}'))
@@ -1587,10 +1588,12 @@ async def main():
             await pg.wait_for_selector('.crs.chome .ccta')
             await pg.wait_for_timeout(900)
             check('big lesson: the course home does not translate it quietly (more than one request): no request', len(calls) == 0 and not await pg.query_selector('.ctrbusy'))
+            refusal_window['on'] = True
             await pg.click('.crs.chome .ccta')
             await pg.wait_for_selector('.ctrbusy')
             await pg.wait_for_selector('.clesson .kbubble', timeout=20000)
             await pg.wait_for_timeout(600)
+            refusal_window['on'] = False
             ph = await pg.evaluate(J("""(()=>{const p=plateById('@BIG@'),t=p.tr&&p.tr.et;return {n:t?Object.keys(t.notes).length:-1,terms:t?Object.keys(t.terms).length:-1,title:t&&t.title,miss:crTrMissing(p).length,err:CL.trErr,
               busy:CL.busy,ctrs:document.querySelector('#ctrs').innerText,retry:!!document.querySelector('#ctrRetry'),tog:!document.querySelector('#ctog').hidden,bubble:document.querySelector('.kbubble').innerText};})()"""))
             check('big lesson: two requests, one after the other (request, answer, request, answer), and no third one after the refusal', len(calls) == 2 and ev == ['req', 'res', 'req', 'res'], json.dumps([len(calls), ev]))

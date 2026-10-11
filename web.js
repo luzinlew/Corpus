@@ -562,7 +562,9 @@
         turns[turns.length - 1] = { role: last.role, content: imgs.concat([{ type: 'text', text: last.content }]) };
       }
       var r;
-      var body = { messages: turns, json: !!asJson, max_tokens: asJson ? 3000 : 1500 };
+      /* opts.maxTokens (a whole number up to 4096: the most the function allows) asks for a longer answer than the usual one, e.g. a translated lesson */
+      var mt = (opts.maxTokens | 0) === opts.maxTokens && opts.maxTokens >= 64 && opts.maxTokens <= 4096 ? opts.maxTokens : (asJson ? 3000 : 1500);
+      var body = { messages: turns, json: !!asJson, max_tokens: mt };
       if (opts.purpose) body.purpose = String(opts.purpose).slice(0, 20);   // what the request is for (course translation); the function may use it for limits and the model
       try { r = await fnFetch('POST', body, opts.signal); }
       catch (e) {

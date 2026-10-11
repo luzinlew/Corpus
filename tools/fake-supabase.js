@@ -18,6 +18,9 @@ const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
 const FN_URL0 = FN_URL;
 let FN_DELAY = 0;
+/* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
+   case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429 */
+let FN_DROP = false, FN_TRUNC = false, FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
 const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
 const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const activity = new Map();   // uid -> Map(day -> {opens, last})
@@ -128,7 +131,12 @@ http.createServer(async (req, res) => {
     for (const k of Object.keys(Q)) if (u.searchParams.has(k)) Q[k] = +u.searchParams.get(k);
     send(res, 200, Q); return;
   }
-  if (p === '/__fn') { FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0; send(res, 200, { fn: FN_URL, delay: FN_DELAY }); return; }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen)
+  if (p === '/__fn') {
+    FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0;
+    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = u.searchParams.get('trunc') === '1'; FN_CASE = u.searchParams.get('case') === '1';
+    FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
+    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER }); return;
+  }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen)
 
   /* ---------- auth ---------- */
   if (p === '/auth/v1/signup' && req.method === 'POST') {
@@ -298,14 +306,21 @@ http.createServer(async (req, res) => {
        every string value prefixed with «[<to>] »; a value with ATTACK in it comes back as an <img onerror> tag, to see that the app shows it as text */
     const tm = body.system && /^CORPUS-TRANSLATE (\w+)>(\w+)\n/.exec(said), at = said.indexOf('\nINPUT:\n');
     let text;
+    let stop = 'end_turn';
     if (tm && at > 0) {
-      const tr = (v) => typeof v === 'string' ? (v.includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : '[' + tm[2] + '] ' + v)
+      FN_TR_N++;
+      if (FN_FAIL_AFTER >= 0 && FN_TR_N > FN_FAIL_AFTER) { send(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'rate limit (test)' } }); return; }
+      const big = (v) => FN_CASE ? v.replace(/\b[a-z]{3,}/g, (w) => w[0].toUpperCase() + w.slice(1)) : v;
+      const tr = (v) => typeof v === 'string' ? (v.includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : '[' + tm[2] + '] ' + big(v))
         : Array.isArray(v) ? v.map(tr) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, tr(x)])) : v;
       let inp = null; try { inp = JSON.parse(said.slice(at + 8)); } catch { /* not JSON: answer with nothing useful */ }
-      text = JSON.stringify(tr(inp));
+      const ans = tr(inp);
+      if (FN_DROP && ans && typeof ans === 'object') delete ans.terms;
+      text = JSON.stringify(ans);
+      if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
     } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length })
       : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
-    send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 } });
+    send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: stop, usage: { input_tokens: 10, output_tokens: 10 } });
     return;
   }
 

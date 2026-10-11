@@ -43,6 +43,7 @@
 | T-020 | P2 | Проверка урока: структуры без рамки, правка вступления/вопросов, «Пересобрать» | planned | — |
 | T-021 | P2 | Плавный урок «с объяснениями, но быстро»: порции по 3, объяснение при ошибке, «Знаю», две кнопки оценки (макет готов, ждёт одобрения) | planned | — |
 | T-022 | P1 | Содержимое курса на языке пользователя: lang + tr у фото/карточек, перевод урока ИИ при открытии с кэшем, «оригинал», CR_KIND/CR_SRC на трёх языках, экспорт/импорт | ready: e2e 272 PASS ×3; не выложено | claude/T-022-content-language |
+| T-023 | P1 | corpus-ai: текстовая и демо-модель Haiku 5.5 (thinking disabled — иначе рассуждение съедает max_tokens); фейковый Claude проверяет правила API | ready: e2e 272 PASS; ждёт вставки функции Львом | claude/T-023-haiku55 |
 
 ## Журнал
 
@@ -236,3 +237,13 @@
 - проверки координатора: e2e ×3 на db69b4c и с правкой теста — exit=0, 272 PASS, ALL PASSED каждый раз; процессов не осталось; регрессия экранов против сайта 574df3d: экраны вне урока совпадают до пикселя, кроме порядка двух папок в «Колодах» — артефакт замороженного времени (одинаковый createdAt → порядок по случайному id из order('id'), сайт против сайта плавает так же); экраны урока на ru/en — переведённые виды/источники и строка «Перевод недоступен»; ошибок консоли 0
 - бюджет: превышен с согласия Льва — дифф без index.html ≈ +1070/−60 (код src ~+480), e2e 7 полных прогонов, субагентов 6
 - откат: 574df3d (gh-pages сейчас); SQL/функций нет
+
+### T-023 corpus-ai на Haiku 5.5
+- статус: ready — Лев 2026-10-11: «почему 4.5, давай 5.5»
+- ветка / файлы: claude/T-023-haiku55 (от T-022) — supabase/functions/corpus-ai/index.ts, tools/fake-supabase.js, tools/e2e_test.py
+- по руководству claude-api (Migrating to Claude Haiku 5.5): ID claude-haiku-5-5; $0.10/$0.50 за 1M (до 100K вход) против $1/$5 у 4.5; thinking по умолчанию включён и считается в max_tokens; temperature/top_p/top_k и prefill → 400 (функция их не шлёт); токенизатор ≈ +30% токенов на тот же текст
+- правка: TEXT_MODEL и DEMO_MODEL по умолчанию claude-haiku-5-5; для моделей claude-haiku-5* в запрос `thinking: {type: "disabled"}` (допустимо при effort low/medium/high, по умолчанию medium); Sonnet 5.5 (фото) не трогаем — у неё disabled → 400
+- проверка: фейковый Claude отвечает 400 на Haiku 5.5 без disabled, на Sonnet 5.5 с disabled, на temperature/top_p/top_k; e2e ждёт модель ровно claude-haiku-5-5
+- для Льва: код функции целиком (вставить в Supabase → Edge Functions → corpus-ai); если в секретах задан CORPUS_AI_MODEL / CORPUS_AI_DEMO_MODEL со старой моделью — удалить или поставить claude-haiku-5-5; откат — прежний код `git show 574df3d:supabase/functions/corpus-ai/index.ts`
+- проверки: e2e exit=0, 272 PASS, ALL PASSED: «AI JSON answer (text model)» → model claude-haiku-5-5 (фейк отверг бы без thinking disabled), фото → claude-sonnet-5-5, демо 5 запросов на Haiku 5.5; node --check fake-supabase.js
+- сайт не меняется (только функция) — выкладка = Лев вставляет код функции; в main файл попадёт со следующей выкладкой сайта

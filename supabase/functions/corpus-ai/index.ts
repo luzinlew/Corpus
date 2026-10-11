@@ -14,9 +14,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const API_URL = Deno.env.get("ANTHROPIC_BASE_URL") ?? "https://api.anthropic.com";
-const TEXT_MODEL = Deno.env.get("CORPUS_AI_MODEL") ?? "claude-haiku-4-5-20251001";
+const TEXT_MODEL = Deno.env.get("CORPUS_AI_MODEL") ?? "claude-haiku-5-5";
 const VISION_MODEL = Deno.env.get("CORPUS_AI_VISION_MODEL") ?? "claude-sonnet-5-5";
-const DEMO_MODEL = Deno.env.get("CORPUS_AI_DEMO_MODEL") ?? "claude-haiku-4-5-20251001";
+const DEMO_MODEL = Deno.env.get("CORPUS_AI_DEMO_MODEL") ?? "claude-haiku-5-5";
 const MAX_TURNS = 40, MAX_TEXT = 70_000, MAX_IMAGES = 4, MAX_IMAGE_B64 = 8_000_000;
 const JSON_SYSTEM = "Your reply is read by a program: answer with only the requested JSON value — no prose, no Markdown code fences.";
 
@@ -103,11 +103,17 @@ Deno.serve(async (req) => {
     if (qe) return reply(500, { code: "unavailable", message: qe.message });
     if (!q?.ok) return reply(429, { code: "quota_exceeded", message: "daily AI limit reached", plan: q?.plan, limit: q?.limit, used: q?.used });
 
+    const model = demo ? DEMO_MODEL : images ? VISION_MODEL : TEXT_MODEL;
+    // Claude Haiku 5.5 thinks by default, and thinking counts toward max_tokens: a chat answer or a JSON reply sized for
+    // Haiku 4.5 would be cut short. Hints, chat and translation need no reasoning, so it is switched off there
+    // (accepted on Haiku 5.5 at its default effort; Sonnet 5.5, the photo model, rejects "disabled", so it is left alone).
+    const thinking = /^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } } : {};
     const r = await fetch(API_URL + "/v1/messages", {
       method: "POST",
       headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
-        model: demo ? DEMO_MODEL : images ? VISION_MODEL : TEXT_MODEL,
+        model,
+        ...thinking,
         max_tokens: Math.max(64, Math.min(Number(body.max_tokens) || 1500, demo ? 1500 : 4096)),
         ...(body.json ? { system: JSON_SYSTEM } : {}),
         messages,

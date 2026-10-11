@@ -299,6 +299,12 @@ http.createServer(async (req, res) => {
   /* ---------- a stand-in for the Claude Messages API ---------- */
   if (p === '/v1/messages' && req.method === 'POST') {
     if (req.headers['x-api-key'] !== ANTHROPIC_KEY) { send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }); return; }
+    // the rules of the real API that the function has to follow: Claude Haiku 5.5 thinks by default (the function turns it off,
+    // so the answer is not eaten by thinking); Claude Sonnet 5.5 rejects "disabled"; no current model takes temperature/top_p/top_k
+    const think = body.thinking && body.thinking.type;
+    if (/^claude-haiku-5/.test(body.model) && think !== 'disabled') { send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'test: Haiku 5.5 must be called with thinking disabled here' } }); return; }
+    if (/^claude-sonnet-5-5/.test(body.model) && think === 'disabled') { send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'thinking.type disabled is not supported for this model' } }); return; }
+    if (['temperature', 'top_p', 'top_k'].some((k) => body[k] !== undefined)) { send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'sampling parameters are not supported for this model' } }); return; }
     const last = body.messages[body.messages.length - 1];
     const blocks = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : last.content;
     const imgs = blocks.filter((b) => b.type === 'image').length, said = blocks.filter((b) => b.type === 'text').map((b) => b.text).join(' ');

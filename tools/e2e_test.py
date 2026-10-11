@@ -410,7 +410,7 @@ async def main():
             ai = await pg.evaluate('({on:!!S.sample, img:S.imgOK, ai:CORPUS_WEB.ai||null})')
             check('AI is on: the function is deployed', ai['on'] and ai['img'] and ai['ai'] and ai['ai']['limit'] == AI_LIMIT, json.dumps(ai))
             r = await pg.evaluate("S.sample.json('Reply with JSON')")
-            check('AI JSON answer (text model)', r.get('ok') is True and r.get('model', '').startswith('claude-haiku'), json.dumps(r))
+            check('AI JSON answer (text model)', r.get('ok') is True and r.get('model') == 'claude-haiku-5-5', json.dumps(r))
             r = await pg.evaluate("""(async()=>{let seen='';const r=await S.sample([{role:'user',content:'Mis on os frontale?'}],{onText:u=>{seen=u.text;}});return {text:r.text,seen};})()""")
             check('AI chat answer reaches onText', 'os frontale' in r['text'] and r['seen'] == r['text'], r['text'])
             r = await pg.evaluate("""(async()=>{const c=document.createElement('canvas');c.width=40;c.height=30;const b=await new Promise(r=>c.toBlob(r,'image/jpeg'));

@@ -474,20 +474,27 @@ async def main():
             await import_file('corpus-folder-lesson.json', 2)
             await pg.evaluate("go({name:'library'})")
             await pg.click('.tabbar [data-v=courses]')
-            await pg.wait_for_selector('.crs.chome .svtile')
-            home = await pg.evaluate("({secs:document.querySelectorAll('.crs.chome .svsec').length,tiles:document.querySelectorAll('.crs.chome .svtile').length,card:!!document.querySelector('.crs.chome .svcard .chip.p3'),bubble:document.querySelector('.crs.chome .kbubble').textContent})")
-            check('course home: bubble, part sections with tiles, importance card', home['secs'] == 3 and home['tiles'] == 2 and home['card'] and 'Urok' in home['bubble'], json.dumps(home))
-            tile = await pg.evaluate("document.querySelector('.crs.chome .svtile').innerText.replace(/\\n/g,' | ')")
-            check('course home: a tile has the title and the counts', 'Esimene foto' in tile and '3' in tile and '2' in tile, tile)
+            await pg.wait_for_selector('.crs.chome .clrow')
+            home = await pg.evaluate("""(()=>{const q=s=>document.querySelectorAll('.crs.chome '+s);return {parts:q('.cpart').length,open:[...q('.cpart')].map(p=>p.classList.contains('open')),rows:q('.clrow').length,st:[...q('.clrow')].map(r=>r.dataset.st),
+              hero:q('.chero .chn b')[0].textContent,legend:q('.cabout .chip').length,old:q('.kbubble,.svtile,.svcard').length,back:q('[data-act=crList]').length};})()""")
+            check('course home: progress block, two parts (the first open, the second folded), one new lesson, importance legend, no old tiles',
+                  home == {'parts': 2, 'open': [True, False], 'rows': 1, 'st': ['new'], 'hero': '0', 'legend': 3, 'old': 0, 'back': 0}, json.dumps(home))
+            row = await pg.evaluate("document.querySelector('.crs.chome .clrow').innerText.replace(/\\n/g,' | ')")
+            check('course home: a lesson row has the title and the counts', 'Esimene foto' in row and '3 struktuuri' in row and '2 küsimust' in row, row)
+            cta = await pg.evaluate("document.querySelector('.crs.chome .ccta').innerText.replace(/\\n/g,' | ')")
+            check('course home: the big button starts the first new lesson', 'Esimene foto' in cta and not await pg.query_selector('.crs.chome .ccta[data-step]'), cta)
             await pg.click('.cfbar [data-f="1"]')
-            await pg.wait_for_function("document.querySelectorAll('.crs.chome .svtile').length===1")
-            tile = await pg.evaluate("document.querySelector('.crs.chome .svtile').innerText")
-            check('importance filter P1: the part without P1 is gone, the tile counts only P1; the choice is kept', await pg.evaluate('META.coursePrio') == 1 and re.search(r'\b1\b', tile) is not None and 'Teine' not in tile, tile)
+            await pg.wait_for_function("document.querySelector('.cfbar [data-f=\"1\"]').classList.contains('on')")
+            row = await pg.evaluate("document.querySelector('.crs.chome .clrow').innerText")
+            check('importance filter P1: the lesson counts only P1; the choice is kept', await pg.evaluate('META.coursePrio') == 1 and '1 struktuur ' in row and 'Teine' not in row, row)
+            await pg.click('.crs.chome .cpart >> nth=1 >> .cph')
+            check('importance filter P1: the part without P1 stays, with a note instead of lessons',
+                  await pg.evaluate("(()=>{const p=document.querySelectorAll('.crs.chome .cpart')[1];return p.querySelectorAll('.clrow').length===0&&p.querySelectorAll('.cempty').length===1;})()"))
             await pg.click('.cfbar [data-f="3"]')
-            await pg.wait_for_function("document.querySelectorAll('.crs.chome .svtile').length===2")
+            await pg.wait_for_function("document.querySelectorAll('.crs.chome .clrow').length===2")
 
             # the lesson of the first photo
-            await pg.click('.crs.chome .svtile >> nth=0')
+            await pg.click('.crs.chome .clrow >> nth=0')
             await pg.wait_for_selector('.clesson .kbubble')
             check('lesson: header with the title and the step, five step buttons, photo shown',
                   await pg.inner_text('.clesson .bar-title b') == 'Esimene foto' and 'Ülevaade' in await pg.inner_text('#cstep') and 'lk 12' in await pg.inner_text('#cstep')
@@ -502,6 +509,15 @@ async def main():
             await pg.wait_for_selector('.cterm')
             check('lesson get-to-know: term, note, framed structure, chips', await pg.inner_text('.cterm') == 'os frontale' and 'Märkus os frontale' in await pg.inner_text('.cnote')
                   and await pg.locator('#masks .cm.cur').count() == 1 and await pg.locator('.clesson .chip.p1').count() == 1 and await pg.locator('#masks .cpt').count() == 0)
+            await pg.click('[data-act=crBack]')
+            await pg.wait_for_selector('.crs.chome')
+            cont = await pg.evaluate("""(()=>{const r=document.querySelector('.crs.chome .clrow'),c=document.querySelector('.crs.chome .ccta');
+              return {st:r.dataset.st,cta:c.innerText,step:c.dataset.step,last:META.courseLast&&META.courseLast.step,pid:!!META.courseLast&&META.courseLast.pid===r.dataset.pid};})()""")
+            check('course home after leaving mid-lesson: the row is current, the big button names the lesson and the step, the step is saved',
+                  cont['st'] == 'cur' and 'Esimene foto' in cont['cta'] and '2' in cont['cta'] and cont['step'] == 'tu' and cont['last'] == 'tu' and cont['pid'], json.dumps(cont))
+            await pg.click('.crs.chome .ccta')
+            await pg.wait_for_selector('.cterm')
+            check('the big button opens the lesson on the saved step', await pg.evaluate("view.name==='courseLesson'&&CL.step==='tu'") and await pg.inner_text('.cterm') == 'os frontale')
             await pg.click('#cnx')
             check('lesson get-to-know: the point marker of the second structure', await pg.inner_text('.cterm') == 'maxilla' and await pg.locator('#masks .cpt').count() == 1)
             await pg.click('#cnx'); await pg.click('#cnx')   # third structure, then on to practice
@@ -573,6 +589,19 @@ async def main():
             check('lesson connect does not touch the schedule', await pg.evaluate("JSON.stringify(S.cards.map(c=>[c.id,c.reps||0,c.due,c.type]))") == sched1)
             await pg.click('#cnx')
             await pg.wait_for_selector('.crs.chome')
+            if not await pg.evaluate("document.querySelector('.crs.chome .cpart').classList.contains('open')"):
+                await pg.click('.crs.chome .cpart >> nth=0 >> .cph')   # the big button moved on to the next part, which opened
+            end = await pg.evaluate("""(()=>({st:document.querySelector('.crs.chome .clrow').dataset.st,last:META.courseLast===undefined,hero:document.querySelector('.crs.chome .chero .chn b').textContent,cta:document.querySelector('.crs.chome .ccta').innerText}))()""")
+            check('lesson finished: the row says repeat or done, nothing is left to continue, the big button moves to the next lesson',
+                  end['st'] in ('due', 'done') and end['last'] and end['hero'] == '1' and 'Teine foto' in end['cta'], json.dumps(end))
+            nrev = await pg.evaluate("+document.querySelector('.crs.chome .crev b').textContent")
+            nwant = await pg.evaluate("(()=>{const d=new Date();d.setHours(24,0,0,0);const p=S.plates.find(p=>p.title==='Esimene foto');return S.cards.filter(c=>c.plateId===p.id&&c.type!=='new'&&c.due<d.getTime()).length;})()")
+            check('course home: "repeat today" counts the cards of the course that are due', nrev == nwant and nrev > 0, f'{nrev} / {nwant}')
+            await pg.click('.crs.chome button.crev')
+            await pg.wait_for_function("view.name==='study'")
+            check('"repeat today" starts a session over the cards of the course only (the new ones of the second part are left out)',
+                  await pg.evaluate("(()=>{const d2=S.decks.find(d=>d.name==='Urok 2').id;return SS.folderId===S.folders.find(f=>f.name==='Urok').id&&SS.deckIds.length===2&&SS.exclude.size>0&&S.cards.filter(c=>c.deckId===d2).every(c=>SS.exclude.has(c.id));})()"))
+            await pg.evaluate("go({name:'courses'})")
             # a step can be opened directly and the same screen opens from the deck
             did = await pg.evaluate("S.decks.find(d=>d.name==='Urok').id")
             await pg.evaluate(f"go({{name:'deck',deckId:'{did}',tab:'photos'}})")
@@ -584,6 +613,26 @@ async def main():
             check('lesson from the deck: the same screen, any step can be opened', await pg.evaluate("view.name==='courseLesson'&&CL.step==='se'"))
             await pg.click('[data-act=crBack]')
             await pg.wait_for_function("view.name==='deck'")
+
+            # the importance filter and the place in a lesson survive a reload
+            pid2 = await pg.evaluate("S.plates.find(p=>p.title==='Teine foto').id")
+            await pg.evaluate("go({name:'courses'})")
+            await pg.click('.cfbar [data-f="2"]')
+            await pg.click(f'.crs.chome .clrow[data-pid="{pid2}"]')
+            await pg.wait_for_selector('.clesson .cseg')
+            await pg.click('.cseg [data-s=ha]')
+            await pg.wait_for_selector('.copt')
+            await pg.click('[data-act=crBack]')
+            await pg.wait_for_selector('.crs.chome')
+            await pg.wait_for_function('WQ.jobs.size===0', timeout=20000)
+            await pg.reload()
+            await app_ready(pg)
+            kept = await pg.evaluate("({prio:META.coursePrio,last:META.courseLast})")
+            check('after a reload the importance filter and the lesson step are still there', kept['prio'] == 2 and kept['last'] == {'pid': pid2, 'step': 'ha'}, json.dumps(kept))
+            await pg.evaluate("go({name:'courses'})")
+            await pg.wait_for_selector('.crs.chome .ccta')
+            back = await pg.evaluate("({on:document.querySelector('.cfbar .on').dataset.f,pid:document.querySelector('.ccta').dataset.pid,step:document.querySelector('.ccta').dataset.step,st:document.querySelector('.clrow[data-pid=\"'+META.courseLast.pid+'\"]').dataset.st})")
+            check('after a reload the course home shows the filter and continues on the saved step', back == {'on': '2', 'pid': pid2, 'step': 'ha', 'st': 'cur'}, json.dumps(back))
 
             # lesson fields survive export and import (kind, page, note, src, prio, pt, intro, link; link item follows the new card ids)
             exp3 = await pg.evaluate(f"buildExport(['{did}']).then(r=>r.out)")
@@ -624,7 +673,7 @@ async def main():
             await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.name.startsWith('Urok')),ids=new Set(ds.map(d=>d.id));
               S.cards.filter(c=>ids.has(c.deckId)).forEach(c=>removeCard(c.id));S.plates.filter(p=>ids.has(p.deckId)).forEach(p=>dropPlate(p));
               ds.forEach(d=>{S.decks=S.decks.filter(x=>x.id!==d.id);removeDoc('decks',d.id);});
-              S.folders.filter(f=>f.name.startsWith('Urok')).forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});delete META.coursePrio;persistMeta();})()""")
+              S.folders.filter(f=>f.name.startsWith('Urok')).forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});delete META.coursePrio;delete META.courseLast;persistMeta();})()""")
             await pg.wait_for_function(f'S.plates.length==={plates_before_lesson} && WQ.jobs.size===0', timeout=20000)
 
             # share the folder by code / QR

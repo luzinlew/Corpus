@@ -931,6 +931,7 @@ const ICONS={
   zout:'<circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5l-4.9-4.9M8 11h6"/>',
   crop:'<path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/>',
   rotate:'<path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  repeat:'<path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/>',
   trash:'<path d="M4 7h16M9 7V4.5h6V7M18 7l-.8 12.5a1.5 1.5 0 01-1.5 1.5H8.3a1.5 1.5 0 01-1.5-1.5L6 7"/>',
   spark:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
   play:'<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
@@ -3707,36 +3708,62 @@ function crLesson(p,pf){
     link:(Array.isArray(p.link)?p.link:[]).filter(k=>!k.item||items.some(c=>c.id===k.item))};
 }
 const crShown=L=>L.items.length>0||(!L.hasCards&&L.link.length>0);
+/* a part stays in the list when the importance filter leaves it no lessons (its ls is empty then) */
 function crParts(fid,pf){
-  return decksInFolder(fid).map(d=>({d:d,ls:platesOf(d.id).filter(hasLesson).map(p=>crLesson(p,pf)).filter(crShown)})).filter(x=>x.ls.length);
+  return decksInFolder(fid).map(d=>{const ps=platesOf(d.id).filter(hasLesson);return {d:d,n:ps.length,ls:ps.map(p=>crLesson(p,pf)).filter(crShown)};}).filter(x=>x.n);
 }
-function crTile(L){
-  const u=plateUrl(L.p),n=L.items.length,m=L.link.length;
-  return '<button class="svtile" data-pid="'+L.id+'"><span class="svt-img">'+(u?'<img src="'+esc(u)+'" alt="" loading="lazy" data-fb>':'<span class="svph">'+kostik(46,'hi')+'</span>')+'</span>'+
-    '<span class="svt-n latin" data-noi18n>'+esc(L.title)+'</span><span class="svt-m">'+(n?plx(n,['структура','структуры','структур'],['structure','structures'],['struktuur','struktuuri'])+' · ':'')+
-    plx(m,['вопрос','вопроса','вопросов'],['question','questions'],['küsimus','küsimust'])+'</span></button>';
+const CR_OPEN={};   // part id -> opened (true) or closed (false) by the reader; lives while the app runs
+const crSteps=L=>LSKEYS.filter(k=>k==='ov'||(k==='se'?L.link.length>0:L.items.length>0));
+const crNL=n=>plx(n,['урок','урока','уроков'],['lesson','lessons'],['õppetund','õppetundi']);
+const crNS=n=>plx(n,['структура','структуры','структур'],['structure','structures'],['struktuur','struktuuri']);
+const crNQ=n=>plx(n,['вопрос','вопроса','вопросов'],['question','questions'],['küsimus','küsimust']);
+const crDue=c=>c.type!=='new'&&c.due<addDays(Date.now(),1);
+const crPass=s=>s.st==='done'||s.st==='due';
+/* where a lesson stands: new; cur (started, or left on a step); due (every card seen, some to repeat today); done */
+function crStatus(L){
+  const nNew=L.items.filter(c=>c.type==='new').length,nDue=L.items.filter(crDue).length,lc=META.courseLast,ss=crSteps(L),k=lc&&lc.pid===L.id?ss.indexOf(lc.step)+1:0;
+  return {st:L.items.length&&!nNew?(nDue?'due':'done'):(k||(nNew&&nNew<L.items.length))?'cur':'new',nDue:nDue,k:k,n:ss.length,step:k?ss[k-1]:null};
 }
+function crRow(L,s){
+  const u=plateUrl(L.p),pill={done:ic('check',13)+T3('Пройден','Done','Läbitud'),due:ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+s.nDue,
+    cur:s.k?T3('Шаг '+s.k+' из '+s.n,'Step '+s.k+' of '+s.n,'Samm '+s.k+' / '+s.n):T3('Начат','Started','Alustatud'),new:T3('Новый','New','Uus')}[s.st];
+  return '<button class="clrow" data-pid="'+L.id+'" data-st="'+s.st+'"><span class="cth">'+(u?'<img src="'+esc(u)+'" alt="" loading="lazy" data-fb>':'<span class="latin" data-noi18n>?</span>')+'</span>'+
+    '<span class="clmid"><span class="cln latin" data-noi18n>'+esc(L.title)+'</span><span class="clsub">'+(L.items.length?crNS(L.items.length)+' · ':'')+crNQ(L.link.length)+'</span>'+
+    (s.k?'<span class="cbar"><i style="width:'+Math.round(s.k/s.n*100)+'%"></i></span>':'')+'</span><span class="cpill '+s.st+'">'+pill+'</span></button>';
+}
+const crBar=(a,b)=>'<span class="cbar"><i style="width:'+(b?Math.round(a/b*100):0)+'%"></i></span>';
 function crHomeHtml(f,multi){
-  const pf=crPrio(),parts=crParts(f.id,pf);
-  const nL=parts.reduce((s,x)=>s+x.ls.length,0),nI=parts.reduce((s,x)=>s+x.ls.reduce((a,L)=>a+L.items.length,0),0);
-  const nm='<b>'+esc(f.name)+'</b>';
-  const sec=(x,k)=>'<div class="svsec"><span>'+(k+1)+'. '+esc(x.d.name)+'</span><small>'+plx(x.ls.length,['урок','урока','уроков'],['lesson','lessons'],['õppetund','õppetundi'])+'</small></div><div class="svtiles grid">'+x.ls.map(crTile).join('')+'</div>';
-  const row=(p,a,b)=>'<div class="srcrow"><span class="chip p'+p+'">P'+p+'</span><span>'+a+'<br><small>'+b+'</small></span></div>';
-  return '<div class="page tabbed crs chome"><header class="svhead">'+(multi?'<button class="ibtn" data-act="crList" aria-label="'+T3('Все курсы','All courses','Kõik kursused')+'">'+ic('back')+'</button>':'')+
-    '<div class="brand"><span class="sv-logo" aria-hidden="true"></span>Corpus</div></header>'+
-    '<div class="kline">'+kostik(40,'hi','kk-float')+'<div class="kbubble">'+T3('Вся тема «'+nm+'»: '+pl(nL,'урок','урока','уроков')+', '+pl(nI,'структура','структуры','структур')+' на фото. Порядок — по важности: сначала <b>P1</b>, потом <b>P2</b>, потом <b>P3</b>.',
-      'The whole topic “'+nm+'”: '+nL+' lessons, '+nI+' structures on the photos. The order follows importance: <b>P1</b> first, then <b>P2</b>, then <b>P3</b>.',
-      'Kogu teema '+nm+': '+nL+' õppetundi, '+nI+' struktuuri fotodel. Järjekord on tähtsuse järgi: <b>P1</b>, siis <b>P2</b>, siis <b>P3</b>.')+'</div></div>'+
-    '<div class="svsec"><span>'+T3('Что учить','What to study','Mida õppida')+'</span><small>'+T3('важность','importance','tähtsus')+'</small></div>'+
-    '<div class="cfbar">'+[[1,T3('Только P1','Only P1','Ainult P1')],[2,'P1 + P2'],[3,T3('Все','All','Kõik')]].map(a=>'<button data-f="'+a[0]+'" class="'+(pf===a[0]?'on':'')+'">'+a[1]+'</button>').join('')+'</div>'+
-    parts.map(sec).join('')+
-    '<div class="svcard"><h3>'+T3('Важность','Importance','Tähtsus')+'</h3><div class="srcs">'+
-      row(1,T3('Главное','Essential','Peamine'),T3('учить в первую очередь','learn it first','õpi esimesena'))+
-      row(2,T3('Важное','Important','Oluline'),T3('детали, следующий шаг','details, the next step','detailid, järgmine samm'))+
-      row(3,T3('Дополнительное','Extra','Lisa'),T3('учить в последнюю очередь','learn it last','õpi viimasena'))+'</div></div>'+
-    '<p class="foot">'+T3('Картинки взяты из учебных материалов и нужны только для вашего личного обучения. Не делитесь файлом курса. Названия и важность определены автоматически, возможны ошибки.',
-      'The pictures come from study materials and are only for your own learning. Do not share the course file. Names and importance were found automatically, there may be mistakes.',
-      'Pildid on õppematerjalidest ja on siin ainult sinu isiklikuks õppimiseks. Ära jaga kursuse faili. Nimed ja tähtsus on tuvastatud automaatselt, vigu võib esineda.')+'</p></div>';
+  const pf=crPrio(),parts=crParts(f.id,pf),all=[];
+  parts.forEach(x=>{x.ss=x.ls.map(crStatus);x.ls.forEach((L,i)=>all.push({L:L,d:x.d,s:x.ss[i]}));});
+  const items=all.reduce((a,x)=>a.concat(x.L.items),[]),rev=items.filter(crDue),nP=all.filter(x=>crPass(x.s)).length,lc=META.courseLast;
+  const cur=all.find(x=>lc&&x.L.id===lc.pid&&x.s.st==='cur')||all.find(x=>x.s.st==='cur')||all.find(x=>x.s.st==='new'),defId=cur?cur.d.id:parts.length?parts[0].d.id:'';
+  const lbl=pf===1?'P1':T3('P1 и P2','P1 and P2','P1 ja P2'),hint=[T3('Только главное: P1.','Only the essentials: P1.','Ainult peamine: P1.'),
+    T3('Главное и важные детали. P3 скрыты.','The essentials and important details. P3 is hidden.','Peamine ja olulised detailid. P3 on peidetud.'),T3('Все структуры курса.','Every structure of the course.','Kõik kursuse struktuurid.')][pf-1];
+  const part=(x,k)=>{
+    const n=x.ls.length,dn=x.ss.filter(crPass).length,o=n>0&&(CR_OPEN[x.d.id]!==undefined?CR_OPEN[x.d.id]:x.d.id===defId);
+    return '<div class="cpart'+(o?' open':'')+'" data-did="'+x.d.id+'"><button class="cph" aria-expanded="'+o+'"><span class="cpn">'+(k+1)+'</span><span class="cpx"><b data-noi18n>'+esc(x.d.name)+'</b><small>'+
+      (n?T3('пройдено '+dn+' из '+n,'done '+dn+' of '+n,'läbitud '+dn+' / '+n):pf===3?T3('нет уроков','no lessons','õppetunde pole'):T3('нет уроков '+lbl,'no '+lbl+' lessons','pole '+lbl+' õppetunde'))+'</small></span>'+(n?ic('fwd',18):'')+'</button>'+crBar(dn,n)+
+      (o?'<div class="cllist">'+x.ls.map((L,i)=>crRow(L,x.ss[i])).join('')+'</div>':n?'':'<p class="cempty">'+(pf===3?T3('В этой части пока нет уроков.','No lessons in this part yet.','Selles osas pole veel õppetunde.'):
+        T3('В этой части нет структур '+lbl+'. Выберите «Все», чтобы увидеть её уроки.','This part has no '+lbl+' structures. Choose “All” to see its lessons.','Selles osas pole '+lbl+' struktuure. Vali „Kõik“, et näha selle õppetunde.'))+'</p>')+'</div>';
+  };
+  const rin='<span class="ctn">'+ic('repeat',16)+'<b>'+rev.length+'</b></span><span>'+(rev.length?T3('повторить сегодня','repeat today','korda täna'):T3('повторять сегодня нечего','nothing to repeat today','täna pole midagi korrata'))+'</span>';
+  const cta=cur?'<button class="ccta" data-pid="'+cur.L.id+'"'+(cur.s.step?' data-step="'+cur.s.step+'"':'')+'><span class="cplay">'+ic('play',18)+'</span><span class="cctx"><span class="cct">'+
+    (cur.s.st==='cur'?T3('Продолжить: ','Continue: ','Jätka: '):T3('Начать: ','Start: ','Alusta: '))+'<i class="latin" data-noi18n>'+esc(cur.L.title)+'</i></span><small><span data-noi18n>'+esc(cur.d.name)+'</span> · '+
+    (cur.s.k?T3('шаг '+cur.s.k+' из '+cur.s.n,'step '+cur.s.k+' of '+cur.s.n,'samm '+cur.s.k+' / '+cur.s.n):cur.s.st==='cur'?T3('начат','started','alustatud'):T3('новый урок','new lesson','uus õppetund'))+'</small></span></button>':'';
+  const leg=(p,a,b)=>'<div class="cleg"><span class="chip p'+p+'">P'+p+'</span><span><b>'+a+'</b> — '+b+'</span></div>';
+  return '<div class="page tabbed crs chome"><header class="chead">'+(multi?'<button class="ibtn" data-act="crList" aria-label="'+T3('Все курсы','All courses','Kõik kursused')+'">'+ic('back')+'</button>':'')+
+    '<div class="chtt"><div class="chname" data-noi18n>'+esc(f.name)+'</div><div class="chsub">'+plx(parts.length,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(all.length)+'</div></div></header>'+
+    '<div class="chero"><div class="chtop"><div><div class="chl">'+T3('Пройдено уроков','Lessons completed','Läbitud õppetunde')+'</div><div class="chn"><b>'+nP+'</b><span>'+T3('из ','of ','/ ')+all.length+'</span></div></div>'+kostik(56,'joy')+'</div>'+crBar(nP,all.length)+
+      '<div class="ctiles">'+(rev.length?'<button class="ctile crev" data-fid="'+f.id+'">'+rin+'</button>':'<div class="ctile crnone">'+rin+'</div>')+
+      '<div class="ctile"><span class="ctn"><b>'+(items.length-items.filter(c=>c.type==='new').length)+'</b><small> / '+items.length+'</small></span><span>'+T3('структур пройдено','structures done','struktuuri läbitud')+'</span></div></div>'+cta+'</div>'+
+    '<div class="cfilt"><div class="clab">'+T3('Что учить','What to study','Mida õppida')+'</div><div class="cfbar" role="group">'+[[1,T3('Только P1','Only P1','Ainult P1')],[2,'P1 + P2'],[3,T3('Все','All','Kõik')]].map(a=>'<button data-f="'+a[0]+'" aria-pressed="'+(pf===a[0])+'" class="'+(pf===a[0]?'on':'')+'">'+a[1]+'</button>').join('')+'</div><p class="chint">'+hint+'</p></div>'+
+    parts.map(part).join('')+
+    '<details class="cabout"><summary>'+ic('help',20)+'<span>'+T3('О курсе','About the course','Kursuse kohta')+'</span>'+ic('fwd',18)+'</summary><div class="cain">'+
+      leg(1,T3('Главное','Essential','Peamine'),T3('учить в первую очередь','learn it first','õpi esimesena'))+leg(2,T3('Важное','Important','Oluline'),T3('детали, следующий шаг','details, the next step','detailid, järgmine samm'))+
+      leg(3,T3('Дополнительное','Extra','Lisa'),T3('учить в последнюю очередь','learn it last','õpi viimasena'))+
+      '<p>'+T3('Картинки взяты из учебных материалов и нужны только для вашего личного обучения. Не делитесь файлом курса. Названия и важность определены автоматически, возможны ошибки.',
+        'The pictures come from study materials and are only for your own learning. Do not share the course file. Names and importance were found automatically, there may be mistakes.',
+        'Pildid on õppematerjalidest ja on siin ainult sinu isiklikuks õppimiseks. Ära jaga kursuse faili. Nimed ja tähtsus on tuvastatud automaatselt, vigu võib esineda.')+'</p></div></details></div>';
 }
 SCREENS.courses={
   html(){
@@ -3748,15 +3775,23 @@ SCREENS.courses={
         T3('Здесь будут курсы: уроки по фото с подписями, фактами и вопросами. Импортируйте файл курса в Настройках.','Courses will live here: lessons on photos with labels, facts and questions. Import a course file in Settings.','Siia tulevad kursused: fotode õppetunnid siltide, faktide ja küsimustega. Impordi kursuse fail Seadetes.')+'</div>'+
         '<button class="btn primary" data-act="importPick">'+ic('import',18)+T3('Импортировать файл курса','Import a course file','Impordi kursuse fail')+'</button>'+starterBtn()+'</div></div>';
     }
-    return '<div class="page tabbed crs">'+head+'<div class="svtiles grid">'+fs.map(f=>{
-      const ls=crParts(f.id,3).reduce((a,x)=>a.concat(x.ls),[]);
-      return '<button class="svtile" data-fid="'+f.id+'"><span class="svt-img">'+(ls[0]&&plateUrl(ls[0].p)?'<img src="'+esc(plateUrl(ls[0].p))+'" alt="" loading="lazy" data-fb>':'<span class="svph">'+kostik(46,'hi')+'</span>')+'</span><span class="svt-n" data-noi18n>'+esc(f.name)+'</span><span class="svt-m">'+
-        plx(ls.length,['урок','урока','уроков'],['lesson','lessons'],['õppetund','õppetundi'])+'</span></button>';}).join('')+'</div></div>';
+    return '<div class="page tabbed crs">'+head+'<div class="ccards">'+fs.map(f=>{
+      const ls=crParts(f.id,3).reduce((a,x)=>a.concat(x.ls),[]),dn=ls.filter(L=>crPass(crStatus(L))).length,due=ls.reduce((a,L)=>a+L.items.filter(crDue).length,0);
+      const cov=ls.filter(L=>plateUrl(L.p)).slice(0,3).map(L=>'<img src="'+esc(plateUrl(L.p))+'" alt="" loading="lazy" data-fb>').join('')||'<span>'+kostik(46,'hi')+'</span>';
+      return '<button class="ccard" data-fid="'+f.id+'"><span class="ccov">'+cov+'</span><span class="ccrow"><span class="ccn"><b data-noi18n>'+esc(f.name)+'</b><small>'+crNL(ls.length)+' · '+T3('пройдено '+dn,'done '+dn,'läbitud '+dn)+'</small></span>'+
+        (due?'<span class="cpill due">'+ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+due+'</span>':'<span class="cpill done">'+ic('check',13)+T3('Всё повторено','All repeated','Kõik korratud')+'</span>')+'</span>'+crBar(dn,ls.length)+'</button>';}).join('')+'</div></div>';
   },
   mount(){
     mountImgFallbacks();
-    document.querySelectorAll('.crs .svtile[data-pid]').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,{name:'courses',fid:view.fid}));
-    document.querySelectorAll('.crs .svtile[data-fid]').forEach(b=>b.onclick=()=>go({name:'courses',fid:b.dataset.fid}));
+    const from=()=>({name:'courses',fid:view.fid});
+    document.querySelectorAll('.crs .clrow').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from()));
+    document.querySelectorAll('.crs .ccta').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from(),b.dataset.step));
+    document.querySelectorAll('.crs .ccard').forEach(b=>b.onclick=()=>go({name:'courses',fid:b.dataset.fid}));
+    document.querySelectorAll('.crs .cph').forEach(b=>b.onclick=()=>{CR_OPEN[b.closest('.cpart').dataset.did]=b.getAttribute('aria-expanded')!=='true';render();});
+    document.querySelectorAll('.crs button.crev').forEach(b=>b.onclick=()=>{
+      const parts=crParts(b.dataset.fid,crPrio()),rev=[];parts.forEach(x=>x.ls.forEach(L=>L.items.filter(crDue).forEach(c=>rev.push(c))));
+      startSession({deckIds:parts.map(x=>x.d.id),folderId:b.dataset.fid},false,rev,META.mode||'hideAll');
+    });
     document.querySelectorAll('.cfbar button').forEach(b=>b.onclick=()=>{META.coursePrio=+b.dataset.f;persistMeta();render();});
   }
 };
@@ -3765,11 +3800,11 @@ function lessonStart(did){
   const ps=platesOf(did).filter(hasLesson);if(!ps.length)return;
   openLesson((ps.find(p=>cardsOfPlate(p.id).some(c=>c.type==='new'))||ps[0]).id,Object.assign({},view));
 }
-function openLesson(pid,from){
+function openLesson(pid,from,step){
   const p=plateById(pid);if(!p){CL=null;go({name:'library'});return;}
   const L=crLesson(p,crPrio());
-  CL={pid:pid,L:L,from:from||{name:'courses'},step:'ov',st:{},focus:null,
-    steps:LSKEYS.filter(k=>k==='ov'||(k==='se'?L.link.length>0:L.items.length>0))};
+  CL={pid:pid,L:L,from:from||{name:'courses'},step:'ov',st:{},focus:null,steps:crSteps(L)};
+  if(step&&CL.steps.indexOf(step)>=0)CL.step=step;   // resume: the step the reader left on
   go({name:'courseLesson'});
 }
 const crNext=k=>CL.steps[CL.steps.indexOf(k)+1]||null;
@@ -3802,7 +3837,7 @@ SCREENS.courseLesson={
   }
 };
 function crGo(s){
-  CL.step=s;
+  CL.step=s;META.courseLast={pid:CL.pid,step:s};persistMeta();   // where "Continue" on the course home leads
   document.querySelectorAll('.cseg button').forEach(b=>b.classList.toggle('on',b.dataset.s===s));
   $('#cstep').textContent=lsName(LSKEYS.indexOf(s)+1)+(CL.L.page?' · '+T3('практикум, стр. ','practical, p. ','praktikum lk ')+CL.L.page:'');
   ({ov:crOv,tu:crTu,ha:crHa,me:crMe,se:crSe})[s]();
@@ -3841,6 +3876,7 @@ function crTu(){
 const crMask=it=>{const k=String(it.term||'').replace(/[()]/g,'').split(/[,;]/)[0].trim(),n=it.note||'';return k?n.split(k).join('…'):n;};
 function crFinish(title,text,next,label){
   crDraw('none');crProg(1);
+  if(!next){delete META.courseLast;persistMeta();}   // the lesson is over: nothing to continue
   crP().innerHTML='<div class="cdone">'+kostik(56,'joy')+'<b>'+esc(title)+'</b><p class="cnote" data-noi18n>'+esc(text)+'</p></div>'+
     '<div class="row"><button class="btn primary" id="cnx">'+(next?label:T3('Другие уроки','Other lessons','Teised õppetunnid'))+'</button></div>';
   $('#cnx').onclick=()=>next?crGo(next):crHome();
@@ -6281,7 +6317,7 @@ async function bootData(){
   if(S.db){
     try{
       const g=await Promise.all(['decks','plates','terms','stats','folders','packs','exams'].map(n=>S.db.collection(n).get().catch(e=>{if(n==='exams')return {docs:[]};throw e;})));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro','coursePrio','courseLast'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});applyLook();}}catch(e){}
       S.decks=g[0].docs.map(x=>Object.assign({},x.data(),{id:x.id,newToday:x.data()&&x.data().newToday?Object.assign({},x.data().newToday):undefined}));
       S.plates=g[1].docs.map(x=>Object.assign({},x.data(),{id:x.id}));
       S.cards=g[2].docs.map(x=>normCard(Object.assign({},x.data(),{id:x.id})));
@@ -6551,26 +6587,64 @@ html.vkb .panel{padding-bottom:12px}
 /* ===== курсы: вкладка и экран урока ===== */
 .crs .kline{display:flex;align-items:flex-start;gap:10px}
 .crs.chome{display:flex;flex-direction:column;gap:14px}
-.crs .svsec{margin:10px 4px 0}.crs .svsec small{font-size:13px;color:var(--ink2)}
-.crs .svhead{padding:6px 0 2px}
-.crs .svtiles.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;overflow:visible;margin:0;padding:0}
-.crs .svtiles.grid .svtile{width:auto;gap:2px;padding:6px 6px 12px}
-.crs .svtiles.grid .svt-img{height:auto;aspect-ratio:16/10;background:#fff}
-.crs .svtiles.grid .svt-n{padding:8px 6px 0;font-size:16px;white-space:normal;overflow:visible}
-.crs .svtiles.grid .svt-m{padding:0 6px;font-size:12.5px}
-.crs .svph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--au1),var(--au3))}
-.crs .svcard{margin-top:0;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
-.crs .svcard h3{margin:0;font-size:15px;font-weight:600}
-.crs .srcs{display:flex;flex-direction:column;gap:8px}
-.crs .srcrow{display:flex;align-items:center;gap:10px;font-size:14px}
-.crs .srcrow>span:last-child{flex:1;min-width:0}.crs .srcrow small{color:var(--ink2);font-size:12.5px}
-.crs .foot{font-size:12px;color:var(--ink3);margin:4px 4px 0}
 .crs .chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:10px;background:var(--primary-soft);color:var(--accent)}
 .crs .chip.src{background:var(--surface2);color:var(--ink2);font-weight:500}
 .crs .chip.p1{background:var(--bad-soft);color:var(--bad)}.crs .chip.p2{background:var(--hard-soft);color:var(--hard)}.crs .chip.p3{background:var(--easy-soft);color:var(--easy)}
-.cfbar{display:flex;gap:6px;flex-wrap:wrap}
-.cfbar button{border:1px solid var(--glass-line);background:var(--glass);border-radius:14px;padding:8px 12px;font-size:13.5px;font-weight:600;color:var(--ink2)}
-.cfbar button.on{background:var(--primary);color:var(--primary-ink)}
+/* course home: header, progress block, filter, parts with lesson rows, list of courses */
+.chead{display:flex;align-items:center;gap:10px;padding:6px 0 2px}
+.chtt{flex:1;min-width:0}
+.chname{font-size:22px;font-weight:600;letter-spacing:-.2px;line-height:1.2;overflow-wrap:anywhere}
+.chsub{font-size:13px;color:var(--ink2)}
+.chero{display:flex;flex-direction:column;gap:14px;padding:16px;border-radius:24px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow)}
+.chtop{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.chl{font-size:13px;font-weight:600;color:var(--ink2)}
+.chn{display:flex;align-items:baseline;gap:6px}.chn b{font-size:46px;font-weight:300;letter-spacing:-2px;line-height:1.05;font-variant-numeric:tabular-nums}.chn span{font-size:17px;color:var(--ink2)}
+.cbar{display:block;height:4px;border-radius:2px;background:var(--sv-track);overflow:hidden}.cbar i{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.chero>.cbar{height:8px;border-radius:4px}.chero>.cbar i{border-radius:4px}
+.ctiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.ctile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border-radius:16px;border:none;background:var(--surface2);color:var(--ink2);font:inherit;font-size:12.5px;text-align:left}
+.ctn{display:flex;align-items:center;gap:6px;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}.ctn small{font-size:14px;font-weight:500;color:var(--ink2)}
+.ctile.crev{background:var(--hard-soft);color:color-mix(in srgb,var(--hard) 60%,var(--ink));cursor:pointer}.crev .ctn{color:inherit}
+.ccta{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:8px 18px 8px 10px;border:none;border-radius:30px;background:var(--primary);color:var(--primary-ink);font:inherit;text-align:left;box-shadow:0 12px 28px rgba(31,27,51,.22)}
+.cplay{flex:none;width:42px;height:42px;border-radius:50%;background:color-mix(in srgb,var(--primary-ink) 16%,transparent);display:flex;align-items:center;justify-content:center}
+.cctx{display:flex;flex-direction:column;min-width:0}.cctx>*{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cct{font-size:16.5px;font-weight:600}.cctx small{font-size:12.5px;opacity:.78}
+.cfilt{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.clab{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--ink2);padding:0 4px}
+.cfbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:3px;border-radius:16px;border:1px solid var(--glass-line);background:var(--glass)}
+.cfbar button{min-height:40px;border:none;border-radius:13px;background:transparent;font:inherit;font-size:14px;font-weight:600;color:var(--ink2)}
+.cfbar button.on{background:var(--primary);color:var(--primary-ink);box-shadow:0 4px 12px rgba(31,27,51,.18)}
+.chint{margin:0;padding:0 4px;font-size:12.5px;color:var(--ink2)}
+.cpart{display:flex;flex-direction:column;gap:8px;margin-top:8px}.cpart>.cbar{margin:0 4px}
+.cph{display:flex;align-items:center;gap:10px;width:100%;padding:4px;border:none;background:transparent;color:inherit;font:inherit;text-align:left}
+.cpn{flex:none;width:28px;height:28px;border-radius:9px;background:var(--primary-soft);color:color-mix(in srgb,var(--accent) 70%,var(--ink));display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:700}
+.cpx{flex:1;min-width:0;display:flex;flex-direction:column}.cpx b{font-size:16px;font-weight:600}.cpx small{font-size:12.5px;color:var(--ink2)}
+.cph .i{color:var(--ink2);transform:rotate(90deg);transition:transform .2s}.cpart.open .cph .i{transform:rotate(-90deg)}
+.cllist{display:flex;flex-direction:column;gap:8px}
+.cempty{margin:0;padding:2px 4px 4px 42px;font-size:13px;color:var(--ink2)}
+.clrow{display:flex;align-items:center;gap:12px;width:100%;padding:8px 10px 8px 8px;border-radius:18px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow);color:inherit;font:inherit;text-align:left}
+.clrow[data-st=cur]{background:var(--glass-strong);box-shadow:inset 0 0 0 2px var(--accent),var(--glass-shadow)}
+.cth{flex:none;width:56px;height:56px;border-radius:13px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--primary-soft);color:var(--accent);font-size:26px;font-weight:600}
+.cth img{width:100%;height:100%;object-fit:cover}
+.clmid{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}.clmid .cbar{margin-top:6px}
+.cln{font-size:17px;font-weight:600}.clsub{font-size:12.5px;color:var(--ink2)}.cln,.clsub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cpill{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:5px 9px;border-radius:11px;white-space:nowrap;background:var(--surface2);color:var(--ink2)}
+.cpill.done{background:var(--ok-soft);color:color-mix(in srgb,var(--ok) 60%,var(--ink))}
+.cpill.due{background:var(--hard-soft);color:color-mix(in srgb,var(--hard) 60%,var(--ink))}
+.cpill.cur{background:var(--primary-soft);color:color-mix(in srgb,var(--accent) 70%,var(--ink))}
+.cabout{margin-top:10px;border-radius:22px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow);overflow:hidden}
+.cabout summary{display:flex;align-items:center;gap:10px;min-height:52px;padding:0 14px;font-size:15px;font-weight:600;cursor:pointer;list-style:none}.cabout summary::-webkit-details-marker{display:none}
+.cabout summary span{flex:1}.cabout summary .i{color:var(--ink2)}.cabout summary .i:last-child{transform:rotate(90deg);transition:transform .2s}.cabout[open] summary .i:last-child{transform:rotate(-90deg)}
+.cain{display:flex;flex-direction:column;gap:10px;padding:0 14px 14px}.cain p{margin:0;font-size:12px;color:var(--ink2)}
+.cleg{display:flex;align-items:center;gap:10px;font-size:14px}.cleg b{font-weight:600}
+.cleg .chip.p1{color:color-mix(in srgb,var(--bad) 60%,var(--ink))}.cleg .chip.p2{color:color-mix(in srgb,var(--hard) 60%,var(--ink))}.cleg .chip.p3{color:color-mix(in srgb,var(--easy) 60%,var(--ink))}
+.ccards{display:flex;flex-direction:column;gap:14px}
+.ccard{display:flex;flex-direction:column;gap:12px;width:100%;padding:10px 10px 14px;border-radius:24px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow);color:inherit;font:inherit;text-align:left}
+.ccov{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;height:104px}
+.ccov>*{border-radius:16px;overflow:hidden;background:var(--primary-soft)}.ccov img{width:100%;height:100%;object-fit:cover}.ccov>span{display:flex;align-items:center;justify-content:center}
+.ccrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 4px}
+.ccn{display:flex;flex-direction:column;min-width:0}.ccn b{font-size:19px;font-weight:700;letter-spacing:-.2px}.ccn small{font-size:13px;color:var(--ink2)}
+.ccard>.cbar{height:6px;margin:0 4px}
 .crs .row{display:flex;gap:8px}.crs .row>.btn{flex:1}
 .crs .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .clesson .bar{padding:8px 12px 18px}

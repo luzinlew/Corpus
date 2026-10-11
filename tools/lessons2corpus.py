@@ -25,8 +25,10 @@ def load_image(ref, base):
         if not f.is_file():
             print('warning: no image file', f, file=sys.stderr); return None
         raw = f.read_bytes()
-        uri = 'data:image/jpeg;base64,' + base64.b64encode(raw).decode()
-    w, h = Image.open(io.BytesIO(raw)).size
+        uri = None
+    im = Image.open(io.BytesIO(raw)); w, h = im.size
+    if uri is None:
+        uri = 'data:image/%s;base64,' % ('png' if im.format == 'PNG' else 'jpeg') + base64.b64encode(raw).decode()
     return uri, w, h
 
 
@@ -84,8 +86,12 @@ def convert(lessons, base):
             if item is not None:
                 lnk['item'] = item; bound += 1
             else:
-                loose += 1
                 target = li if li in photo_of else first_in_part.get(L.get('part'), next(iter(photo_of), None))
+                if target is None:
+                    print('warning: question dropped, no photo for it:', q.get('q'), file=sys.stderr)
+                else:
+                    loose += 1
+                    print('warning: question without a frame:', q.get('q'), file=sys.stderr)
             if target is not None:
                 photo_of[target].setdefault('link', []).append(lnk)
     doc = {'app': 'corpus', 'kind': 'folder', 'version': 1, 'exportedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),

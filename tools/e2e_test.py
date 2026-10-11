@@ -448,6 +448,7 @@ async def main():
                   json.dumps([d['name'] for d in exp2['decks']]))
 
             # ---------- lesson player ----------
+            plates_before_lesson = await pg.evaluate('S.plates.length')
             async def import_file(name, count_plates):
                 n0 = await pg.evaluate('S.plates.length')
                 await pg.evaluate("go({name:'settings'})")
@@ -476,10 +477,11 @@ async def main():
                     await pg.click('[data-act=introNext]')
             await pg.wait_for_function("view.name==='study'&&SS.lesson&&SS.lesson.next===4&&SS.cm==='choice'", timeout=10000)
             check('lesson step 3: choice session without scheduling', await pg.evaluate('SS.cram===true&&SS.cm==="choice"'))
-            await pg.click('.full.study [data-act=studyExit]')
+            check('lesson: the close button of a lesson session leaves the lesson', bool(await pg.query_selector('.full.study header [data-act=lessonQuit]')))
+            await pg.evaluate('A.studyExit()')   # what the end of the session does: on to the next step
             await pg.wait_for_function("view.name==='study'&&SS.lesson&&SS.lesson.next===5", timeout=10000)
             check('lesson step 4: scheduled session (not cram)', await pg.evaluate('SS.cram===false'))
-            await pg.click('.full.study [data-act=studyExit]')
+            await pg.evaluate('A.studyExit()')
             await pg.wait_for_function("view.name==='lesson'&&LS.step===5", timeout=10000)
             check('lesson step 5: the linked frame is highlighted', await pg.locator('#masks .mk.hl').count() == 1 and await pg.locator('#masks .mk.open').count() == 0)
             await pg.click('.ls-opts .opt >> text="maxilla"')
@@ -530,7 +532,7 @@ async def main():
               S.cards.filter(c=>ids.has(c.deckId)).forEach(c=>removeCard(c.id));S.plates.filter(p=>ids.has(p.deckId)).forEach(p=>dropPlate(p));
               ds.forEach(d=>{S.decks=S.decks.filter(x=>x.id!==d.id);removeDoc('decks',d.id);});
               S.folders.filter(f=>f.name.startsWith('Urok')).forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});})()""")
-            await pg.wait_for_function('S.plates.length===6 && WQ.jobs.size===0', timeout=20000)
+            await pg.wait_for_function(f'S.plates.length==={plates_before_lesson} && WQ.jobs.size===0', timeout=20000)
 
             # share the folder by code / QR
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")

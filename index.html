@@ -2525,7 +2525,7 @@ function doneHtml(){
   const sm=sessSummary();
   const scope=SS.examId&&examById(SS.examId)?{name:exTitle(examById(SS.examId))}:SS.folderId?folderById(SS.folderId):deckById(SS.deckId);let next='';
   if(!SS.cram){const ids=sessionDeckIds();const l=S.cards.filter(c=>ids.indexOf(c.deckId)>=0&&!cardExcluded(c)&&(c.type==='learn'||c.type==='relearn')).sort((a,b)=>a.due-b.due)[0];if(l)next=' Следующая карточка будет готова через '+fmtDelay(l.due-Date.now())+'.';}
-  return '<div class="full"><header class="bar"><button class="ibtn plain" data-act="studyExit" aria-label="Закрыть">'+ic('close')+'</button><div class="bar-title"><b data-noi18n>'+esc(scope?scope.name:'')+'</b></div>'+gearBtn(1)+'</header>'+
+  return '<div class="full"><header class="bar"><button class="ibtn plain" data-act="'+(SS&&SS.lesson?'lessonQuit':'studyExit')+'" aria-label="Закрыть">'+ic('close')+'</button><div class="bar-title"><b data-noi18n>'+esc(scope?scope.name:'')+'</b></div>'+gearBtn(1)+'</header>'+
     (SS.limitHit?'<div class="donebox">'+doneMark()+'<h2>Сессия завершена</h2><p class="muted">'+pl(SS.done,'ответ','ответа','ответов')+' за '+pl(Math.max(1,Math.round((Date.now()-SS.t0)/MIN)),'минуту','минуты','минут')+'. Хорошая работа — можно передохнуть или продолжить.</p>'+sm.html+
     '<div class="done-btns"><button class="btn primary" data-act="sessMore">'+(SS.limit==='t10'?'Ещё 10 минут':'Ещё 20 карточек')+'</button><button class="btn line" data-act="studyExit">Закончить</button>':
     '<div class="donebox">'+doneMark()+'<h2>'+(SS.cram?'Тренировка завершена':'На сегодня всё')+'</h2><p class="muted">'+(sm.html?'':(SS.done?'Ответов за сессию: '+SS.done+'.':'Карточек к повтору нет.'))+next+'</p>'+sm.html+
@@ -2537,7 +2537,7 @@ SCREENS.study={
     if(!SS.cur)return doneHtml();
     if(SS.intro)return introHtml();
     const c=cardById(SS.cur),p=isText(c)?null:plateById(c.plateId);
-    return '<div class="full study"><header class="bar"><button class="ibtn plain" data-act="studyExit" aria-label="Закрыть">'+ic('close')+'</button>'+
+    return '<div class="full study"><header class="bar"><button class="ibtn plain" data-act="'+(SS&&SS.lesson?'lessonQuit':'studyExit')+'" aria-label="Закрыть">'+ic('close')+'</button>'+
       '<div class="scounts" id="scounts">'+countsBar()+'</div>'+
       '<button class="ibtn plain" data-act="studyUndo" id="undoBtn" aria-label="Отменить ответ"'+(SS.undo.length?'':' disabled')+'>'+ic('undo')+'</button>'+
       askBtn()+gearBtn(1)+'<button class="ibtn plain" data-act="studyMenu" aria-label="Режим и действия">'+ic('more')+'</button><div class="kprog" id="kprog"></div></header>'+
@@ -2729,12 +2729,12 @@ function introPanel(){
     '<div class="ans intro-ans">'+name+(c&&c.note?'<div class="anote">'+esc(c.note)+'</div>':'')+'</div>'+
     '<div class="intro-nav"><button class="btn line" data-act="introPrev" aria-label="Назад"'+(I.i?'':' disabled')+'>'+ic('back',18)+'Назад</button>'+
     '<button class="btn primary" data-act="introNext">'+(last?(I.review?'Готово':'Учить эти метки'):'Далее')+(last?'':ic('fwd',18))+'</button></div>'+
-    '<button class="btn quiet block" data-act="'+(I.review?'studyExit':'introSkip')+'">'+(I.review?'Закрыть':'Пропустить ознакомление')+'</button>';
+    '<button class="btn quiet block" data-act="'+(I.review?'studyExit':'introSkip')+'">'+(I.review?(SS.lesson?'Пропустить ознакомление':'Закрыть'):'Пропустить ознакомление')+'</button>';
 }
 function introTitle(){const I=SS.intro;return '<b>Ознакомление</b><small>'+(I.n>1?T3('Порция '+(I.k+1)+' из '+I.n+' · ','Part '+(I.k+1)+' of '+I.n+' · ','Osa '+(I.k+1)+'/'+I.n+' · '):'')+T3('метка '+(I.i+1)+' из '+I.ids.length,'label '+(I.i+1)+' of '+I.ids.length,'silt '+(I.i+1)+'/'+I.ids.length)+'</small>';}
 function introHtml(){
   const p=plateById(SS.intro.plateId);
-  return '<div class="full study intro"><header class="bar"><button class="ibtn plain" data-act="studyExit" aria-label="Закрыть">'+ic('close')+'</button>'+
+  return '<div class="full study intro"><header class="bar"><button class="ibtn plain" data-act="'+(SS&&SS.lesson?'lessonQuit':'studyExit')+'" aria-label="Закрыть">'+ic('close')+'</button>'+
     '<div class="bar-title" id="introTitle">'+introTitle()+'</div>'+gearBtn(1)+'</header>'+
     stageHtml(p)+'<div class="panel"><div class="panel-in" id="panel"></div></div></div>';
 }
@@ -3704,7 +3704,7 @@ function lsSession(p,cram,mode,next){
   return true;
 }
 function openLesson(pid,step){
-  const p=plateById(pid);if(!p)return;
+  const p=plateById(pid);if(!p){LS=null;go({name:'library'});return;}
   const q=Array.isArray(p.link)?p.link:[];
   if(step>=2&&step<=4&&!lsCards(pid).length)step=5;
   if(step===5&&!q.length)step=6;
@@ -3954,7 +3954,7 @@ function cleanLessonPlate(sp,p){
     if(a.length)p.link=a;}
 }
 function cleanLessonCard(c){
-  if(typeof c.note==='string'){c.note=c.note.slice(0,1000);if(!c.note)delete c.note;}else delete c.note;
+  if(typeof c.note==='string'){c.note=c.note.slice(0,4000);if(!c.note)delete c.note;}else delete c.note;
   if(typeof c.src==='string'&&c.src){c.src=c.src.slice(0,12);}else delete c.src;
   if(!(Number.isInteger(c.prio)&&c.prio>=1&&c.prio<=3))delete c.prio;
   if(!(Array.isArray(c.pt)&&c.pt.length===2&&c.pt.every(v=>typeof v==='number'&&isFinite(v)&&v>=0&&v<=100)))delete c.pt;
@@ -4054,7 +4054,7 @@ async function importData(data,opts){
     if(sc.id!=null)cmap[sc.id]=c.id;
     restored.push(normCard(c));n++;
   });
-  S.plates.filter(pp=>pp.link&&Object.keys(pmap).some(k=>pmap[k].nid===pp.id)).forEach(pp=>{pp.link.forEach(l=>{if(l.item){if(cmap[l.item])l.item=cmap[l.item];else delete l.item;}});persist('plates',pp.id);});
+  S.plates.filter(pp=>pp.link&&Object.keys(pmap).some(k=>pmap[k].nid===pp.id)).forEach(pp=>{pp.link.forEach(l=>{if(l.item){if(Object.prototype.hasOwnProperty.call(cmap,l.item))l.item=cmap[l.item];else delete l.item;}});persist('plates',pp.id);});
   packAdd(restored);
   hideBusy();
   toast(full?'Восстановлено: '+pl(n,'карточка','карточки','карточек'):isFolder?'Папка импортирована: '+pl(n,'карточка','карточки','карточек'):'Колода импортирована: '+pl(n,'карточка','карточки','карточек'));
@@ -5987,10 +5987,11 @@ const A={
   zoomIn:()=>{const z=setZoom(zoomStep(1));if(SS&&view.name==='study'){SS.zoom=z;focusTarget();}},
   zoomOut:()=>{const z=setZoom(zoomStep(-1));if(SS&&view.name==='study')SS.zoom=z;},
   studyHome:()=>{SS=Object.assign({},{zoom:SS?SS.zoom:1});go({name:'home'});},
-  sessHard:()=>{if(!SS||!SS.log)return;const sub=sessHardList().map(e=>cardById(e.id));if(!sub.length){toast('Трудных карточек пока нет');return;}const sc={deckId:SS.deckId,deckIds:SS.deckIds,folderId:SS.folderId,examId:SS.examId};startSession(sc,true,sub,SS.mode);},
+  sessHard:()=>{if(!SS||!SS.log)return;const sub=sessHardList().map(e=>cardById(e.id));if(!sub.length){toast('Трудных карточек пока нет');return;}const sc={deckId:SS.deckId,deckIds:SS.deckIds,folderId:SS.folderId,examId:SS.examId};const L=SS.lesson;startSession(sc,true,sub,SS.mode);if(L&&SS)SS.lesson=L;},
   lesson:()=>lessonStart(view.deckId),
   lessonNext:()=>lessonNext(),
   lessonPick:el=>lessonPick(+el.dataset.i),
+  lessonQuit:()=>{if(SS)delete SS.lesson;LS=null;A.studyExit();},
   lessonExit:()=>{const p=LS&&plateById(LS.pid);LS=null;go({name:'deck',deckId:p?p.deckId:null,tab:'photos'});},
   lessonPlate:()=>{const p=plateById(LS.pid),ps=platesOf(p.deckId),n=ps.slice(ps.findIndex(x=>x.id===p.id)+1).find(hasLesson);if(n)openLesson(n.id,1);},
   studyExit:()=>{const L=SS&&SS.lesson;if(L){SS={zoom:SS.zoom};openLesson(L.pid,L.next);return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
@@ -6163,7 +6164,7 @@ async function bootData(){
 if(window.__TEST__){
   Object.defineProperty(window,'SS',{get:()=>SS});
   Object.defineProperty(window,'ED',{get:()=>ED});
-  Object.defineProperty(window,'LS',{get:()=>LS});window.dropPlate=dropPlate;window.removeDoc=removeDoc;window.WQ=WQ;
+  Object.defineProperty(window,'LS',{get:()=>LS});window.A=A;window.dropPlate=dropPlate;window.removeDoc=removeDoc;window.WQ=WQ;
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;

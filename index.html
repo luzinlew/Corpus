@@ -3701,6 +3701,7 @@ function lsSession(p,cram,mode,next){
   if(SS===mark)return false;
   SS.lesson={pid:p.id,next:next};
   if(SS.intro&&!SS.intro.review)introEnd();   // the introduction was step 2
+  else render();   // the header was drawn before SS.lesson existed
   return true;
 }
 function openLesson(pid,step){
@@ -3709,7 +3710,7 @@ function openLesson(pid,step){
   if(step>=2&&step<=4&&!lsCards(pid).length)step=5;
   if(step===5&&!q.length)step=6;
   LS={deckId:p.deckId,pid:pid,step:step,i:0,picked:null,opts:null,right:0,total:q.length};
-  if(step===2){startIntroReview(p.deckId,[pid]);if(SS&&SS.intro)SS.lesson={pid:pid,next:3};else openLesson(pid,3);return;}
+  if(step===2){startIntroReview(p.deckId,[pid]);if(SS&&SS.intro){SS.lesson={pid:pid,next:3};render();}else openLesson(pid,3);return;}
   if(step===3){if(!lsSession(p,true,'choice',4))openLesson(pid,5);return;}
   if(step===4){
     if(!lsSession(p,false,'hideAll',5)||!SS.cur){SS={zoom:SS&&SS.zoom};openLesson(pid,5);}
@@ -5987,7 +5988,7 @@ const A={
   zoomIn:()=>{const z=setZoom(zoomStep(1));if(SS&&view.name==='study'){SS.zoom=z;focusTarget();}},
   zoomOut:()=>{const z=setZoom(zoomStep(-1));if(SS&&view.name==='study')SS.zoom=z;},
   studyHome:()=>{SS=Object.assign({},{zoom:SS?SS.zoom:1});go({name:'home'});},
-  sessHard:()=>{if(!SS||!SS.log)return;const sub=sessHardList().map(e=>cardById(e.id));if(!sub.length){toast('Трудных карточек пока нет');return;}const sc={deckId:SS.deckId,deckIds:SS.deckIds,folderId:SS.folderId,examId:SS.examId};const L=SS.lesson;startSession(sc,true,sub,SS.mode);if(L&&SS)SS.lesson=L;},
+  sessHard:()=>{if(!SS||!SS.log)return;const sub=sessHardList().map(e=>cardById(e.id));if(!sub.length){toast('Трудных карточек пока нет');return;}const sc={deckId:SS.deckId,deckIds:SS.deckIds,folderId:SS.folderId,examId:SS.examId};const L=SS.lesson;startSession(sc,true,sub,SS.mode);if(L&&SS){SS.lesson=L;render();}},
   lesson:()=>lessonStart(view.deckId),
   lessonNext:()=>lessonNext(),
   lessonPick:el=>lessonPick(+el.dataset.i),

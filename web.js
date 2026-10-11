@@ -562,7 +562,9 @@
         turns[turns.length - 1] = { role: last.role, content: imgs.concat([{ type: 'text', text: last.content }]) };
       }
       var r;
-      try { r = await fnFetch('POST', { messages: turns, json: !!asJson, max_tokens: asJson ? 3000 : 1500 }, opts.signal); }
+      var body = { messages: turns, json: !!asJson, max_tokens: asJson ? 3000 : 1500 };
+      if (opts.purpose) body.purpose = String(opts.purpose).slice(0, 20);   // what the request is for (course translation); the function may use it for limits and the model
+      try { r = await fnFetch('POST', body, opts.signal); }
       catch (e) {
         if (e && e.name === 'AbortError') throw { code: 'cancelled', message: 'cancelled' };
         throw { code: 'unavailable', message: String((e && e.message) || e) };

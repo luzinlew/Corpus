@@ -17,6 +17,7 @@ const aiUsed = new Map();     // uid|day -> units used today (public.ai_usage)
 const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
 const FN_URL0 = FN_URL;
+let FN_DELAY = 0;
 const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
 const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const activity = new Map();   // uid -> Map(day -> {opens, last})
@@ -127,7 +128,7 @@ http.createServer(async (req, res) => {
     for (const k of Object.keys(Q)) if (u.searchParams.has(k)) Q[k] = +u.searchParams.get(k);
     send(res, 200, Q); return;
   }
-  if (p === '/__fn') { FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; send(res, 200, { fn: FN_URL }); return; }
+  if (p === '/__fn') { FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0; send(res, 200, { fn: FN_URL, delay: FN_DELAY }); return; }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen)
 
   /* ---------- auth ---------- */
   if (p === '/auth/v1/signup' && req.method === 'POST') {
@@ -293,7 +294,16 @@ http.createServer(async (req, res) => {
     const last = body.messages[body.messages.length - 1];
     const blocks = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : last.content;
     const imgs = blocks.filter((b) => b.type === 'image').length, said = blocks.filter((b) => b.type === 'text').map((b) => b.text).join(' ');
-    const text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length })
+    /* a lesson translation (the app's prompt starts with «CORPUS-TRANSLATE <from>><to>» and ends with «INPUT:» and the JSON): the same JSON back,
+       every string value prefixed with «[<to>] »; a value with ATTACK in it comes back as an <img onerror> tag, to see that the app shows it as text */
+    const tm = body.system && /^CORPUS-TRANSLATE (\w+)>(\w+)\n/.exec(said), at = said.indexOf('\nINPUT:\n');
+    let text;
+    if (tm && at > 0) {
+      const tr = (v) => typeof v === 'string' ? (v.includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : '[' + tm[2] + '] ' + v)
+        : Array.isArray(v) ? v.map(tr) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, tr(x)])) : v;
+      let inp = null; try { inp = JSON.parse(said.slice(at + 8)); } catch { /* not JSON: answer with nothing useful */ }
+      text = JSON.stringify(tr(inp));
+    } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length })
       : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
     send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 } });
     return;
@@ -303,6 +313,7 @@ http.createServer(async (req, res) => {
   if (p === '/functions/v1/corpus-ai') {
     if (!FN_URL) { send(res, 404, { message: 'Requested function was not found' }); return; }
     try {
+      if (FN_DELAY && req.method === 'POST') await new Promise((r) => setTimeout(r, FN_DELAY));
       const h = {};
       for (const k of ['authorization', 'apikey', 'content-type', 'x-corpus-demo']) if (req.headers[k]) h[k] = req.headers[k];
       const r = await fetch(FN_URL, { method: req.method, headers: h, body: req.method === 'GET' ? undefined : raw });

@@ -3,8 +3,9 @@
 
     python3 tools/lessons2corpus.py IN.json -o OUT.json
 
-IN is either a course ({"lessons": [...]}) or a plain list of lessons. A lesson is
-{id, title, sub, part, page, img, intro[], items[{id, term, kind, box[x,y,w,h], note, src, prio, pt}], link[{term, q, ans, opts, src, page, item}]}.
+IN is either a course ({"lessons": [...], "lang": "ru"|"en"|"et"}) or a plain list of lessons. A lesson is
+{id, lang, title, sub, part, page, img, intro[], items[{id, term, kind, box[x,y,w,h], note, src, prio, pt}], link[{term, q, ans, opts, src, page, item}]}.
+lang (ru, en or et; the lesson's own, else the course's) is the language of the text: the app translates a lesson into the reader's language. Without it the app guesses.
 img is a path relative to IN's folder or a data: URI. The result holds slides: keep it for your own use,
 do not publish it or put it into the repository.
 """
@@ -50,6 +51,8 @@ def convert(lessons, base):
         t += 1
         p = {'id': 'p%d' % (len(plates) + 1), 'deckId': did[L.get('part')], 'w': img[1], 'h': img[2], 'createdAt': t, 'image': img[0],
              'title': L.get('title', '')}
+        if L.get('lang') in ('ru', 'en', 'et'):
+            p['lang'] = L['lang']
         if isinstance(L.get('page'), int) and 0 <= L['page'] <= 999 and L.get('page'):
             p['page'] = L['page']
         if L.get('intro'):
@@ -110,6 +113,8 @@ def main():
     src = pathlib.Path(a.infile)
     data = json.loads(src.read_text(encoding='utf-8'))
     lessons = data['lessons'] if isinstance(data, dict) else data
+    if isinstance(data, dict) and data.get('lang') in ('ru', 'en', 'et'):
+        lessons = [dict({'lang': data['lang']}, **L) for L in lessons]
     doc, bound, loose = convert(lessons, src.parent)
     pathlib.Path(a.out).write_text(json.dumps(doc, ensure_ascii=False), encoding='utf-8')
     print('decks %d, photos %d, cards %d, questions %d (with a frame %d, without %d)' %

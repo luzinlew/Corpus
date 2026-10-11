@@ -143,6 +143,31 @@ def lesson_file(path):
     pathlib.Path(path).write_text(json.dumps(doc))
 
 
+ATK = '<img src=x onerror=window.__xss=7>'   # what the fake Claude answers instead of any line with ATTACK in it
+
+
+def ru_lesson_file(path):
+    """A small course in Russian (lang 'ru') for the translation checks: a photo with four structures (kinds luu, luu, ava and one the dictionary does not know), an intro with a bold word
+    and a line with ATTACK, two questions (one answered in Latin, one in Russian). The note of the second structure carries ATTACK too: the fake Claude turns it into an <img onerror> tag."""
+    from PIL import Image
+    buf = io.BytesIO(); Image.new('RGB', (600, 400), (235, 235, 225)).save(buf, 'JPEG', quality=80)
+    data = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+    now = int(time.time() * 1000)
+    rows = [('os frontale', 'luu', 'KT', 1, 'Лобная кость (os frontale) образует лоб.'), ('maxilla', 'luu', 'OC', 2, 'Верхняя челюсть (maxilla) ATTACK'),
+            ('foramen magnum', 'ava', 'PIC', 3, 'Большое затылочное отверстие (foramen magnum).'), ('sulcus sagittalis', 'sooned', 'KT', 1, 'Борозда (sulcus sagittalis) по средней линии.')]
+    cards = [{'id': 'c%d' % (i + 1), 'deckId': 'd1', 'plateId': 'p1', 'term': t, 'x': 5 + 20 * i, 'y': 20 + 10 * i, 'w': 16, 'h': 5, 'createdAt': now + i,
+              'note': n, 'src': s, 'prio': pr, 'kind': k} for i, (t, k, s, pr, n) in enumerate(rows)]
+    doc = {'app': 'corpus', 'kind': 'folder', 'version': 1, 'exportedAt': '2026-10-06T12:00:00Z',
+           'folders': [{'id': 'f1', 'name': 'Urok RU', 'mode': 'hideAll'}],
+           'decks': [{'id': 'd1', 'name': 'Urok RU', 'newPerDay': 20, 'mode': 'hideAll', 'folderId': 'f1', 'createdAt': now}],
+           'plates': [{'id': 'p1', 'deckId': 'd1', 'w': 600, 'h': 400, 'createdAt': now, 'image': data, 'lang': 'ru', 'title': 'Лобная и верхняя челюсть', 'page': 7,
+                       'intro': ['Это <b>лобная</b> кость.', 'Смотрите ATTACK на рисунок.'],
+                       'link': [{'item': 'c2', 'q': 'Как называется верхняя челюсть?', 'ans': 'maxilla', 'opts': ['os frontale', 'mandibula', 'vomer'], 'src': 'KT', 'page': 5},
+                                {'q': 'Какая кость образует лоб?', 'ans': 'лобная кость', 'opts': ['нижняя челюсть', 'сошник', 'скуловая кость'], 'src': 'OC'}]}],
+           'cards': cards, 'stats': {}}
+    pathlib.Path(path).write_text(json.dumps(doc))
+
+
 def order_file(path):
     """Decks and photos listed in a scrambled order in the file; their createdAt says the real order.
     Two photos share a createdAt: the file order decides between them."""
@@ -236,6 +261,7 @@ async def main():
     folder_file(tmp / 'corpus-folder-Kolju.json')
     order_file(tmp / 'corpus-folder-order.json')
     lesson_file(tmp / 'corpus-folder-lesson.json')
+    ru_lesson_file(tmp / 'corpus-folder-ru.json')
     anki_file(tmp / 'Kolju.apkg')
     deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
     fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key', SUPABASE_SERVICE_ROLE_KEY='service-key')
@@ -304,6 +330,18 @@ async def main():
                   const cv=document.createElement('canvas');cv.width=20;cv.height=20;const x=cv.getContext('2d');x.drawImage(im,0,0,20,20);
                   let readable=true;try{x.getImageData(0,0,1,1);}catch(e){readable=false;}
                   return {url,status:r.status,ct,w:im.naturalWidth,readable};}""")
+
+            def watch_ai(page):
+                """The bodies of the POST requests the page sends to the AI function (a list that grows)."""
+                calls = []
+                page.on('request', lambda r: '/functions/v1/corpus-ai' in r.url and r.method == 'POST' and calls.append(r.post_data_json))
+                return calls
+
+            async def ui_lang(page, lang):
+                """Switch the interface language the way the reader does: in Settings."""
+                await page.evaluate("go({name:'settings'})")
+                await page.click(f'[data-act=setLang][data-v={lang}] >> nth=0')
+                await page.wait_for_function(f"document.documentElement.lang==='{lang}'")
 
             # ---------- user A: sign up through the invite link ----------
             ctx, pg, errs = await open_ctx()
@@ -799,8 +837,8 @@ async def main():
             from PIL import Image
             cdir = tmp / 'course'; (cdir / 'img').mkdir(parents=True)
             Image.new('RGB', (80, 60), (200, 200, 200)).save(cdir / 'img' / 'a.jpg')
-            (cdir / 'course.json').write_text(json.dumps({'lessons': [
-                {'id': 'a', 'title': 'A', 'sub': 'sub', 'part': 1, 'page': 7, 'img': 'img/a.jpg', 'intro': ['x <b>y</b>'],
+            (cdir / 'course.json').write_text(json.dumps({'lang': 'ru', 'lessons': [
+                {'id': 'a', 'lang': 'et', 'title': 'A', 'sub': 'sub', 'part': 1, 'page': 7, 'img': 'img/a.jpg', 'intro': ['x <b>y</b>'],
                  'items': [{'id': 'i1', 'term': 'Os frontale', 'kind': 'luu', 'box': [1, 2, 3, 4], 'note': 'n', 'src': 'KT', 'prio': 1}], 'link': []},
                 {'id': 'b', 'title': 'B', 'part': 1, 'img': None, 'items': [],
                  'link': [{'term': 'os frontale', 'q': 'q?', 'ans': 'a', 'opts': ['b', 'c', 'd'], 'src': 'KT', 'page': 3}]}]}))
@@ -808,7 +846,76 @@ async def main():
             out = json.loads((cdir / 'out.json').read_text())
             check('lessons2corpus: folder file with the question bound to its frame, kind and pages kept',
                   out['kind'] == 'folder' and len(out['plates']) == 1 and out['plates'][0]['title'] == 'A' and out['plates'][0]['page'] == 7 and out['plates'][0]['image'].startswith('data:image/jpeg')
-                  and out['cards'][0]['id'] == 'a:i1' and out['cards'][0]['kind'] == 'luu' and out['plates'][0]['link'][0]['item'] == 'a:i1' and out['plates'][0]['link'][0]['page'] == 3, json.dumps(out['plates'][0].get('link')))
+                  and out['cards'][0]['id'] == 'a:i1' and out['cards'][0]['kind'] == 'luu' and out['plates'][0]['link'][0]['item'] == 'a:i1' and out['plates'][0]['link'][0]['page'] == 3
+                  and out['plates'][0].get('lang') == 'et', json.dumps(out['plates'][0].get('link')))
+
+            # the language of a lesson: from the file, else guessed from the text; exported with the photo
+            guess = await pg.evaluate("['Лобная кость','Märkus os frontale','Frontal bone','Šoom','Os frontale (лоб)','os frontale'].map(crGuessLang)")
+            check('course language: Cyrillic is Russian, õäöüšž is Estonian, the rest English', guess == ['ru', 'et', 'en', 'et', 'ru', 'en'], json.dumps(guess))
+            lg = await pg.evaluate(f"(()=>{{const p=plateById(S.plates.find(p=>p.title==='Esimene foto').id);return [p.lang||null,crSrcLang(p)];}})()")
+            check('course language: a lesson without lang in the file is guessed (Estonian here), the export carries it', lg[1] == 'et' and pl3.get('lang') == 'et' and await pg.evaluate("S.plates[S.plates.length-1].lang") == 'et', json.dumps([lg, pl3.get('lang')]))
+
+            # a lesson in Russian, the reader's language is Estonian, and the AI has nothing left for today: the lesson works in Russian with a quiet note
+            ai_a = watch_ai(pg)
+            await import_file('corpus-folder-ru.json', 1)
+            ru_did = await pg.evaluate("S.decks.find(d=>d.name==='Urok RU').id")
+            ru_fid = await pg.evaluate("S.folders.find(f=>f.name==='Urok RU').id")
+            ru_pid = await pg.evaluate("S.plates.find(p=>p.title==='Лобная и верхняя челюсть').id")
+            ru_sel = f'.crs.chome .clrow[data-pid="{ru_pid}"]'
+
+            async def ru_from_deck():
+                await pg.evaluate(f"go({{name:'deck',deckId:'{ru_did}',tab:'photos'}})")
+                await pg.click('[data-act=lesson]')
+                await pg.wait_for_selector('.clesson .kbubble', timeout=15000)
+
+            await ru_from_deck()
+            await pg.wait_for_function("document.querySelector('#ctrs').textContent.includes('Tõlge pole saadaval')", timeout=15000)
+            na = await pg.evaluate("({bubble:document.querySelector('.kbubble').innerText,retry:!!document.querySelector('#ctrRetry'),tog:!document.querySelector('#ctog').hidden,busy:!!document.querySelector('.ctrbusy'),err:CL.trErr,title:document.querySelector('#cttl').textContent,steps:document.querySelectorAll('.cseg button').length})")
+            check('translation refused (daily limit): the lesson opens in its own language, a quiet «Tõlge pole saadaval», no retry button, no original/translation switch',
+                  na['bubble'] == 'Это лобная кость.' and not na['retry'] and not na['tog'] and not na['busy'] and na['err'] == 'quota_exceeded' and na['title'] == 'Лобная и верхняя челюсть' and na['steps'] == 5, json.dumps(na, ensure_ascii=False))
+            check('translation refused: exactly one request, for the course purpose', len(ai_a) == 1 and ai_a[0].get('purpose') == 'course', json.dumps([c.get('purpose') for c in ai_a]))
+            await pg.click('#cnx'); await pg.click('#cnx')
+            await pg.wait_for_selector('.cterm')
+            tu = await pg.evaluate("({term:document.querySelector('.cterm').textContent,note:document.querySelector('.cnote').textContent,meta:document.querySelector('.meta').innerText})")
+            check('lesson in its own language: the note as in the file, kind and source from the Estonian dictionary', tu['term'] == 'os frontale' and tu['note'] == 'Лобная кость (os frontale) образует лоб.' and 'luu' in tu['meta'] and 'Kolju tervikuna' in tu['meta'], json.dumps(tu, ensure_ascii=False))
+            await pg.click('[data-act=crBack]')
+            await pg.wait_for_function("view.name==='deck'")
+            await pg.evaluate(f"go({{name:'courses',fid:'{ru_fid}'}})")
+            await pg.wait_for_selector('.crs.chome .ccta')
+            await pg.evaluate(f"CR_OPEN['{ru_did}']=true;render()")
+            await pg.click(ru_sel)
+            await pg.wait_for_selector('.clesson .kbubble')
+            check('after a refusal the lesson is not sent again by itself (course home and reopening): still one request, the note is shown at once',
+                  len(ai_a) == 1 and 'Tõlge pole saadaval' in await pg.inner_text('#ctrs') and not await pg.query_selector('.ctrbusy'))
+            await pg.click('[data-act=crBack]')
+            await pg.wait_for_selector('.crs.chome')
+            await pg.evaluate("CR_TRERR.clear();window.__smp=S.sample;S.sample=null")
+            await pg.click(ru_sel)
+            await pg.wait_for_selector('.clesson .kbubble')
+            check('no AI at all: the lesson opens in its own language with the same quiet note and no retry, nothing is asked',
+                  len(ai_a) == 1 and 'Tõlge pole saadaval' in await pg.inner_text('#ctrs') and not await pg.query_selector('#ctrRetry') and await pg.evaluate("CL.trErr") == 'no_ai')
+            await pg.click('[data-act=crBack]')   # back on the course home while there is no AI: it asks for nothing there either
+            await pg.wait_for_selector('.crs.chome')
+            await pg.evaluate("S.sample=window.__smp;0")
+
+            # the names of the kinds and sources come from the dictionary in the reader's language; Russian lesson, Russian reader: nothing to translate
+            dic = {}
+            for lang in ('ru', 'en', 'et'):
+                await ui_lang(pg, lang)
+                dic[lang] = await pg.evaluate("[crKind('luu'),crSrcName('KT'),crKind('ava'),crSrcName('PIC'),crSrcName('OC'),crKind('õmblus'),crKind('õõs'),crKind('muu'),crKind('zzz'),crSrcName('QQ'),crKind('')]")
+            check('kinds and sources are shown in the reader’s language (ru, en, et); an unknown kind or source stays as it is',
+                  dic == {'ru': ['кость', 'Череп целиком', 'отверстие / канал', 'рисунок практикума', 'Ossa cranii', 'шов', 'полость / пазуха', 'структура', 'zzz', 'QQ', ''],
+                          'en': ['bone', 'The skull as a whole', 'foramen / canal', 'practical image', 'Ossa cranii', 'suture', 'cavity / sinus', 'structure', 'zzz', 'QQ', ''],
+                          'et': ['luu', 'Kolju tervikuna', 'ava / kanal', 'praktikumi pilt', 'Ossa cranii', 'õmblus', 'õõs / siinus', 'struktuur', 'zzz', 'QQ', '']}, json.dumps(dic, ensure_ascii=False))
+            await ui_lang(pg, 'ru')
+            await ru_from_deck()
+            await pg.click('#cnx'); await pg.click('#cnx')
+            await pg.wait_for_selector('.cterm')
+            rr = await pg.evaluate("({err:CL.trErr,busy:CL.busy,tog:!document.querySelector('#ctog').hidden,ctrs:document.querySelector('#ctrs').textContent,meta:document.querySelector('.meta').innerText,note:document.querySelector('.cnote').textContent})")
+            check('Russian reader, Russian lesson: nothing is translated or asked, kind and source in Russian, no note about the translation',
+                  rr['err'] is None and not rr['busy'] and not rr['tog'] and rr['ctrs'] == '' and 'кость' in rr['meta'] and 'Череп целиком' in rr['meta'] and rr['note'].startswith('Лобная кость') and len(ai_a) == 1, json.dumps(rr, ensure_ascii=False))
+            await pg.click('[data-act=crBack]')
+            await ui_lang(pg, 'et')
 
             # clean up, so the counts in the later scenarios stay as they were
             await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.name.startsWith('Urok')),ids=new Set(ds.map(d=>d.id));
@@ -1162,6 +1269,246 @@ async def main():
             await pg.wait_for_function("view.name==='home'", timeout=5000)
             check('summary: «back to home» leads to the home screen', True)
             check('summary: a session without answers shows no summary', await pg.evaluate("(()=>{const o=SS;SS={log:[],deckIds:[]};const r=sessSummary();SS=o;return r.html===''&&r.hard===0;})()"))
+
+            # ---------- a course in another language: translated once by the AI, kept on the photo, shown in the reader's language ----------
+            await pg.reload()   # the AI function is back (see above): this page gets it
+            await app_ready(pg)
+            calls = watch_ai(pg)
+            n_err = len(errs)
+            me = await pg.evaluate('CORPUS_WEB.uid')
+            objs0 = sum(1 for o in state()['objects'] if o['owner'] == me)
+            check('translation: the friend has the AI again and has used nothing today', await pg.evaluate('!!S.sample && !!CORPUS_WEB.ai && CORPUS_WEB.ai.used===0'), await pg.evaluate('JSON.stringify(CORPUS_WEB.ai)'))
+            await import_file('corpus-folder-ru.json', 1)
+            pid = await pg.evaluate("S.plates.find(p=>p.title==='Лобная и верхняя челюсть').id")
+            fid_r = await pg.evaluate("S.folders.find(f=>f.name==='Urok RU').id")
+            did_r = await pg.evaluate("S.decks.find(d=>d.name==='Urok RU').id")
+            cids = await pg.evaluate(f"cardsOfPlate('{pid}').map(c=>c.id)")
+            check('translation: importing a course in another language asks the AI for nothing; the language of the file is kept',
+                  len(calls) == 0 and await pg.evaluate(f"plateById('{pid}').lang") == 'ru' and len(cids) == 4)
+            row_r = f'.crs.chome .clrow[data-pid="{pid}"]'
+
+            # on the course home the lesson of «Continue» is translated quietly
+            await pg.evaluate(f"go({{name:'courses',fid:'{fid_r}'}})")
+            await pg.wait_for_selector('.crs.chome .ccta')
+            await pg.wait_for_function(f"!!(plateById('{pid}').tr&&plateById('{pid}').tr.et)", timeout=20000)
+            check('course home: the «Continue» lesson is translated in the background, one request, nothing on screen about it', len(calls) == 1 and await pg.evaluate("view.name==='courses'") and not await pg.query_selector('.ctrbusy'))
+            msg = calls[0]['messages'][0]['content']
+            check('translation request: JSON mode, for the course purpose, Russian into Estonian, the dictionary kinds are not sent, the unknown one is',
+                  calls[0].get('purpose') == 'course' and calls[0].get('json') is True and len(calls[0]['messages']) == 1 and msg.startswith('CORPUS-TRANSLATE ru>et\n') and '"sooned"' in msg and '"luu"' not in msg and '"ava"' not in msg and '\nINPUT:\n{' in msg)
+            tr = await pg.evaluate(f"JSON.parse(JSON.stringify(plateById('{pid}').tr.et))")
+            notes = {c: tr['notes'][c] for c in tr['notes']}
+            ids_note = {}
+            for c in cids:
+                ids_note[c] = await pg.evaluate(f"cardById('{c}').note")
+            check('translation kept on the photo: title, intro, questions, one table of terms, notes by card id, kinds',
+                  tr['title'] == '[et] Лобная и верхняя челюсть' and tr['intro'] == ['[et] Это <b>лобная</b> кость.', ATK] and tr['q'] == ['[et] Как называется верхняя челюсть?', '[et] Какая кость образует лоб?']
+                  and set(tr['notes']) == set(cids) and sorted(tr['notes'].values()).count(ATK) == 1 and all(v == '[et] ' + ids_note[c] for c, v in notes.items() if v != ATK)
+                  and len(tr['terms']) == 8 and tr['terms']['лобная кость'] == '[et] лобная кость' and tr['terms']['maxilla'] == '[et] maxilla' and tr['kinds'] == {'sooned': '[et] sooned'} and tr['at'] > 0,
+                  json.dumps(tr, ensure_ascii=False)[:300])
+
+            # the lesson opens in Estonian at once (already translated)
+            await pg.click('.crs.chome .ccta')
+            await pg.wait_for_selector('.clesson .kbubble')
+            ov = await pg.evaluate("""({t:document.querySelector('.kbubble').innerText,b:document.querySelector('.kbubble b')&&document.querySelector('.kbubble b').textContent,from:document.querySelector('.ctrfrom').innerText,
+              title:document.querySelector('#cttl').textContent,tog:!document.querySelector('#ctog').hidden,code:document.querySelector('#ctog').textContent,lab:document.querySelector('#ctog').getAttribute('aria-label'),
+              pressed:document.querySelector('#ctog').getAttribute('aria-pressed'),ctrs:document.querySelector('#ctrs').textContent})""")
+            check('translated lesson: overview in Estonian with the bold word kept, «Tõlgitud vene keelest», translated title, the button with the original language (RU)',
+                  ov['t'] == '[et] Это лобная кость.' and ov['b'] == 'лобная' and ov['from'] == 'Tõlgitud vene keelest' and ov['title'] == '[et] Лобная и верхняя челюсть' and ov['tog'] and ov['code'] == 'RU'
+                  and ov['lab'] == 'Näita originaali' and ov['pressed'] == 'false' and ov['ctrs'] == '' and len(calls) == 1, json.dumps(ov, ensure_ascii=False))
+            await pg.click('#ctog')
+            og = await pg.evaluate("({t:document.querySelector('.kbubble').innerText,from:!!document.querySelector('.ctrfrom'),title:document.querySelector('#cttl').textContent,pressed:document.querySelector('#ctog').getAttribute('aria-pressed'),orig:CL.orig})")
+            check('the RU button shows the original: Russian text, no «translated» line, Russian title', og == {'t': 'Это лобная кость.', 'from': False, 'title': 'Лобная и верхняя челюсть', 'pressed': 'true', 'orig': True}, json.dumps(og, ensure_ascii=False))
+            await pg.click('#ctog')
+            check('…and back to the translation', (await pg.inner_text('.kbubble')) == '[et] Это лобная кость.' and await pg.evaluate('CL.orig===false'))
+            await pg.click('#cnx')
+            x = await pg.evaluate("({t:document.querySelector('.kbubble').textContent,img:document.querySelectorAll('.kbubble img,#cpanel img').length,xss:window.__xss===undefined})")
+            check('an answer of the AI with a tag in it stays text in the overview (no element, no script)', x == {'t': ATK, 'img': 0, 'xss': True}, json.dumps(x))
+            await pg.click('#cnx')
+            await pg.wait_for_selector('.cterm')
+            seen = []
+            for k in range(4):
+                seen.append(await pg.evaluate("({term:document.querySelector('.cterm').textContent,note:document.querySelector('.cnote').textContent,meta:document.querySelector('.meta').innerText,img:document.querySelectorAll('#cpanel img').length})"))
+                if k < 3:
+                    await pg.click('#cnx')
+            want = [('os frontale', '[et] Лобная кость (os frontale) образует лоб.', 'luu', 'Kolju tervikuna'), ('maxilla', ATK, 'luu', 'Ossa cranii'),
+                    ('foramen magnum', '[et] Большое затылочное отверстие (foramen magnum).', 'ava / kanal', 'praktikumi pilt'), ('sulcus sagittalis', '[et] Борозда (sulcus sagittalis) по средней линии.', '[et] sooned', 'Kolju tervikuna')]
+            check('get to know: Latin names stay, notes in Estonian, kinds and sources from the dictionary (Estonian), the kind the dictionary lacks from the translation; a tag stays text',
+                  all(a['term'] == w[0] and a['note'] == w[1] and w[2] in a['meta'] and w[3] in a['meta'] and a['img'] == 0 for a, w in zip(seen, want)) and await pg.evaluate('window.__xss===undefined'), json.dumps(seen, ensure_ascii=False))
+            await pg.click('#ctog')
+            og = await pg.evaluate("({note:document.querySelector('.cnote').textContent,meta:document.querySelector('.meta .chip').textContent,i:CL.st.i})")
+            await pg.click('#ctog')
+            check('the RU button on a step shows the original note and kind and keeps the place', og == {'note': 'Борозда (sulcus sagittalis) по средней линии.', 'meta': 'sooned', 'i': 3}, json.dumps(og, ensure_ascii=False))
+            await pg.click('#cnx')
+            await pg.wait_for_selector('.copt')
+            # practice: the note after the answer is the translation; the button keeps the answer and the score
+            term = await pg.evaluate('CL.st.q[CL.st.i].term')
+            await pg.click(f'.copt >> text="{term}"')
+            fb = await pg.evaluate("(()=>{const it=CL.st.q[CL.st.i],t=crT(plateById(CL.pid));return {note:document.querySelector('#cfb .cnote').textContent,want:t.notes[it.id],ok:CL.st.ok};})()")
+            check('practice: the note after the answer is the translated one', fb['note'] == fb['want'] and fb['ok'] == 1, json.dumps(fb, ensure_ascii=False))
+            await pg.click('#ctog')
+            fb2 = await pg.evaluate("({note:document.querySelector('#cfb .cnote').textContent,ok:CL.st.ok,okBtn:document.querySelectorAll('.copt.ok').length,verdict:document.querySelectorAll('.cverdict.ok').length})")
+            await pg.click('#ctog')
+            fb3 = await pg.evaluate("({ok:CL.st.ok,okBtn:document.querySelectorAll('.copt.ok').length})")
+            check('practice: the RU button mid-question shows the original note, keeps the answer given and does not count it twice',
+                  fb2['note'] != fb['note'] and fb2['note'] == await pg.evaluate("cardById(CL.st.q[CL.st.i].id).note") and fb2['ok'] == 1 and fb2['okBtn'] == 1 and fb2['verdict'] == 1 and fb3 == {'ok': 1, 'okBtn': 1}, json.dumps([fb2, fb3], ensure_ascii=False))
+            for _ in range(4):
+                if await pg.query_selector('.cdone'):
+                    break
+                if not await pg.query_selector('#cnx'):
+                    await pg.click('.copt >> nth=0')
+                await pg.click('#cnx')
+            await pg.wait_for_selector('.cdone')
+            await pg.click('#cnx')
+            await pg.wait_for_selector('#chint')
+            await pg.click('#chint')
+            hb = await pg.evaluate("(()=>{const it=CL.st.q[CL.st.i],n=crT(plateById(CL.pid)).notes[it.id];return {box:document.querySelector('.hintbox').textContent,want:n.split(it.term).join('…')};})()")
+            check('recall: the hint masks the term in the translated note', hb['want'] in hb['box'] and (hb['want'] == ATK or '…' in hb['box']), json.dumps(hb, ensure_ascii=False))
+            await pg.click('.cseg [data-s=se]')
+            await pg.wait_for_selector('.cq')
+            rights = []
+            for k in range(2):
+                q = await pg.evaluate("CL.st.q[CL.st.i]")
+                shown = await pg.evaluate("({q:document.querySelector('.cq').textContent,opts:[...document.querySelectorAll('.copt')].map(b=>b.textContent).sort(),chip:document.querySelector('.meta').innerText})")
+                want_q = tr['q'][0] if q['q'].startswith('Как называется') else tr['q'][1]
+                want_o = sorted(tr['terms'][o] for o in [q['ans']] + q['opts'])
+                rights.append(shown['q'] == want_q and shown['opts'] == want_o)
+                if k == 0:
+                    await pg.click(f'.copt >> text="{tr["terms"][q["ans"]]}"')
+                    ok1 = await pg.evaluate("({ok:document.querySelectorAll('.cverdict.ok').length,green:document.querySelectorAll('.copt.ok').length,n:CL.st.ok})")
+                    await pg.click('#ctog')
+                    ok2 = await pg.evaluate("({q:document.querySelector('.cq').textContent,ok:document.querySelectorAll('.cverdict.ok').length,green:document.querySelectorAll('.copt.ok').length,n:CL.st.ok,opts:[...document.querySelectorAll('.copt')].map(b=>b.textContent).sort()})")
+                    await pg.click('#ctog')
+                    rights.append(ok1 == {'ok': 1, 'green': 1, 'n': 1} and ok2['q'] == q['q'] and ok2['ok'] == 1 and ok2['green'] == 1 and ok2['n'] == 1 and ok2['opts'] == sorted([q['ans']] + q['opts']))
+                else:
+                    wrong = await pg.evaluate("(()=>{const l=CL.st.q[CL.st.i],t=crT(plateById(CL.pid));return t.terms[l.opts[0]];})()")
+                    await pg.click(f'.copt >> text="{wrong}"')
+                    rights.append(await pg.locator('.copt.no').count() == 1 and await pg.locator('.copt.ok').count() == 1 and bool(await pg.query_selector('.cverdict.no')))
+                await pg.click('#cnx')
+            check('connect: the question and the options are shown through the translation, the right translated option counts, the original shows the same screen; a wrong one is marked', all(rights), json.dumps(rights))
+            await pg.wait_for_selector('.cdone')
+            check('connect: result 1 / 2 (the right one counted once)', '1 / 2' in await pg.inner_text('.cdone b'))
+            check('all of this took one request', len(calls) == 1)
+            await pg.click('#cnx')
+            await pg.wait_for_selector('.crs.chome')
+
+            # opened for the first time (no translation yet): the panel says so, the photo is in place, the steps wait; then the lesson shows the translation at its step
+            await pg.evaluate(f"delete plateById('{pid}').tr")
+
+            urllib.request.urlopen(API + '/__fn?delay=1500')   # the function answers 1.5 s late
+            await pg.click(row_r)
+            await pg.wait_for_selector('.ctrbusy')
+            bz = await pg.evaluate("({txt:document.querySelector('.ctrbusy').innerText,photo:!!document.querySelector('#simg'),bubble:!!document.querySelector('.kbubble'),step:CL.step,ctrs:document.querySelector('#ctrs').textContent})")
+            await pg.click('.cseg [data-s=tu]')
+            bz2 = await pg.evaluate("({busy:!!document.querySelector('.ctrbusy'),step:CL.step,term:!!document.querySelector('.cterm'),tab:document.querySelector('.cseg .on').dataset.s})")
+            check('first opening: «Tõlgin õppetundi…» with the photo in place; the steps wait (a click on «Tutvumine» does not leave the wait)',
+                  bz['txt'] == 'Tõlgin õppetundi…' and bz['photo'] and not bz['bubble'] and bz['ctrs'] == '' and bz2 == {'busy': True, 'step': 'tu', 'term': False, 'tab': 'tu'}, json.dumps([bz, bz2], ensure_ascii=False))
+            await pg.wait_for_selector('.cterm', timeout=15000)
+            urllib.request.urlopen(API + '/__fn?off=0')
+            tn = await pg.evaluate("({note:document.querySelector('.cnote').textContent,busy:!!document.querySelector('.ctrbusy'),step:CL.step})")
+            check('…when the translation arrives the step the reader chose is shown, translated; one more request, kept on the photo',
+                  tn['note'] == '[et] Лобная кость (os frontale) образует лоб.' and not tn['busy'] and tn['step'] == 'tu' and len(calls) == 2 and await pg.evaluate(f"!!plateById('{pid}').tr.et"), json.dumps([tn, len(calls)], ensure_ascii=False))
+            await pg.click('[data-act=crBack]')
+            await pg.wait_for_selector('.crs.chome')
+
+            # a study session over the same cards shows the translated note, also in the introduction of the photo
+            await pg.evaluate(f"startStudy('{did_r}')")
+            await pg.wait_for_selector('.full.study.intro #panel .intro-nav', timeout=10000)
+            n1 = await pg.evaluate("(()=>{const id=SS.intro.ids[SS.intro.i],el=document.querySelector('#panel .anote');return {t:el&&el.textContent,want:crT(plateById(cardById(id).plateId)).notes[id],raw:cardById(id).note,img:document.querySelectorAll('#panel .anote img').length};})()")
+            await pg.click('[data-act=introSkip]')
+            await pg.wait_for_selector('.full.study:not(.intro) #panel')
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            n2 = await pg.evaluate("(()=>{const id=SS.cur,el=document.querySelector('#panel .anote');return {t:el&&el.textContent,want:crT(plateById(cardById(id).plateId)).notes[id],raw:cardById(id).note,img:document.querySelectorAll('#panel .anote img').length};})()")
+            check('study session: the note under the answer is the translated one (in the introduction and in the question); a tag in it stays text',
+                  all(n['t'] == n['want'] and n['t'] != n['raw'] and n['img'] == 0 for n in (n1, n2)) and await pg.evaluate('window.__xss===undefined'), json.dumps([n1, n2], ensure_ascii=False))
+            await pg.click('[data-act=studyExit]')
+            check('study session: a card that is not in a translated lesson keeps its own note', await pg.evaluate("crNoteOf({note:'Märkus',plateId:S.plates[0].id})==='Märkus' && crNoteOf({note:'x'})==='x' && crNoteOf({})===''"))
+
+            # export and import: the language and the translation travel; the notes follow the new card ids; junk in the file is dropped
+            exp = await pg.evaluate(f"buildExport(['{did_r}']).then(r=>JSON.parse(JSON.stringify(r.out)))")
+            ep = exp['plates'][0]
+            check('export carries the language and the translation, the notes keyed by the exported card ids',
+                  ep.get('lang') == 'ru' and list(ep.get('tr', {})) == ['et'] and set(ep['tr']['et']['notes']) == {c['id'] for c in exp['cards']} and ep['tr']['et']['title'] == tr['title'])
+            ep['lang'] = 'xx'
+            ep['tr']['xx'] = {'title': 'x'}
+            ep['tr']['en'] = {'title': 7, 'intro': 'x', 'terms': ['a'], 'notes': {'c': 5}, 'kinds': None}
+            ep['tr']['et']['title'] = 'T' * 500
+            ep['tr']['et']['notes']['nope'] = 'a note of nobody'
+            ep['tr']['et']['terms']['__proto__'] = 'polluted'
+            ep['tr']['et']['terms']['x' * 400] = 'a key that is too long'
+            ep['tr']['et']['kinds']['k' * 30] = 'a kind that is too long'
+            (tmp / 'corpus-deck-ru2.json').write_text(json.dumps(exp))
+            await import_file('corpus-deck-ru2.json', 1)
+            res = await pg.evaluate(f"""(()=>{{const p=S.plates.find(p=>p.id!=='{pid}'&&p.title==='Лобная и верхняя челюсть');const cs=cardsOfPlate(p.id).map(c=>c.id).sort().join();const t=p.tr.et;
+              return {{id:p.id,lang:p.lang,langs:Object.keys(p.tr),title:t.title.length,notes:Object.keys(t.notes).sort().join()===cs,n:Object.keys(t.notes).length,
+                proto:Object.getPrototypeOf(t.terms)===null&&Object.getPrototypeOf(p.tr)===null,pol:Object.keys(t.terms).includes('__proto__'),longk:Object.keys(t.terms).some(k=>k.length>300),kinds:Object.keys(t.kinds),
+                oldids:Object.keys(t.notes).some(k=>{json.dumps(cids)}.includes(k))}};}})()""")
+            check('import: the language of the file is kept only if it is ru/en/et (else guessed), only ru/en/et translations, limits applied, notes follow the new card ids, objects without a prototype, junk dropped',
+                  res['lang'] == 'ru' and res['langs'] == ['et'] and res['title'] == 200 and res['notes'] and res['n'] == 4 and res['proto'] and not res['pol'] and not res['longk'] and res['kinds'] == ['sooned'] and not res['oldids'], json.dumps(res))
+            pid2 = res['id']
+            did2 = await pg.evaluate(f"plateById('{pid2}').deckId")
+            await pg.evaluate(f"go({{name:'deck',deckId:'{did2}',tab:'photos'}})")
+            await pg.click('[data-act=lesson]')
+            await pg.wait_for_selector('.clesson .kbubble')
+            await pg.click('#cnx'); await pg.click('#cnx')
+            await pg.wait_for_selector('.cterm')
+            ni = await pg.evaluate("({term:document.querySelector('.cterm').textContent,note:document.querySelector('.cnote').textContent,busy:CL.busy})")
+            check('imported lesson opens translated at once (the notes found their cards), no request', ni['term'] == 'os frontale' and ni['note'] == '[et] Лобная кость (os frontale) образует лоб.' and not ni['busy'] and len(calls) == 2, json.dumps(ni, ensure_ascii=False))
+            await pg.click('[data-act=crBack]')
+
+            # the translation is saved: after a reload the lesson opens translated, nothing is asked
+            await pg.wait_for_function('WQ.jobs.size===0', timeout=20000)
+            await pg.reload()
+            await app_ready(pg)
+            await pg.evaluate(f"go({{name:'deck',deckId:'{did_r}',tab:'photos'}})")
+            await pg.click('[data-act=lesson]')
+            await pg.wait_for_selector('.clesson .kbubble')
+            check('after a reload the translated lesson opens at once, without a request', (await pg.inner_text('.kbubble')) == '[et] Это лобная кость.' and len(calls) == 2 and await pg.evaluate("CL.busy===false"))
+            await pg.click('[data-act=crBack]')
+
+            # English reader: the AI function does not answer → the lesson in Russian, a quiet note and «Retry»; then it works again
+            await ui_lang(pg, 'en')
+            urllib.request.urlopen(API + '/__fn?off=1')
+            await pg.evaluate(f"go({{name:'deck',deckId:'{did_r}',tab:'photos'}})")
+            await pg.click('[data-act=lesson]')
+            await pg.wait_for_selector('.clesson .kbubble')
+            await pg.wait_for_function("document.querySelector('#ctrs').textContent.includes('Translation unavailable')", timeout=15000)
+            fl = await pg.evaluate("({bubble:document.querySelector('.kbubble').innerText,retry:!!document.querySelector('#ctrRetry'),retryText:document.querySelector('#ctrRetry')&&document.querySelector('#ctrRetry').textContent,tog:!document.querySelector('#ctog').hidden,err:CL.trErr})")
+            check('English reader, the AI function is down: the lesson stays Russian, «Translation unavailable» and «Retry», no switch', fl == {'bubble': 'Это лобная кость.', 'retry': True, 'retryText': 'Retry', 'tog': False, 'err': 'unavailable'} and len(calls) == 3, json.dumps(fl, ensure_ascii=False))
+            await pg.click('[data-act=crBack]')
+            await pg.click('[data-act=lesson]')
+            await pg.wait_for_selector('.clesson .kbubble')
+            check('a failed lesson is not sent again by reopening it: the note and «Retry» are there at once, no request', len(calls) == 3 and await pg.evaluate("!!document.querySelector('#ctrRetry')"))
+            urllib.request.urlopen(API + '/__fn?off=0')
+            await pg.click('#ctrRetry')
+            await pg.wait_for_function("document.querySelector('.kbubble')&&document.querySelector('.kbubble').innerText.startsWith('[en] ')", timeout=20000)
+            en = await pg.evaluate("({t:document.querySelector('.kbubble').innerText,from:document.querySelector('.ctrfrom').innerText,ctrs:document.querySelector('#ctrs').textContent,lab:document.querySelector('#ctog').getAttribute('aria-label'),used:CORPUS_WEB.ai.used})")
+            check('«Retry» asks again and shows the English translation; the counter counts the requests that were answered (3)',
+                  en == {'t': '[en] Это лобная кость.', 'from': 'Translated from Russian', 'ctrs': '', 'lab': 'Show original', 'used': 3} and len(calls) == 4, json.dumps(en, ensure_ascii=False))
+            await pg.click('#cnx'); await pg.click('#cnx')
+            await pg.wait_for_selector('.cterm')
+            em = await pg.evaluate("document.querySelector('.meta').innerText")
+            check('English reader: kind and source from the English dictionary', 'bone' in em and 'The skull as a whole' in em, em)
+            await pg.click('[data-act=crBack]')
+
+            # Russian reader: the lesson is in Russian, nothing to translate; the tr.et stays on the photo for Estonian readers
+            await ui_lang(pg, 'ru')
+            await pg.evaluate(f"go({{name:'deck',deckId:'{did_r}',tab:'photos'}})")
+            await pg.click('[data-act=lesson]')
+            await pg.wait_for_selector('.clesson .kbubble')
+            check('Russian reader: the lesson is shown as it is, no switch, no request', await pg.evaluate("document.querySelector('#ctog').hidden&&CL.trErr===null&&!CL.busy") and (await pg.inner_text('.kbubble')) == 'Это лобная кость.' and len(calls) == 4)
+            await pg.click('[data-act=crBack]')
+            await ui_lang(pg, 'et')
+            check('translation scenario: no script errors or failed requests of its own', len(errs) == n_err, '; '.join(errs[n_err:])[:300])
+
+            # clean up (both photos with their translations), so the counts in the later scenarios stay as they were
+            await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.name.startsWith('Urok')),ids=new Set(ds.map(d=>d.id));
+              S.cards.filter(c=>ids.has(c.deckId)).forEach(c=>removeCard(c.id));S.plates.filter(p=>ids.has(p.deckId)).forEach(p=>dropPlate(p));
+              ds.forEach(d=>{S.decks=S.decks.filter(x=>x.id!==d.id);removeDoc('decks',d.id);});
+              S.folders.filter(f=>f.name.startsWith('Urok')).forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});delete META.coursePrio;delete META.courseLast;persistMeta();})()""")
+            await pg.wait_for_function('WQ.jobs.size===0', timeout=20000)
+            st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me) == objs0)
+            check('translation scenario cleaned up: the photos are gone from Storage', sum(1 for o in st['objects'] if o['owner'] == me) == objs0)
 
             await ctx.close()
 

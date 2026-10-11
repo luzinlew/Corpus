@@ -30,7 +30,7 @@
 | T-009 | P3 | Edge Functions: версия в ответе GET, чтобы видеть, что развёрнуто | planned | — |
 | T-010 | P3 | README/CLAUDE.md: публичный бакет, сброс пароля, список SQL-файлов, адрес в push_test | planned | — |
 | T-011 | P2 | Нестабильный e2e: порядок фото с одинаковым createdAt при импорте + гонка в проверке копии фото | ready: исправлено в claude/T-011-order; остаётся редкая гонка после выхода из аккаунта (см. запись) | claude/T-011-order |
-| T-013 | P1 | Урок по фото из 5 шагов (Ülevaade → Tutvumine → Harjutus → Meenutamine → Seosta) + импорт курса Kolju (46 уроков) | ready: e2e 155 PASS, ALL PASSED (63c9142); не выложено | claude/T-013-lesson-player |
+| T-013 | P1 | Урок по фото из 5 шагов (Ülevaade → Tutvumine → Harjutus → Meenutamine → Seosta) + импорт курса Kolju (46 уроков) | deployed 7d6d215; откат 75be3db | claude/T-013-lesson-player |
 
 ## Журнал
 
@@ -134,7 +134,7 @@
 
 ### T-013 Проигрыватель урока по фото
 - статус: review — «да» Льва 2026-10-11; код e947c05 + правки ревью
-- шаг: 8 — готово, ждёт «деплой T-013»
+- шаг: 8 — deployed
 - ветка / файлы: claude/T-013-lesson-player — src/corpus.html, tools/lessons2corpus.py (новый), tools/e2e_test.py, index.html (сборка)
 - данные (всё необязательно, старые колоды не меняются): метка + `note`, `src` (KT/OC/PIC), `prio` (1–3), `pt` [x%,y%]; фото + `title`, `intro[]` (текст, `<b>` → жирный через esc+замену), `link[]` {item, q, ans, opts[], src}; колода без фото-метки допустима только для link (урок «Koljuaugud ja ühendused» без картинки)
 - экспорт/импорт: поля в CONTENT_KEYS и в объект фото; при импорте `link.item` перепривязывается к новым id меток; createdAt сохраняется
@@ -150,3 +150,4 @@
 - конвертер на course.json: 3 колоды, 45 фото, 711 карточек, 322 вопроса (306 с рамкой, 16 без)
 - e2e с разрешения Льва сверх бюджета: 5-й прогон FAIL (шапка сессии рисовалась до SS.lesson → крестик вёл дальше; исправлено render() в 63c9142), 6-й — 155 PASS, ALL PASSED
 - деплой: «деплой» от Льва 2026-10-11 15:12; откат: 75be3dbb946f1ca2c16129888306d9baf2b74af0 (gh-pages до выкладки); SQL/функций нет
+- deployed 2026-10-11: main и gh-pages = 7d6d215, сборка Pages run 29 success (15:13:45Z); corpusapp.ee из облака не проверить (прокси 403)

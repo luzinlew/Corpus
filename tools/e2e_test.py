@@ -118,21 +118,26 @@ def folder_file(path):
 
 
 def lesson_file(path):
-    """A folder with one photo that carries a lesson: three cards with notes, an intro (one line bold, one an attack), two link questions."""
+    """A course folder, two parts (decks). Part one: a photo with a lesson (three cards with kind/note/prio, an intro with a bold line and an attack, two link questions).
+    Part two: a photo with one card of importance 2 and a question about it."""
     from PIL import Image
     buf = io.BytesIO(); Image.new('RGB', (600, 400), (235, 235, 225)).save(buf, 'JPEG', quality=80)
     data = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
     now = int(time.time() * 1000)
     cards = [{'id': 'c%d' % (i + 1), 'deckId': 'd1', 'plateId': 'p1', 'term': t, 'x': 5 + 30 * i, 'y': 20 + 10 * i, 'w': 16, 'h': 5, 'createdAt': now + i,
-              'note': 'Märkus ' + t, 'src': 'KT', 'prio': 1 + i} for i, t in enumerate(['os frontale', 'maxilla', 'mandibula'])]
+              'note': 'Märkus ' + t, 'src': 'KT', 'prio': 1 + i, 'kind': 'luu'} for i, t in enumerate(['os frontale', 'maxilla', 'mandibula'])]
     cards[1]['pt'] = [40.5, 60]
+    cards.append({'id': 'c4', 'deckId': 'd2', 'plateId': 'p2', 'term': 'vomer', 'x': 40, 'y': 40, 'w': 16, 'h': 5, 'createdAt': now + 9, 'note': 'Märkus vomer', 'src': 'OC', 'prio': 2, 'kind': 'luu'})
     doc = {'app': 'corpus', 'kind': 'folder', 'version': 1, 'exportedAt': '2026-10-06T12:00:00Z',
            'folders': [{'id': 'f1', 'name': 'Urok', 'mode': 'hideAll'}],
-           'decks': [{'id': 'd1', 'name': 'Urok', 'newPerDay': 20, 'mode': 'hideAll', 'folderId': 'f1'}],
-           'plates': [{'id': 'p1', 'deckId': 'd1', 'w': 600, 'h': 400, 'createdAt': now, 'image': data, 'title': 'Esimene foto',
+           'decks': [{'id': 'd1', 'name': 'Urok', 'newPerDay': 20, 'mode': 'hideAll', 'folderId': 'f1', 'createdAt': now},
+                     {'id': 'd2', 'name': 'Urok 2', 'newPerDay': 20, 'mode': 'hideAll', 'folderId': 'f1', 'createdAt': now + 5}],
+           'plates': [{'id': 'p1', 'deckId': 'd1', 'w': 600, 'h': 400, 'createdAt': now, 'image': data, 'title': 'Esimene foto', 'page': 12,
                        'intro': ['Esimene rida on <b>paks</b>.', 'Atakk: <img src=x onerror=window.__xss=1>'],
-                       'link': [{'item': 'c2', 'q': 'Mis on ülalõualuu?', 'ans': 'maxilla', 'opts': ['os frontale', 'mandibula', 'vomer'], 'src': 'KT'},
-                                {'q': 'Mis on alalõualuu?', 'ans': 'mandibula', 'opts': ['maxilla', 'os nasale', 'vomer'], 'src': 'OC'}]}],
+                       'link': [{'item': 'c2', 'q': 'Mis on ülalõualuu?', 'ans': 'maxilla', 'opts': ['os frontale', 'mandibula', 'vomer'], 'src': 'KT', 'page': 5},
+                                {'q': 'Mis on alalõualuu?', 'ans': 'mandibula', 'opts': ['maxilla', 'os nasale', 'vomer'], 'src': 'OC'}]},
+                      {'id': 'p2', 'deckId': 'd2', 'w': 600, 'h': 400, 'createdAt': now + 6, 'image': data, 'title': 'Teine foto',
+                       'link': [{'item': 'c4', 'q': 'Mis on atra?', 'ans': 'vomer', 'opts': ['maxilla', 'os nasale', 'zygoma'], 'src': 'OC', 'page': 8}]}],
            'cards': cards, 'stats': {}}
     pathlib.Path(path).write_text(json.dumps(doc))
 
@@ -447,7 +452,7 @@ async def main():
                   [d['name'] for d in exp2['decks']] == want['decks'] and [p['w'] for p in exp2['plates'] if p['deckId'] == exp2['decks'][0]['id']] == want['photos'],
                   json.dumps([d['name'] for d in exp2['decks']]))
 
-            # ---------- lesson player ----------
+            # ---------- courses tab and lesson screen ----------
             plates_before_lesson = await pg.evaluate('S.plates.length')
             async def import_file(name, count_plates):
                 n0 = await pg.evaluate('S.plates.length')
@@ -458,80 +463,168 @@ async def main():
                 await pg.click('#layer [data-s="1"]')
                 await pg.wait_for_function(f'S.plates.length==={n0 + count_plates}', timeout=20000)
 
-            await import_file('corpus-folder-lesson.json', 1)
+            await pg.evaluate("go({name:'library'})")
+            await pg.click('.tabbar [data-v=courses]')
+            await pg.wait_for_selector('.crs .sv-empty')
+            tb = await pg.evaluate("""(()=>{const n=document.querySelector('.tabbar').getBoundingClientRect();const bs=[...document.querySelectorAll('.tabbar button')].map(b=>b.getBoundingClientRect());
+              return {n:bs.length,inside:bs.every(r=>r.left>=n.left-1&&r.right<=n.right+1&&r.width>40),dw:Math.abs(document.querySelector('.tabpill').getBoundingClientRect().width-bs[0].width)};})()""")
+            check('courses tab: six tabs fit the bar at 390px, the pill is one tab wide', tb['n'] == 6 and tb['inside'] and tb['dw'] < 3, json.dumps(tb))
+            check('courses tab: no course yet, an empty state with an import button', bool(await pg.query_selector('.crs .sv-empty [data-act=importPick]')))
+
+            await import_file('corpus-folder-lesson.json', 2)
+            await pg.evaluate("go({name:'library'})")
+            await pg.click('.tabbar [data-v=courses]')
+            await pg.wait_for_selector('.crs.chome .svtile')
+            home = await pg.evaluate("({secs:document.querySelectorAll('.crs.chome .svsec').length,tiles:document.querySelectorAll('.crs.chome .svtile').length,card:!!document.querySelector('.crs.chome .svcard .chip.p3'),bubble:document.querySelector('.crs.chome .kbubble').textContent})")
+            check('course home: bubble, part sections with tiles, importance card', home['secs'] == 3 and home['tiles'] == 2 and home['card'] and 'Urok' in home['bubble'], json.dumps(home))
+            tile = await pg.evaluate("document.querySelector('.crs.chome .svtile').innerText.replace(/\\n/g,' | ')")
+            check('course home: a tile has the title and the counts', 'Esimene foto' in tile and '3' in tile and '2' in tile, tile)
+            await pg.click('.cfbar [data-f="1"]')
+            await pg.wait_for_function("document.querySelectorAll('.crs.chome .svtile').length===1")
+            tile = await pg.evaluate("document.querySelector('.crs.chome .svtile').innerText")
+            check('importance filter P1: the part without P1 is gone, the tile counts only P1; the choice is kept', await pg.evaluate('META.coursePrio') == 1 and re.search(r'\b1\b', tile) is not None and 'Teine' not in tile, tile)
+            await pg.click('.cfbar [data-f="3"]')
+            await pg.wait_for_function("document.querySelectorAll('.crs.chome .svtile').length===2")
+
+            # the lesson of the first photo
+            await pg.click('.crs.chome .svtile >> nth=0')
+            await pg.wait_for_selector('.clesson .kbubble')
+            check('lesson: header with the title and the step, five step buttons, photo shown',
+                  await pg.inner_text('.clesson .bar-title b') == 'Esimene foto' and 'Ülevaade' in await pg.inner_text('#cstep') and 'lk 12' in await pg.inner_text('#cstep')
+                  and await pg.locator('.cseg button').count() == 5 and bool(await pg.query_selector('.clesson #simg')), await pg.inner_text('#cstep'))
+            txt = await pg.inner_text('.clesson .kbubble')
+            check('lesson overview: <b> is bold, the attack line stays text, all labels visible',
+                  await pg.inner_text('.clesson .kbubble b') == 'paks' and await pg.locator('#masks .cm').count() == 0 and await pg.evaluate('window.__xss') is None, txt)
+            await pg.click('#cnx')
+            txt = await pg.inner_text('.clesson .kbubble')
+            check('lesson overview: second paragraph shows the attack as text', '<img src=x onerror=window.__xss=1>' in txt and not await pg.query_selector('.clesson .kbubble img') and await pg.evaluate('window.__xss') is None and '2 / 2' in await pg.inner_text('.ccount'), txt)
+            await pg.click('#cnx')
+            await pg.wait_for_selector('.cterm')
+            check('lesson get-to-know: term, note, framed structure, chips', await pg.inner_text('.cterm') == 'os frontale' and 'Märkus os frontale' in await pg.inner_text('.cnote')
+                  and await pg.locator('#masks .cm.cur').count() == 1 and await pg.locator('.clesson .chip.p1').count() == 1 and await pg.locator('#masks .cpt').count() == 0)
+            await pg.click('#cnx')
+            check('lesson get-to-know: the point marker of the second structure', await pg.inner_text('.cterm') == 'maxilla' and await pg.locator('#masks .cpt').count() == 1)
+            await pg.click('#cnx'); await pg.click('#cnx')   # third structure, then on to practice
+            await pg.wait_for_selector('.copt')
+            sched0 = await pg.evaluate("JSON.stringify(S.cards.map(c=>[c.id,c.reps||0,c.due,c.type]))")
+            check('lesson practice: a hidden target, three options', await pg.locator('#masks .cm.tgt').count() == 1 and await pg.locator('.copt').count() == 3)
+            for k in range(3):
+                term = await pg.evaluate('CL.st.q[CL.st.i].term')
+                if k == 1:
+                    await pg.evaluate("[...document.querySelectorAll('.copt')].find(b=>b.textContent!==CL.st.q[CL.st.i].term).click()")
+                    check('lesson practice: a wrong option is marked, the frame shakes red, the right one shows', await pg.locator('.copt.no').count() == 1 and await pg.locator('.copt.ok').count() == 1 and await pg.locator('#masks .cm.bad').count() == 1)
+                else:
+                    await pg.click(f'.copt >> text="{term}"')
+                    if k == 0:
+                        check('lesson practice: the right option turns green with the note', await pg.locator('.copt.ok').count() == 1 and await pg.locator('#masks .cm.okk').count() == 1 and 'Märkus' in await pg.inner_text('#cfb'))
+                await pg.click('#cnx')
+            check('lesson practice: result 2 / 3', '2 / 3' in await pg.inner_text('.cdone b'), await pg.inner_text('.cdone b'))
+            check('lesson practice does not touch the schedule', await pg.evaluate("JSON.stringify(S.cards.map(c=>[c.id,c.reps||0,c.due,c.type]))") == sched0)
+            await pg.click('#cnx')
+            await pg.wait_for_selector('#cshow')
+            check('lesson recall: target frame, hint and show-answer buttons', await pg.locator('#masks .cm.tgt').count() == 1 and bool(await pg.query_selector('#chint')))
+            await pg.click('#chint')
+            check('lesson recall: the hint shows the kind, the masked note and the first letters', bool(await pg.query_selector('.hintbox')) and 'luu' in await pg.inner_text('.hintbox') and '…' in await pg.inner_text('.hintbox'), await pg.inner_text('.hintbox'))
+            first = await pg.evaluate('CL.st.q[0].id')
+            await pg.click('#cshow')
+            ivs = await pg.evaluate("[...document.querySelectorAll('.crate button small')].map(x=>x.textContent)")
+            check('lesson recall: four ratings with real, translated intervals', len(ivs) == 4 and all(ivs) and not re.search('[а-яА-Я]', ' '.join(ivs)) and await pg.locator('#masks .cm.open').count() == 1, json.dumps(ivs))
+            await pg.click('.crate .r3')
+            c1 = await pg.evaluate(f"(()=>{{const c=cardById('{first}');return {{reps:c.reps,type:c.type,due:c.due>Date.now()}};}})()")
+            check('lesson recall: Good writes the card schedule', c1['reps'] == 1 and c1['type'] != 'new' and c1['due'], json.dumps(c1))
+            await pg.click('#cshow'); await pg.click('.crate .r1')
+            check('lesson recall: Again puts the structure back into the queue', await pg.evaluate('CL.st.q.length') == 4)
+            for _ in range(6):
+                if await pg.query_selector('.cdone'):
+                    break
+                await pg.click('#cshow'); await pg.click('.crate .r3')
+            await pg.wait_for_selector('.cdone')
+            reps = await pg.evaluate("S.cards.filter(c=>c.plateId===CL.pid).map(c=>c.reps||0).sort().join()")
+            check('lesson recall: every structure rated at least once', all(int(x) >= 1 for x in reps.split(',')), reps)
+            # a second pass the same day: cards not due yet keep their schedule
+            await pg.click('.cseg [data-s=me]')
+            await pg.wait_for_selector('#cshow')
+            q0 = await pg.evaluate('CL.st.q[0].id')
+            before = await pg.evaluate(f"(c=>[c.reps,c.due])(cardById('{q0}'))")
+            await pg.click('#cshow'); await pg.click('.crate .r3')
+            check('lesson recall: a card that is not due yet keeps its schedule', await pg.evaluate(f"(c=>[c.reps,c.due])(cardById('{q0}'))") == before, json.dumps(before))
+            for _ in range(8):
+                if await pg.query_selector('.cdone'):
+                    break
+                await pg.click('#cshow'); await pg.click('.crate .r3')
+            await pg.wait_for_selector('.cdone')
+            sched1 = await pg.evaluate("JSON.stringify(S.cards.map(c=>[c.id,c.reps||0,c.due,c.type]))")
+            await pg.click('#cnx')
+            await pg.wait_for_selector('.cq')
+            seen = []
+            for k in range(2):
+                q = await pg.evaluate('CL.st.q[CL.st.i]')
+                frame = await pg.locator('#masks .cm.cur').count()
+                seen.append((bool(q.get('item')), frame, 'lk' in await pg.inner_text('.clesson .chip.src') or not q.get('page')))
+                if k == 0:
+                    await pg.evaluate("[...document.querySelectorAll('.copt')].find(b=>b.textContent!==CL.st.q[CL.st.i].ans).click()")
+                    check('lesson connect: a wrong option is marked, the answer is shown', await pg.locator('.copt.no').count() == 1 and await pg.locator('.copt.ok').count() == 1 and bool(await pg.query_selector('.cverdict.no')))
+                else:
+                    await pg.click(f'.copt >> text="{q["ans"]}"')
+                    check('lesson connect: a right option is green', bool(await pg.query_selector('.cverdict.ok')))
+                await pg.click('#cnx')
+            check('lesson connect: the structure of the question is framed, a question without one frames nothing and the page shows', all((has and frame == 1) or (not has and frame == 0) for has, frame, _ in seen) and any(has for has, _, _ in seen) and all(pg_ for _, _, pg_ in seen), json.dumps(seen))
+            check('lesson connect: result 1 / 2 and a way back', '1 / 2' in await pg.inner_text('.cdone b') and bool(await pg.query_selector('#cnx')))
+            check('lesson connect does not touch the schedule', await pg.evaluate("JSON.stringify(S.cards.map(c=>[c.id,c.reps||0,c.due,c.type]))") == sched1)
+            await pg.click('#cnx')
+            await pg.wait_for_selector('.crs.chome')
+            # a step can be opened directly and the same screen opens from the deck
             did = await pg.evaluate("S.decks.find(d=>d.name==='Urok').id")
             await pg.evaluate(f"go({{name:'deck',deckId:'{did}',tab:'photos'}})")
             check('lesson: the deck has a Lesson button', bool(await pg.query_selector('[data-act=lesson]')))
             await pg.click('[data-act=lesson]')
-            await pg.wait_for_selector('.ls-intro')
-            txt = await pg.inner_text('.ls-intro')
-            check('lesson step 1: intro shown, <b> bold, attack stays text',
-                  'Esimene rida on paks.' in txt and await pg.inner_text('.ls-intro b') == 'paks' and '<img src=x onerror=window.__xss=1>' in txt
-                  and not await pg.query_selector('.ls-intro img') and await pg.evaluate('window.__xss') is None, txt)
-            check('lesson step 1: all frames open', await pg.locator('#masks .mk.open').count() == 3)
-            await pg.click('[data-act=lessonNext]')
-            await pg.wait_for_selector('.intro-ans .anote')
-            check('lesson step 2: introduction shows the card note', 'Märkus ' in await pg.inner_text('.intro-ans .anote'))
-            for _ in range(6):
-                if await pg.evaluate("view.name==='study'&&!!SS.intro"):
-                    await pg.click('[data-act=introNext]')
-            await pg.wait_for_function("view.name==='study'&&SS.lesson&&SS.lesson.next===4&&SS.cm==='choice'", timeout=10000)
-            check('lesson step 3: choice session without scheduling', await pg.evaluate('SS.cram===true&&SS.cm==="choice"'))
-            check('lesson: the close button of a lesson session leaves the lesson', bool(await pg.query_selector('.full.study header [data-act=lessonQuit]')))
-            await pg.evaluate('A.studyExit()')   # what the end of the session does: on to the next step
-            await pg.wait_for_function("view.name==='study'&&SS.lesson&&SS.lesson.next===5", timeout=10000)
-            check('lesson step 4: scheduled session (not cram)', await pg.evaluate('SS.cram===false'))
-            await pg.evaluate('A.studyExit()')
-            await pg.wait_for_function("view.name==='lesson'&&LS.step===5", timeout=10000)
-            check('lesson step 5: the linked frame is highlighted', await pg.locator('#masks .mk.hl').count() == 1 and await pg.locator('#masks .mk.open').count() == 0)
-            await pg.click('.ls-opts .opt >> text="maxilla"')
-            check('lesson step 5: right choice gives ok verdict', bool(await pg.query_selector('.verdict.ok')))
-            await pg.click('[data-act=lessonNext]')
-            await pg.wait_for_function('LS.i===1&&LS.picked===null')
-            check('lesson step 5: a question without a frame highlights nothing', await pg.locator('#masks .mk.hl').count() == 0)
-            await pg.click('.ls-opts .opt >> text="vomer"')
-            check('lesson step 5: wrong choice gives bad verdict with the answer', bool(await pg.query_selector('.verdict.bad')) and await pg.inner_text('.verdict.bad .ls-ans') == 'mandibula')
-            await pg.click('[data-act=lessonNext]')
-            await pg.wait_for_selector('.ls-done')
-            check('lesson end: 1 of 2 right', re.search(r'1\s*(/|из|of)\s*2', await pg.inner_text('.ls-done')) is not None, await pg.inner_text('.ls-done'))
-            await pg.click('[data-act=lessonExit]')
+            await pg.wait_for_selector('.clesson .cseg')
+            await pg.click('.cseg button[data-s=se]')
+            await pg.wait_for_selector('.cq')
+            check('lesson from the deck: the same screen, any step can be opened', await pg.evaluate("view.name==='courseLesson'&&CL.step==='se'"))
+            await pg.click('[data-act=crBack]')
             await pg.wait_for_function("view.name==='deck'")
 
-            # lesson fields survive export and import (note, src, prio, pt, intro, link; link item follows the new card ids)
+            # lesson fields survive export and import (kind, page, note, src, prio, pt, intro, link; link item follows the new card ids)
             exp3 = await pg.evaluate(f"buildExport(['{did}']).then(r=>r.out)")
             pl3, cs3 = exp3['plates'][0], {c['term']: c for c in exp3['cards']}
-            check('deck export carries intro, link and card note/src/prio/pt',
-                  len(pl3.get('intro', [])) == 2 and len(pl3.get('link', [])) == 2 and pl3.get('title') == 'Esimene foto'
-                  and all(c.get('note') and c.get('src') == 'KT' and c.get('prio') for c in cs3.values()) and cs3['maxilla'].get('pt') == [40.5, 60],
+            check('deck export carries intro, link, page and card kind/note/src/prio/pt',
+                  len(pl3.get('intro', [])) == 2 and len(pl3.get('link', [])) == 2 and pl3.get('title') == 'Esimene foto' and pl3.get('page') == 12 and pl3['link'][0].get('page') == 5
+                  and all(c.get('note') and c.get('src') == 'KT' and c.get('prio') and c.get('kind') == 'luu' for c in cs3.values()) and cs3['maxilla'].get('pt') == [40.5, 60],
                   json.dumps(pl3.get('link'))[:200])
             exp3['plates'][0]['intro'].append(7)   # junk in the file must be dropped, not break the import
+            exp3['plates'][0]['link'][1]['page'] = 1000
             exp3['cards'][0]['prio'] = 9
+            exp3['cards'][0]['kind'] = 'x' * 50
+            exp3['cards'][1]['kind'] = 7
             (tmp / 'corpus-deck-lesson2.json').write_text(json.dumps(exp3))
             await import_file('corpus-deck-lesson2.json', 1)
             res = await pg.evaluate("""(()=>{const p=S.plates[S.plates.length-1];const cs=cardsOfPlate(p.id);const it=cs.find(c=>c.id===p.link[0].item);
-              return {intro:p.intro.length,n:cs.length,item:it&&it.term,second:p.link[1].item,note:cs.every(c=>c.note),prio:cs.map(c=>c.prio).filter(Boolean).sort().join(),pt:cs.filter(c=>c.pt).length};})()""")
-            check('imported lesson: link points at the new card, junk dropped', res == {'intro': 2, 'n': 3, 'item': 'maxilla', 'second': None, 'note': True, 'prio': '2,3', 'pt': 1}, json.dumps(res))
+              return {intro:p.intro.length,n:cs.length,item:it&&it.term,second:p.link[1].item,note:cs.every(c=>c.note),prio:cs.map(c=>c.prio).filter(Boolean).sort().join(),pt:cs.filter(c=>c.pt).length,
+                page:p.page,lp:[p.link[0].page,p.link[1].page],kinds:cs.map(c=>c.kind||'-').sort().join()};})()""")
+            check('imported lesson: link points at the new card, page kept, junk dropped', res == {'intro': 2, 'n': 3, 'item': 'maxilla', 'second': None, 'note': True, 'prio': '2,3', 'pt': 1,
+                                                                                           'page': 12, 'lp': [5, None], 'kinds': '-,luu,' + 'x' * 20}, json.dumps(res))
 
             # tools/lessons2corpus.py
             from PIL import Image
             cdir = tmp / 'course'; (cdir / 'img').mkdir(parents=True)
             Image.new('RGB', (80, 60), (200, 200, 200)).save(cdir / 'img' / 'a.jpg')
             (cdir / 'course.json').write_text(json.dumps({'lessons': [
-                {'id': 'a', 'title': 'A', 'sub': 'sub', 'part': 1, 'img': 'img/a.jpg', 'intro': ['x <b>y</b>'],
-                 'items': [{'id': 'i1', 'term': 'Os frontale', 'box': [1, 2, 3, 4], 'note': 'n', 'src': 'KT', 'prio': 1}], 'link': []},
+                {'id': 'a', 'title': 'A', 'sub': 'sub', 'part': 1, 'page': 7, 'img': 'img/a.jpg', 'intro': ['x <b>y</b>'],
+                 'items': [{'id': 'i1', 'term': 'Os frontale', 'kind': 'luu', 'box': [1, 2, 3, 4], 'note': 'n', 'src': 'KT', 'prio': 1}], 'link': []},
                 {'id': 'b', 'title': 'B', 'part': 1, 'img': None, 'items': [],
-                 'link': [{'term': 'os frontale', 'q': 'q?', 'ans': 'a', 'opts': ['b', 'c', 'd'], 'src': 'KT'}]}]}))
+                 'link': [{'term': 'os frontale', 'q': 'q?', 'ans': 'a', 'opts': ['b', 'c', 'd'], 'src': 'KT', 'page': 3}]}]}))
             subprocess.run([sys.executable, str(ROOT / 'tools' / 'lessons2corpus.py'), str(cdir / 'course.json'), '-o', str(cdir / 'out.json')], check=True, capture_output=True)
             out = json.loads((cdir / 'out.json').read_text())
-            check('lessons2corpus: folder file with the question bound to its frame',
-                  out['kind'] == 'folder' and len(out['plates']) == 1 and out['plates'][0]['title'] == 'A — sub' and out['plates'][0]['image'].startswith('data:image/jpeg')
-                  and out['cards'][0]['id'] == 'a:i1' and out['plates'][0]['link'][0]['item'] == 'a:i1', json.dumps(out['plates'][0].get('link')))
+            check('lessons2corpus: folder file with the question bound to its frame, kind and pages kept',
+                  out['kind'] == 'folder' and len(out['plates']) == 1 and out['plates'][0]['title'] == 'A' and out['plates'][0]['page'] == 7 and out['plates'][0]['image'].startswith('data:image/jpeg')
+                  and out['cards'][0]['id'] == 'a:i1' and out['cards'][0]['kind'] == 'luu' and out['plates'][0]['link'][0]['item'] == 'a:i1' and out['plates'][0]['link'][0]['page'] == 3, json.dumps(out['plates'][0].get('link')))
 
             # clean up, so the counts in the later scenarios stay as they were
             await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.name.startsWith('Urok')),ids=new Set(ds.map(d=>d.id));
               S.cards.filter(c=>ids.has(c.deckId)).forEach(c=>removeCard(c.id));S.plates.filter(p=>ids.has(p.deckId)).forEach(p=>dropPlate(p));
               ds.forEach(d=>{S.decks=S.decks.filter(x=>x.id!==d.id);removeDoc('decks',d.id);});
-              S.folders.filter(f=>f.name.startsWith('Urok')).forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});})()""")
+              S.folders.filter(f=>f.name.startsWith('Urok')).forEach(f=>{S.folders=S.folders.filter(x=>x.id!==f.id);removeDoc('folders',f.id);});delete META.coursePrio;persistMeta();})()""")
             await pg.wait_for_function(f'S.plates.length==={plates_before_lesson} && WQ.jobs.size===0', timeout=20000)
 
             # share the folder by code / QR

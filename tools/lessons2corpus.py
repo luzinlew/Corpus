@@ -4,7 +4,7 @@
     python3 tools/lessons2corpus.py IN.json -o OUT.json
 
 IN is either a course ({"lessons": [...]}) or a plain list of lessons. A lesson is
-{id, title, sub, part, img, intro[], items[{id, term, box[x,y,w,h], note, src, prio, pt}], link[{term, q, ans, opts, src, item}]}.
+{id, title, sub, part, page, img, intro[], items[{id, term, kind, box[x,y,w,h], note, src, prio, pt}], link[{term, q, ans, opts, src, page, item}]}.
 img is a path relative to IN's folder or a data: URI. The result holds slides: keep it for your own use,
 do not publish it or put it into the repository.
 """
@@ -49,7 +49,9 @@ def convert(lessons, base):
             continue
         t += 1
         p = {'id': 'p%d' % (len(plates) + 1), 'deckId': did[L.get('part')], 'w': img[1], 'h': img[2], 'createdAt': t, 'image': img[0],
-             'title': L.get('title', '') + (' — ' + L['sub'] if L.get('sub') else '')}
+             'title': L.get('title', '')}
+        if isinstance(L.get('page'), int) and 0 <= L['page'] <= 999 and L.get('page'):
+            p['page'] = L['page']
         if L.get('intro'):
             p['intro'] = list(L['intro'])
         plates.append(p); photo_of[li] = p
@@ -58,7 +60,7 @@ def convert(lessons, base):
             b = it['box']
             c = {'id': '%s:%s' % (L['id'], it['id']), 'deckId': p['deckId'], 'plateId': p['id'], 'term': it['term'],
                  'x': b[0], 'y': b[1], 'w': b[2], 'h': b[3], 'createdAt': t}
-            for k in ('note', 'src', 'prio', 'pt'):
+            for k in ('kind', 'note', 'src', 'prio', 'pt'):
                 if it.get(k) is not None:
                     c[k] = it[k]
             cards.append(c)
@@ -73,6 +75,8 @@ def convert(lessons, base):
             lnk = {'q': q['q'], 'ans': q['ans'], 'opts': list(q.get('opts', []))}
             if q.get('src'):
                 lnk['src'] = q['src']
+            if isinstance(q.get('page'), int) and 0 <= q['page'] <= 999:
+                lnk['page'] = q['page']
             target, item = None, None
             if q.get('item') and li in photo_of and '%s:%s' % (L['id'], q['item']) in ids:
                 target, item = li, '%s:%s' % (L['id'], q['item'])

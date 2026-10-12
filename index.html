@@ -6682,7 +6682,7 @@ async function boot(){
   const cl=window.claude;
   /* on the site the status of the AI function can come after the app has started (web.js then sends «corpus-ai-ready» and keeps the sample in CORPUS_WEB.lateSample):
      the listener is put on BEFORE waiting for cl.use, else an early event would be overwritten by the null below. No CORPUS_WEB (the claude.ai artifact): nothing here */
-  if(window.CORPUS_WEB)window.addEventListener('corpus-ai-ready',e=>aiLate(e&&e.detail&&e.detail.sample));
+  if(window.CORPUS_WEB)window.addEventListener('corpus-ai-ready',e=>{const s=e&&e.detail&&e.detail.sample,W=window.CORPUS_WEB;if(s&&W&&s===W.lateSample)aiLate(s);});   // only the sample web.js made
   if(cl&&cl.use){
     const r=await Promise.all(['db','assets','sample','downloads','user'].map(n=>cl.use(n).catch(()=>null)));
     S.db=r[0];S.assets=r[1];S.sample=r[2];S.downloads=r[3];S.user=r[4];

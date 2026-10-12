@@ -49,7 +49,7 @@
 | T-026 | P3 | Мелочи с прошлых сверок: суффикс «(импорт)» хранится по-русски при повторном импорте; подписи вкладок «Календарь»/«Статистика» обрезаются на 390px по-русски; подсказка клавиш на устройствах без клавиатуры | planned | — |
 | T-027 | P3 | Безопасность, усиление: revoke all + grant select на ai_plans/ai_usage/ai_bonus (как на ai_course в T-016); общие тексты ошибок модели/БД клиенту, детали — в лог (L6/L7 ревью T-016) | planned | — |
 | T-028 | P0 | ИИ на сайте не отвечает (чат, подсказки), функция без ошибок в логе → причина (код: текст ответа функции) под ошибкой в чате и в подсказке | deployed cb06900; причина найдена и исправлена SQL (нет private.ai_global) | claude/T-028-ai-diagnostics |
-| T-029 | P1 | Надёжность ИИ: функция пишет ошибки базы в лог; ИИ включается сам, если статус пришёл позже 2,5 с; выкладка функций из GitHub Actions (секрет SUPABASE_ACCESS_TOKEN, проверка загрузки после выкладки) | in-progress | claude/T-029-ai-reliability |
+| T-029 | P1 | Надёжность ИИ: функция пишет ошибки базы в лог; ИИ включается сам, если статус пришёл позже 2,5 с; выкладка функций из GitHub Actions (секрет SUPABASE_ACCESS_TOKEN, проверка загрузки после выкладки) | ready: e2e 329 PASS ×2; ждёт «деплой» (решение Льва о защите main / environment — по желанию) | claude/T-029-ai-reliability |
 
 ## Журнал
 
@@ -304,3 +304,6 @@
   - GitHub Actions: deploy-functions.yml — при push в main с изменениями в supabase/functions/** и вручную: CLI Supabase выкладывает corpus-ai и corpus-push с --no-verify-jwt и --project-ref (из config.js), потом проверка, что функция загрузилась (OPTIONS → 200), иначе красный прогон; только в репозитории luzinlew/Corpus; permissions: contents read
   - Льву один раз: Supabase → Account → Access Tokens → новый токен → GitHub → Settings → Secrets → Actions → SUPABASE_ACCESS_TOKEN
 - проверка: e2e — статус ИИ с задержкой > 2,5 с (ручка фейка) → ИИ сначала скрыт, затем появляется сам (S.sample, кнопка чата); ошибка лимита в функции → строка в логе функции; workflow — проверка YAML; ALL PASSED
+- реализация: implementer (прерван лимитом сессии, продолжен) — 24713bd; e2e 329 PASS ×2; actionlint 0; отрицательные прогоны: без правок падают новые проверки
+- security-reviewer: critical/high нет. medium — токен Supabase с полным доступом: любой с правом push в main может правкой workflow вывести секрет → решение Льва: защита ветки main и/или GitHub Environment production с секретом (по желанию). low — версии actions/CLI не закреплены (latest) — оставлено, закрепить при первой поломке; событие corpus-ai-ready принимало любой sample → теперь только W.lateSample (сделано); --no-verify-jwt безопасен (обе функции проверяют вход сами); сообщения ошибок БД уходят клиенту — было и раньше (T-027)
+- проверка координатора после правки слушателя: e2e ×2 exit 0, 329 PASS, ALL PASSED

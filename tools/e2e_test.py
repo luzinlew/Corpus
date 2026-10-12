@@ -2801,8 +2801,8 @@ async def main():
             check('plan: step 3: «5 osa · 10 õppetundi», legend P1 3 · P2 5 · P3 2, parts numbered with their names, no pictures made from tags in the AI\'s names',
                   sc['h'] == '5 osa · 10 õppetundi' and sc['leg'] == 'P1 · 3 P2 · 5 P3 · 2' and sc['k'] == 'TI soovitab' and sc['n'] == 10 and sc['parts'][0] == '1|Abaluu|4 õppetundi' and sc['parts'][1] == '2|Humerus|2 õppetundi'
                   and sc['parts'][2].startswith('3|<img src=x onerror=window.__xss=7>|') and sc['parts'][4] == '5|Atlas|2 õppetundi' and sc['xss'], json.dumps(sc, ensure_ascii=False))
-            check('plan: …the bar: «≈ 7 TI päringut», «Koosta plaan uuesti» and «Koosta kursus» (off, «järgmine samm tuleb varsti»); step 1 of the header goes back',
-                  'Koosta plaan uuesti' in sc['bar'] and 'Koosta kursus' in sc['bar'] and 'järgmine samm tuleb varsti' in sc['bar'] and '≈ 7 TI päringut' in sc['bar'] and sc['stepb'] == ['0'] and await pg.is_disabled('.cnbtns .cnmain'), sc['bar'])
+            check('plan: …the bar: «≈ 7 TI päringut», «Koosta plaan uuesti» and «Koosta kursus» (on since T-019: 10 lessons × 2 requests); step 1 of the header goes back',
+                  'Koosta plaan uuesti' in sc['bar'] and 'Koosta kursus' in sc['bar'] and '≈ 20 TI päringut · jäänud ' in sc['bar'] and '≈ 7 TI päringut' in sc['bar'] and sc['stepb'] == ['0'] and not await pg.is_disabled('.cnbtns .cnmain'), sc['bar'])
             ls = await pg.evaluate("""[...document.querySelectorAll('.cnpl')].map(l=>({t:l.querySelector('.cnlt').innerText,m:l.querySelector('.cnplm small').innerText,pp:l.querySelector('.cnpp').innerText.replace(/\\s+/g,' '),warn:!!l.querySelector('.cnwarn')}))""")
             lb2 = {x['t']: x for x in ls}
             check('plan: a lesson shows its picture («pilt: atlas-sildid.png»), the P counters, and for no picture the warning «Sobivat pilti pole …»',
@@ -3102,7 +3102,7 @@ async def main():
                   and seen['ru'][0]['sp'].startswith('Израсходовано 1 из ≈ 5 запросов') and seen['ru'][0]['bar'] == 'Отменить', json.dumps(seen['ru'][0], ensure_ascii=False))
             check('plan: step 2 in English', seen['en'][0]['t'] == 'The AI is making the plan | Photos are read on this device, which may take a few minutes. You can minimise the app.' and seen['en'][0]['rows'][1] == 'Reading “Core” and “Extra” / request 1 of 2' and seen['en'][0]['sp'].startswith('Used 1 of ≈ 5 requests') and seen['en'][0]['bar'] == 'Cancel', json.dumps(seen['en'][0], ensure_ascii=False))
             check('plan: step 2 in Estonian', seen['et'][0]['t'] == 'TI koostab plaani | Fotod loetakse selles seadmes, see võib võtta mõne minuti. Rakenduse võib minimeerida.' and seen['et'][0]['rows'][1] == 'Loen „Põhi“ ja „Täiendus“ materjale / päring 1 / 2' and seen['et'][0]['sp'].startswith('Kasutatud 1 / ≈ 5 päringut') and seen['et'][0]['bar'] == 'Tühista', json.dumps(seen['et'][0], ensure_ascii=False))
-            check('plan: step 3 in three languages', seen['ru'][1]['k'] == 'ИИ предлагает' and seen['ru'][1]['h'] == '4 части · 8 уроков' and 'Пересоставить план' in seen['ru'][1]['bar'] and 'Собрать курс' in seen['ru'][1]['bar'] and 'следующий шаг — скоро' in seen['ru'][1]['bar']
+            check('plan: step 3 in three languages', seen['ru'][1]['k'] == 'ИИ предлагает' and seen['ru'][1]['h'] == '4 части · 8 уроков' and 'Пересоставить план' in seen['ru'][1]['bar'] and 'Собрать курс' in seen['ru'][1]['bar'] and 'следующий шаг — скоро' not in seen['ru'][1]['bar']
                   and seen['en'][1]['k'] == 'The AI suggests' and seen['en'][1]['h'] == '4 parts · 8 lessons' and 'Make the plan again' in seen['en'][1]['bar'] and 'Build the course' in seen['en'][1]['bar']
                   and seen['et'][1]['k'] == 'TI soovitab' and seen['et'][1]['h'] == '4 osa · 8 õppetundi' and 'Koosta kursus' in seen['et'][1]['bar'], json.dumps(seen, ensure_ascii=False)[:700])
             await ui_lang(pg, 'ru')
@@ -3158,6 +3158,224 @@ async def main():
             check('plan: deleting the draft removes cplan too (and cdraft, ctext)', not any(r['coll'] in ('cdraft', 'ctext', 'cplan') for r in st['docs']), json.dumps([(r['coll'], r['id']) for r in st['docs'] if r['coll'] in ('cdraft', 'ctext', 'cplan')]))
             check('plan: no script errors or failed requests in the browser', not errs_p, '; '.join(errs_p)[:500])
             await ctx_p.close()
+
+            # ---------- «New course», step 4: the lessons are built (T-019). Own account; the fake Claude answers CORPUS-LESSON deterministically ----------
+            urllib.request.urlopen(API + '/__fn')
+            urllib.request.urlopen(API + '/__course?free=100&limit=')
+            ctx_a, pa, errs_a = await open_ctx()
+            await pa.goto(SITE + '?create=1&i=' + INVITE)
+            await pa.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pa.fill('input[name=email]', 'build@test.ee')
+            await pa.fill('input[name=password]', 'kolju2026')
+            await pa.click('.cw-go')
+            await app_ready(pa)
+            await ui_lang(pa, 'et')
+            ai_a = watch_ai(pa)
+            uid_b = await pa.evaluate('CORPUS_WEB.uid')
+            mine = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_b]
+            lessons_of = lambda a: [c for c in a if c.get('task') == 'lesson']
+            Lb = lambda title: f'.cnpl:has(.cnlt:text-is("{title}"))'
+            await pa.evaluate("go({name:'courses'})")
+            await pa.wait_for_selector('.cnnew')
+            await pa.click('.cnnew')
+            await pa.wait_for_selector('.cnw')
+            did_b = await pa.evaluate('view.did')
+            await pa.fill('#cnName', 'Ülajäse')
+            await pa.press('#cnName', 'Tab')
+            await pa.set_input_files('#cnFile', [str(PLD / 'Anatoomia loeng.pdf'), str(PLD / 'Lisa lugemine.pdf'), str(PLD / 'Kollokvium plaan küsimused.pdf'), str(PLD / 'atlas-sildid.png')])
+            await pa.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=4&&d.mats.every(m=>m.status!=='reading')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            await pa.click('.cnmain')
+            await pa.wait_for_selector('.cnph', timeout=120000)
+            for t_ in ('Fossa supraspinata', 'Acromion scapulae', 'Caput humeri', 'Collum chirurgicum', 'Articulatio humeri', 'Tuberculum infraglenoidale'):
+                await pa.click(Lb(t_) + ' [data-cn=loff]')
+            await pa.click(Lb('Spina scapulae') + ' .cnplh')
+            await pa.click(Lb('Spina scapulae') + ' [data-cn=pic]')
+            await pa.wait_for_function("document.querySelectorAll('#layer .cnpick').length>=2&&!document.querySelector('#layer .cnpriv')")
+            gp = await pa.evaluate("[...document.querySelectorAll('#layer .cnpick')].map(b=>b.dataset.s).find(s=>s.startsWith('g:'))")
+            await pa.click(f"#layer .cnpick[data-s='{gp}']")
+            await pa.wait_for_function("!document.querySelector('#layer .cnpick')")
+            await pa.click(Lb('Margo medialis') + ' .cnplh')
+            for t_ in ('Tuber scapulae', 'Os frontale', 'Tuber parietale'):
+                await pa.fill(Lb('Margo medialis') + ' .cntin', t_)
+                await pa.click(Lb('Margo medialis') + ' [data-cn=tadd]')
+            await pa.click(Lb('Angulus inferior') + ' .cnplh')
+            await pa.click(Lb('Angulus inferior') + ' .pc')   # P3 → P1
+            await state_when(lambda s: any((t['la'] == 'Angulus inferior' and t.get('pu') == 1) for r in mine(s, 'cplan') for p in r['data']['parts'] for l in p['lessons'] for t in l['terms']))
+            await pa.wait_for_timeout(1500)
+            bar = await pa.inner_text('.cnbtns .cnmain')
+            check('build: step 3 «Koosta kursus» is on: 4 lessons left on × 2 requests → «≈ 8 TI päringut · jäänud N»', not await pa.is_disabled('.cnbtns .cnmain') and 'Koosta kursus' in bar and '≈ 8 TI päringut · jäänud ' in bar, bar)
+
+            # --- a second device (same account, no originals): the pictures cannot be made, the lesson without a picture is built, the AI fails → a lesson without texts ---
+            ctx_b, pb, errs_b = await open_ctx()
+            ai_b = watch_ai(pb)
+            await pb.goto(SITE + '?create=1')
+            await pb.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pb.click('.cw-tabs [data-m=in]')
+            await pb.fill('input[name=email]', 'build@test.ee')
+            await pb.fill('input[name=password]', 'kolju2026')
+            await pb.click('.cw-go')
+            await app_ready(pb)
+            await ui_lang(pb, 'et')
+            await pb.click('.tabbar [data-v=courses]')
+            await pb.wait_for_selector('.crs .cnd')
+            urllib.request.urlopen(API + '/__fn?fail_after=0')
+            refusal_window['on'] = True
+            await pb.click('.cnd .cndgo')
+            await pb.wait_for_selector('[data-cn=build]:not([disabled])', timeout=30000)
+            await pb.click('[data-cn=build]')
+            await pb.wait_for_function("view.step===4&&!document.querySelector('.cnbcur')&&document.querySelectorAll('.cnbl').length===4&&!!CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=60000)
+            refusal_window['on'] = False
+            urllib.request.urlopen(API + '/__fn')
+            ui = await pb.evaluate("({n:document.querySelector('.cnbn').innerText.replace(/\\n+/g,' '),rows:[...document.querySelectorAll('.cnbl')].map(r=>r.innerText.replace(/\\n+/g,' | ')),bar:document.querySelector('#cnBar').innerText.replace(/\\n+/g,' / ')})")
+            check('build: without the originals on this device the three lessons with a picture are errors («Koosta seadmes, kus failid asuvad») and are not built; the one without a picture is ready',
+                  ui['n'].startswith('1 ') and sum('Viga' in r for r in ui['rows']) == 3 and sum('Koosta seadmes, kus failid asuvad' in r for r in ui['rows']) == 3 and 'Kontrolli: 2' in ui['rows'][1] and 'Processus coracoideus' in ui['rows'][1], json.dumps(ui, ensure_ascii=False))
+            check('build: …the lesson went on although the AI refused (a lesson without texts: «Kontrolli: 2» = no picture + no texts); the failed lessons never reached the AI', 'Kontrolli: 2' in ui['rows'][1] and len(lessons_of(ai_b)) == 1, ui['rows'][1])
+            check('build: …the bar offers «Proovi ebaõnnestunuid uuesti» and «Õpi valmisolevaid · 1»', 'Proovi ebaõnnestunuid uuesti' in ui['bar'] and 'Õpi valmisolevaid · 1' in ui['bar'], ui['bar'])
+            st = await state_when(lambda s: len(mine(s, 'plates')) == 1 and any(r['data'].get('courseId') for r in mine(s, 'cdraft')) and any(r['data'].get('bld') and len(r['data']['bld']['ls']) == 4 for r in mine(s, 'cplan')))
+            pl0 = mine(st, 'plates')[0]['data']
+            check('build: the course is created at the first ready lesson: folder with createdAt, a deck per part; cdraft.courseId points at it; the lesson has a plain picture in Storage, the title, the user\'s language, a fallback intro',
+                  len(mine(st, 'folders')) == 1 and mine(st, 'folders')[0]['data']['name'] == 'Ülajäse' and mine(st, 'folders')[0]['data']['createdAt'] > 1e12 and [r['data']['name'] for r in mine(st, 'decks')] == ['Abaluu'] and mine(st, 'cdraft')[0]['data']['courseId'] == mine(st, 'folders')[0]['id']
+                  and pl0['title'] == 'Processus coracoideus' and pl0['lang'] == 'et' and 'TI ei vastanud' in pl0['intro'][0] and len([o for o in st['objects'] if o['owner'] == uid_b]) == 1, json.dumps(pl0, ensure_ascii=False)[:300])
+            await ctx_b.close()
+
+            # --- device A: reload; the build is «idle» with the saved state; the limit refuses → a pause with an understandable text, nothing paid, the picture uploaded for the attempt is removed ---
+            await pa.reload()
+            await app_ready(pa)
+            await pa.click('.tabbar [data-v=courses]')
+            await pa.wait_for_selector('.crs .cnd')
+            await pa.click('.cnd .cndgo')
+            await pa.wait_for_selector('.cnbl', timeout=30000)
+            check('build: after a reload the draft opens on step 4 (built lessons from the cloud: 1 of 4, three errors), paused, «Jätka» offered', await pa.evaluate("view.step") == 4 and (await pa.inner_text('.cnbn')).replace('\n', ' ').startswith('1 ') and 'Jätka' in await pa.inner_text('#cnBar') and await pa.query_selector('.cnbcur') is None)
+            objs0 = len([o for o in state()['objects'] if o['owner'] == uid_b])
+            urllib.request.urlopen(API + '/__course?free=0&limit=0')
+            n_a = len(ai_a)
+            await pa.evaluate("CORPUS_WEB.aiCourse={left:0,free:0,pool:'course'}")
+            await pa.click('[data-cn=resume]')
+            await pa.wait_for_function("CDRAFTS.get(view.did)._bld.state==='quota'", timeout=60000)
+            qt = await pa.inner_text('.cnerr')
+            await state_when(lambda s: len([o for o in s['objects'] if o['owner'] == uid_b]) == objs0)
+            check('build: the limit refuses a lesson → a pause: «Kursuste TI limiit on otsas …», «Jätka» stays; one request went out, was refused and cost nothing; the picture uploaded for it is deleted again',
+                  'Kursuste TI limiit on otsas' in qt and 'Valmis õppetunnid on salvestatud' in qt and tasks_of(ai_a[n_a:]) == ['lesson'] and len([o for o in state()['objects'] if o['owner'] == uid_b]) == objs0 and 'Jätka' in await pa.inner_text('#cnBar'), qt)
+            used_b = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_b, 0)
+            u_b0 = used_b()
+
+            # --- limit back; a pause after the current lesson; a reload; the rest goes on from the next lesson ---
+            urllib.request.urlopen(API + '/__course?free=100&limit=')
+            urllib.request.urlopen(API + '/__fn?delay=1500')
+            await pa.evaluate("CORPUS_WEB.aiCourse={left:100,free:100,pool:'course'}")
+            n_a = len(ai_a)
+            await pa.click('[data-cn=resume]')
+            await pa.wait_for_selector('.cnbcur')
+            cur_t = await pa.evaluate("({t:document.querySelector('.cnbcur .cnlt').innerText,rows:[...document.querySelectorAll('.cnbcur .cnrow')].map(r=>r.className.replace('cnrow ','').split(' ')[0]),h:document.querySelector('.cnti').innerText,on:[...document.querySelectorAll('.cnsl.on')].map(e=>e.innerText),pause:document.querySelector('#cnBar [data-cn=pause]').innerText})")
+            check('build: step 4 while building: title «Kursuse koostamine», step «3. Koostamine», the current lesson (Spina scapulae) with a 5-row check-list, the button «Paus»',
+                  cur_t['t'] == 'Spina scapulae' and len(cur_t['rows']) == 5 and cur_t['h'] == 'Kursuse koostamine' and cur_t['on'] == ['3. Koostamine'] and cur_t['pause'] == 'Paus', json.dumps(cur_t, ensure_ascii=False))
+            await pa.click('[data-cn=pause]')
+            await pa.wait_for_function("CDRAFTS.get(view.did)._bld.state==='pause'", timeout=60000)
+            await pa.wait_for_timeout(500)
+            st = await state_when(lambda s: len(mine(s, 'plates')) == 2)
+            check('build: «Paus» finishes the lesson in progress and stops (2 of 4 ready; exactly one more AI request, 2 units paid)', (await pa.inner_text('.cnbn')).replace('\n', ' ').startswith('2 ') and len(lessons_of(ai_a[n_a:])) == 1 and used_b() - u_b0 == 2, await pa.inner_text('.cnbn'))
+            await pa.reload()
+            await app_ready(pa)
+            await pa.click('.tabbar [data-v=courses]')
+            await pa.wait_for_selector('.crs .cnd')
+            await pa.click('.cnd .cndgo')
+            await pa.wait_for_selector('.cnbl', timeout=30000)
+            urllib.request.urlopen(API + '/__fn')
+            ai_a = watch_ai(pa)
+            await pa.click('[data-cn=resume]')
+            await pa.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            check('build: after the reload «Jätka» builds only the two lessons left (2 lesson requests, 4 units); 4 of 4 ready', len(lessons_of(ai_a)) == 2 and (await pa.inner_text('.cnbn')).replace('\n', ' ').startswith('4 ') and used_b() - u_b0 == 6, json.dumps([len(lessons_of(ai_a)), used_b() - u_b0, await pa.inner_text('.cnbn')]))
+            lr = lastai()
+            check('build: the lesson request: model claude-sonnet-5-5 with thinking between_tools, 4000 tokens, the function\'s prompt «CORPUS-LESSON et», one turn', lr['model'] == 'claude-sonnet-5-5' and lr['thinking'] == {'type': 'between_tools'} and lr['max_tokens'] == 4000 and lr['said'].startswith('CORPUS-LESSON et\n') and lr['turns'] == 1, json.dumps({k: lr[k] for k in ('model', 'thinking', 'max_tokens')}))
+
+            # --- what was built ---
+            st = await state_when(lambda s: len(mine(s, 'plates')) == 4 and len(mine(s, 'packs')) >= 1)
+            plates = {r['data']['title']: r['data'] for r in mine(st, 'plates')}
+            cards_ = {}
+            for r in mine(st, 'packs'):
+                for cid, c in r['data']['c'].items():
+                    cards_.setdefault(c.get('plateId') or None, []).append(dict(c, id=cid))
+            pid_of = {t_: next(r['id'] for r in mine(st, 'plates') if r['data']['title'] == t_) for t_ in plates}
+            cs = lambda t_: sorted(cards_.get(pid_of[t_], []), key=lambda c: c['createdAt'])
+            fo = mine(st, 'folders')
+            dk = {r['data']['name']: r['data'] for r in mine(st, 'decks')}
+            check('build: one folder «Ülajäse», two decks (Abaluu, Atlas) in the order of the plan by createdAt, four photo lessons in the order of the plan inside the decks, all with a picture in Storage (4 objects)',
+                  len(fo) == 1 and len(dk) == 2 and dk['Abaluu']['createdAt'] < dk['Atlas']['createdAt'] and all(d['folderId'] == fo[0]['id'] for d in dk.values()) and len(plates) == 4
+                  and plates['Spina scapulae']['createdAt'] < plates['Processus coracoideus']['createdAt'] and plates['Margo medialis']['createdAt'] < plates['Angulus inferior']['createdAt']
+                  and all(p['deckId'] == next(r['id'] for r in mine(st, 'decks') if r['data']['name'] == ('Abaluu' if t_ in ('Spina scapulae', 'Processus coracoideus') else 'Atlas')) for t_, p in plates.items())
+                  and len([o for o in st['objects'] if o['owner'] == uid_b]) == 4 and all(p.get('assetId') for p in plates.values()), json.dumps([[k, v['createdAt']] for k, v in plates.items()]))
+            sp = cs('Spina scapulae')
+            check('build: the lesson on a PDF page: the picture is the rendered page (about 1131×1600), page 1, the card has a frame found in the text layer of the page and P1 (= the plan), a note from the AI in the user\'s language, source «Anatoomia lo»',
+                  plates['Spina scapulae']['page'] == 1 and 1000 < plates['Spina scapulae']['w'] < 1300 and plates['Spina scapulae']['h'] == 1600 and len(sp) == 1 and not sp[0].get('noframe') and 5 < sp[0]['x'] < 11 and 8 < sp[0]['y'] < 12 and 8 < sp[0]['w'] < 25 and 0.8 < sp[0]['h'] < 4
+                  and sp[0]['prio'] == 1 and sp[0]['note'].startswith('[et] Note on Spina scapulae (p1') and sp[0]['src'] == 'Anatoomia lo', json.dumps([plates['Spina scapulae'], sp], ensure_ascii=False)[:600])
+            mm = cs('Margo medialis')
+            check('build: the lesson on the photo: a frame where the label was found (OCR, inside the picture), the structures added by the user have no frame (noframe, P2 as in the plan), notes from the AI; «Angulus inferior» has P1 (changed by tap)',
+                  [c['term'] for c in mm] == ['Margo medialis', 'Tuber scapulae', 'Os frontale', 'Tuber parietale'] and not mm[0].get('noframe') and 40 < mm[0]['x'] < 100 and all(c.get('noframe') for c in mm[1:]) and [c['prio'] for c in mm] == [3, 2, 2, 2]
+                  and all(c['note'].startswith('[et] Note on') for c in mm) and cs('Angulus inferior')[0]['prio'] == 1 and not cs('Angulus inferior')[0].get('noframe'), json.dumps(mm, ensure_ascii=False)[:500])
+            lk = plates['Margo medialis'].get('link') or []
+            check('build: the intro and the question of the AI are on the lesson (2 sentences; one question: the answer is the first structure, 3 wrong options, linked to its frame), the language of the lesson is «et»',
+                  plates['Margo medialis']['lang'] == 'et' and plates['Margo medialis']['intro'][0].startswith('[et] Margo medialis intro') and len(lk) == 1 and lk[0]['ans'] == 'Margo medialis' and sorted(lk[0]['opts']) == ['Os frontale', 'Tuber parietale', 'Tuber scapulae'] and lk[0]['item'] == mm[0]['id'] and lk[0]['q'].startswith('[et] '),
+                  json.dumps(lk, ensure_ascii=False))
+            check('build: the lesson without a picture has no cards, only the intro and (when the AI is there) questions; it was built without texts on the other device', cs('Processus coracoideus') == [] and 'TI ei vastanud' in plates['Processus coracoideus']['intro'][0] and not plates['Processus coracoideus'].get('link'))
+            bl = next(r['data']['bld'] for r in mine(st, 'cplan'))
+            check('build: cplan.bld holds the state: every lesson ok with its plate; the one with frames missing says nf 3, the lesson without a picture np 1 and nt 1',
+                  sorted(v['st'] for v in bl['ls'].values()) == ['ok'] * 4 and all(v['pid'] for v in bl['ls'].values()) and sorted((v['nf'], v['nt'], v['np']) for v in bl['ls'].values()) == [(0, 0, 0), (0, 0, 0), (0, 1, 1), (3, 0, 0)] and len(bl['parts']) == 2, json.dumps(bl)[:300])
+
+            # --- the course is an ordinary course: in the «Courses» tab, a lesson opens in the player ---
+            await pa.click('[data-cn=learn]')
+            await pa.wait_for_selector('.crs .clrow')
+            for _ in range(3):
+                shut = await pa.query_selector('.crs button.cph[aria-expanded=false]')
+                if shut:
+                    await shut.click()
+                    await pa.wait_for_timeout(200)
+            tab = await pa.evaluate("({n:document.querySelector('.crs').innerText.replace(/\\n+/g,' | '),rows:document.querySelectorAll('.crs .clrow').length,parts:document.querySelectorAll('.crs .cpart').length,view:view.name})")
+            check('build: «Õpi valmisolevaid» opens the course in the «Courses» tab: its name, two parts, three lessons (the one without a picture, structures or questions has nothing to show and the Courses tab hides it)', tab['view'] == 'courses' and 'Ülajäse' in tab['n'] and tab['rows'] == 3 and tab['parts'] == 2 and 'Margo medialis' in tab['n'], tab['n'][:300])
+            await pa.click(f".crs .clrow[data-pid='{pid_of['Margo medialis']}']")
+            await pa.wait_for_function("view.name==='courseLesson'")
+            await pa.wait_for_timeout(600)
+            txt = await pa.inner_text('body')
+            check('build: the lesson opens in the player: the overview shows the AI intro; the steps are there (with the question step)', '[et] Margo medialis intro one.' in txt and 'Seosta' in txt and 'Margo medialis' in txt, txt[:300].replace('\n', ' | '))
+            await pa.evaluate("go({name:'courseNew',did:'" + did_b + "',step:4})")
+            await pa.wait_for_selector('.cnbl')
+            await pa.click(f".cnbl [data-cn=open][data-lid]")
+            await pa.wait_for_function("view.name==='courseLesson'")
+            check('build: a ready row of step 4 opens its lesson in the player', await pa.evaluate("CL&&CL.from.name==='courseNew'&&CL.from.step===4"))
+            await pa.evaluate("go({name:'courseNew',did:'" + did_b + "',step:4})")
+            await pa.wait_for_selector('.cnbl')
+
+            # --- a second build of the same draft (the record of the build is lost): the same folder, the decks and the lessons are not doubled ---
+            st0 = state()
+            await pa.evaluate("(()=>{const d=CDRAFTS.get(view.did);d._plan.bld.ls=Object.create(null);d._plan.bld.parts=Object.create(null);d._bld=null;cnBPaint();})()")
+            n_a = len(ai_a)
+            await pa.click('[data-cn=resume]')
+            await pa.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            st = await state_when(lambda s: len(mine(s, 'plates')) == 4 and len([o for o in s['objects'] if o['owner'] == uid_b]) == 4, 15)
+            check('build: building the same draft again does not double the course: still 1 folder, 2 decks, 4 lessons, 4 pictures in Storage (the old ones are replaced)',
+                  len(mine(st, 'folders')) == 1 and len(mine(st, 'decks')) == 2 and len(mine(st, 'plates')) == 4 and len([o for o in st['objects'] if o['owner'] == uid_b]) == 4 and len(lessons_of(ai_a[n_a:])) == 4, json.dumps([len(mine(st, 'folders')), len(mine(st, 'decks')), len(mine(st, 'plates'))]))
+
+            # --- three languages and the layout of step 4 ---
+            seen = {}
+            for lang in ('ru', 'en', 'et'):
+                await ui_lang(pa, lang)
+                await pa.evaluate("go({name:'courseNew',did:'" + did_b + "',step:4})")
+                await pa.wait_for_selector('.cnbl')
+                seen[lang] = await pa.evaluate("({t:document.querySelector('.cnti').innerText,n:document.querySelector('.cnbn').innerText.replace(/\\n+/g,' '),on:[...document.querySelectorAll('.cnsl.on')].map(e=>e.innerText),note:document.querySelector('.cnbnote').innerText,bar:document.querySelector('#cnBar').innerText.replace(/\\n+/g,' / '),pill:document.querySelector('.cnbp').innerText})")
+            check('build: step 4 in Russian', seen['ru']['t'] == 'Сборка курса' and seen['ru']['n'] == '4 из 4 уроков готово' and seen['ru']['on'] == ['3. Сборка'] and seen['ru']['note'] == 'Курс собран. Уроки можно учить.' and 'Учить готовые · 4' in seen['ru']['bar'], json.dumps(seen['ru'], ensure_ascii=False))
+            check('build: step 4 in English', seen['en']['t'] == 'Building the course' and seen['en']['n'] == '4 of 4 lessons ready' and seen['en']['on'] == ['3. Build'] and seen['en']['note'] == 'The course is built. You can study the lessons.' and 'Study the ready ones · 4' in seen['en']['bar'], json.dumps(seen['en'], ensure_ascii=False))
+            check('build: step 4 in Estonian', seen['et']['t'] == 'Kursuse koostamine' and seen['et']['n'] == '4 / 4 õppetundi valmis' and seen['et']['on'] == ['3. Koostamine'] and seen['et']['note'] == 'Kursus on koostatud. Õppetunde saab õppida.' and 'Õpi valmisolevaid · 4' in seen['et']['bar'], json.dumps(seen['et'], ensure_ascii=False))
+            lay = []
+            for w in (360, 390):
+                await pa.set_viewport_size({'width': w, 'height': 844})
+                await pa.wait_for_timeout(300)
+                lay.append(await pa.evaluate("""()=>{const out=[];document.querySelectorAll('.cnbgo,.cnbn,.cnbtns').forEach(c=>{const cr=c.getBoundingClientRect(),ks=[...c.children].filter(e=>e.getBoundingClientRect().width>0),r=ks.map(k=>k.getBoundingClientRect());
+                  ks.forEach((k,i)=>{if(r[i].right>cr.right+0.5)out.push('outside '+c.className+' > '+k.className);for(let j=i+1;j<ks.length;j++){const a=r[i],b=r[j];if(a.left<b.right-0.5&&b.left<a.right-0.5&&a.top<b.bottom-0.5&&b.top<a.bottom-0.5)out.push('overlap '+c.className);}});});
+                  if(document.documentElement.scrollWidth>document.documentElement.clientWidth+0.5)out.push('sideways');return out;}"""))
+            await pa.set_viewport_size({'width': 390, 'height': 844})
+            check('build: step 4 at 360 and 390 px: nothing overlaps or leaves its box', lay == [[], []], json.dumps(lay))
+            check('build: no script errors or failed requests in the browser (both devices)', not errs_a and not errs_b, '; '.join(errs_a + errs_b)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx_a.close()
 
             # --- the function directly: forms of the requests, no payment for a refused one, the prompt and the model are the function\'s own ---
             tokp = signup_token('planfn@test.ee')
@@ -3255,6 +3473,71 @@ async def main():
             status, j = fn_call(tokp, 'POST', good_p)
             check('plan: a cut-short answer is passed on with truncated true (the app turns it into «Retry»)', status == 200 and j['truncated'] is True, json.dumps([status, j.get('truncated')]))
             urllib.request.urlopen(API + '/__fn')
+            urllib.request.urlopen(API + '/__course?free=0&limit=')
+
+            # --- task lesson of the function: forms, no payment for a refused request, the prompt, the model, 2 units ---
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            tl = lambda n: [{'id': f't{i}', 'la': f'Os n{i}', 'p': 2} for i in range(1, n + 1)]
+            good_l = {'task': 'lesson', 'purpose': 'course', 'lang': 'et', 'input': {'title': 'Spina scapulae', 'terms': tl(4), 'text': '[Loeng, 1] Spina scapulae on luu.', 'exam': ['Kirjelda Os n1 asendit.']}}
+
+            def with_l(**kw):
+                b = json.loads(json.dumps(good_l)); b['input'].update(kw.pop('input', {})); b.update(kw); return b
+            bad_l = {
+                'no lang': {k: v for k, v in good_l.items() if k != 'lang'}, 'lang xx': with_l(lang='xx'), 'lang constructor': with_l(lang='constructor'), 'purpose other': with_l(purpose='daily'),
+                'input is a list': {**good_l, 'input': []}, 'input with a foreign key': with_l(input={'x': 1}), 'no title': {**good_l, 'input': {k: v for k, v in good_l['input'].items() if k != 'title'}}, 'title is a number': with_l(input={'title': 5}), 'title of 301': with_l(input={'title': 't' * 301}),
+                'no terms': {**good_l, 'input': {'title': 'x'}}, 'terms is empty': with_l(input={'terms': []}), '41 terms': with_l(input={'terms': tl(41)}), 'terms is a string': with_l(input={'terms': 'x'}), 'term is a string': with_l(input={'terms': ['x']}),
+                'term with a foreign key': with_l(input={'terms': [{'id': 't1', 'la': 'a', 'x': 1}]}), 'term id empty': with_l(input={'terms': [{'id': '', 'la': 'a'}]}), 'term id of 41': with_l(input={'terms': [{'id': 'i' * 41, 'la': 'a'}]}),
+                'la is a number': with_l(input={'terms': [{'id': 't1', 'la': 5}]}), 'la is blank': with_l(input={'terms': [{'id': 't1', 'la': '  '}]}), 'la of 301': with_l(input={'terms': [{'id': 't1', 'la': 'a' * 301}]}),
+                'p is 4': with_l(input={'terms': [{'id': 't1', 'la': 'a', 'p': 4}]}), 'p is a string': with_l(input={'terms': [{'id': 't1', 'la': 'a', 'p': '1'}]}), 'same id twice': with_l(input={'terms': [{'id': 't1', 'la': 'a'}, {'id': 't1', 'la': 'b'}]}),
+                'text is a number': with_l(input={'text': 5}), 'text of 20001': with_l(input={'text': 'a' * 20001}), 'exam is a string': with_l(input={'exam': 'x'}), '31 questions': with_l(input={'exam': ['a'] * 31}),
+                'question of 601': with_l(input={'exam': ['a' * 601]}), 'question is a number': with_l(input={'exam': [1]}),
+                'JSON over 40000': with_l(input={'text': '"' * 20000, 'exam': ['"' * 600] * 30}),
+            }
+            cs0 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            lt0 = lastai()
+            wrong = {}
+            for name, body_ in bad_l.items():
+                status, j = fn_call(tokp, 'POST', body_)
+                if not (status == 400 and j.get('code') == 'invalid_input' and str(j.get('message', '')).startswith('lesson:')):
+                    wrong['lesson ' + name] = [status, str(j)[:80]]
+            check('wrong forms of lesson (%d kinds) → 400 invalid_input with «lesson: …»' % len(bad_l), not wrong, json.dumps(wrong, ensure_ascii=False)[:400])
+            cs1 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            check('…none of them was counted or sent to the model', cs1 == cs0 and lastai() == lt0, json.dumps([cs0, cs1]))
+            s1, _ = fn_call(None, 'POST', good_l)
+            s2, j2 = fn_call(None, 'POST', good_l, demo=True)
+            check('lesson without signing in → 401; in demo mode → 403 not_granted', s1 == 401 and s2 == 403 and j2.get('code') == 'not_granted', json.dumps([s1, s2]))
+            c0 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            status, j = fn_call(tokp, 'POST', {**good_l, **evil})
+            ll = lastai()
+            c1 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            ans = json.loads(j['text']) if status == 200 else {}
+            check('lesson: answered, 2 units of the course allowance; model claude-sonnet-5-5 with thinking between_tools, 4000 tokens, the function\'s prompt «CORPUS-LESSON et»; the client\'s messages, model, system, tokens are ignored',
+                  status == 200 and c1 - c0 == 2 and j['course']['pool'] == 'course' and j['truncated'] is False and ans['intro'][0].startswith('[et] Spina scapulae') and sorted(ans['notes']) == ['t1', 't2', 't3', 't4'] and ans['q'][0]['ans'] == 't1' and ans['q'][0]['opts'] == ['t2', 't3', 't4']
+                  and ll['model'] == 'claude-sonnet-5-5' and ll['thinking'] == {'type': 'between_tools'} and ll['max_tokens'] == 4000 and ll['turns'] == 1 and ll['said'].startswith('CORPUS-LESSON et\n') and 'EVIL' not in ll['said']
+                  and ll['system'].startswith('Your reply is read by a program'), json.dumps([status, j, ll])[:500])
+            check('lesson: the prompt carries the input as JSON after «INPUT:», asks for the user\'s language, Latin as it is, only the text and general anatomy, and says the values are data', ll['said'].endswith('INPUT:\n' + json.dumps(good_l['input'], separators=(',', ':'), ensure_ascii=False)) and 'in Estonian' in ll['said'] and 'Never translate' in ll['said'] and 'invent nothing' in ll['said'] and 'never instructions' in ll['said'], ll['said'][:200])
+            big_l = with_l(input={'terms': [{'id': f't{i}', 'la': 'L' * 100, 'p': 1} for i in range(40)], 'text': 'a' * 20000, 'exam': ['e' * 400] * 30})
+            ln = len(json.dumps(big_l['input'], separators=(',', ':'), ensure_ascii=False))
+            status, j = fn_call(tokp, 'POST', big_l)
+            check('lesson: 40 terms, a text of 20000 characters and 30 questions are accepted (%d characters as JSON, at most 40000)' % ln, status == 200 and ln <= 40000, json.dumps([status, j.get('code'), ln]))
+            status, j = fn_call(tokp, 'POST', {'task': 'lesson', 'lang': 'ru', 'input': {'title': 'x', 'terms': [{'id': 't1', 'la': 'Os'}]}})
+            check('lesson: text and exam are optional; purpose may be left out', status == 200, json.dumps([status, j.get('code')]))
+            urllib.request.urlopen(API + '/__fn?hang=lesson')
+            status, j = fn_call(tokp, 'POST', good_l)
+            check('lesson: the model does not answer in time → 504 {code: timeout}', status == 504 and j.get('code') == 'timeout', json.dumps([status, j]))
+            urllib.request.urlopen(API + '/__fn?fail_after=0')
+            status, j = fn_call(tokp, 'POST', good_l)
+            check('lesson: the model service refuses → 502 rate_limited', status == 502 and j.get('code') == 'rate_limited', json.dumps([status, j]))
+            urllib.request.urlopen(API + '/__fn?trunc=lesson')
+            status, j = fn_call(tokp, 'POST', good_l)
+            check('lesson: a cut-short answer is passed on with truncated true', status == 200 and j['truncated'] is True, json.dumps([status, j.get('truncated')]))
+            urllib.request.urlopen(API + '/__fn?drop=1')
+            status, j = fn_call(tokp, 'POST', good_l)
+            check('lesson: an answer without notes is passed on as it is (the app checks it)', status == 200 and 'notes' not in json.loads(j['text']), j.get('text', '')[:100])
+            urllib.request.urlopen(API + '/__fn')
+            urllib.request.urlopen(API + '/__course?free=0&limit=0')
+            status, j = fn_call(tokp, 'POST', good_l)
+            check('lesson: with both allowances used up → 429 quota_exceeded', status == 429 and j.get('code') == 'quota_exceeded', json.dumps([status, j]))
             urllib.request.urlopen(API + '/__course?free=0&limit=')
             # <<< T018
 

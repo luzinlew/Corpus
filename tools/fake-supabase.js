@@ -31,7 +31,7 @@ const FN_URL0 = FN_URL;
 let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429.
-   The same switches work for the course outline and plan requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
+   The same switches work for the course outline, plan and lesson requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
    trunc — cut short with stop_reason max_tokens; fail_after — 429 from the model service */
 let FN_DROP = false, FN_TRUNC = false, FN_HANG = '', FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
 let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
@@ -158,7 +158,7 @@ http.createServer(async (req, res) => {
   if (p === '/__lasttr') { send(res, 200, LAST_TR || {}); return; }   // the last translation request that reached the fake Claude
   if (p === '/__fn') {
     FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0;
-    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = u.searchParams.get('hang') === 'plan' ? 'plan' : ''; FN_CASE = u.searchParams.get('case') === '1';
+    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan', 'lesson'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = ['plan', 'lesson'].includes(u.searchParams.get('hang')) ? u.searchParams.get('hang') : ''; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
     FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
     FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0;
@@ -373,7 +373,7 @@ http.createServer(async (req, res) => {
        every string value prefixed with «[<to>] »; a value with ATTACK in it comes back as an <img onerror> tag, to see that the app shows it as text */
     const tm = body.system && /^CORPUS-TRANSLATE (\w+)>(\w+)\n/.exec(said), at = said.indexOf('\nINPUT:\n');
     /* a course outline / plan (labels «CORPUS-OUTLINE <lang>» / «CORPUS-PLAN <lang>» at the start of the prompt, then «INPUT:» and the JSON) */
-    const om = body.system && /^CORPUS-OUTLINE (\w+)\n/.exec(said), pm = body.system && /^CORPUS-PLAN (\w+)\n/.exec(said);
+    const om = body.system && /^CORPUS-OUTLINE (\w+)\n/.exec(said), pm = body.system && /^CORPUS-PLAN (\w+)\n/.exec(said), lm = body.system && /^CORPUS-LESSON (\w+)\n/.exec(said);
     let text;
     let stop = 'end_turn';
     if (tm && at > 0) {
@@ -388,17 +388,23 @@ http.createServer(async (req, res) => {
       if (FN_DROP && ans && typeof ans === 'object') delete ans.terms;
       text = JSON.stringify(ans);
       if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
-    } else if ((om || pm) && at > 0) {
+    } else if ((om || pm || lm) && at > 0) {
       FN_TR_N++;
       LAST_TR = { model: body.model, max_tokens: body.max_tokens, system: body.system, turns: body.messages.length, said, thinking: body.thinking };
       if (FN_FAIL_AFTER >= 0 && FN_TR_N > FN_FAIL_AFTER) { send(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'rate limit (test)' } }); return; }
-      if (FN_HANG && pm) await new Promise((r) => setTimeout(r, 6000));   // hang=plan: the plan request takes longer than the function waits (CORPUS_AI_TIMEOUT_MS)
+      if ((FN_HANG === 'plan' && pm) || (FN_HANG === 'lesson' && lm)) await new Promise((r) => setTimeout(r, 6000));   // hang=plan: the plan request takes longer than the function waits (CORPUS_AI_TIMEOUT_MS)
       let inp = null; try { inp = JSON.parse(said.slice(at + 8)); } catch { /* not JSON */ }
       inp = inp || {};
       const norm = (v) => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       const evil = (v) => String(v).includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : String(v);
       let ans;
-      if (om) {
+      if (lm) {
+        /* lesson: [<lang>] marks the language asked for; the intro names the title, a note for every term, one question of relations when there are 4 terms or more (the first term, the next three are the wrong answers) */
+        const ts = Array.isArray(inp.terms) ? inp.terms : [];
+        ans = { intro: ['[' + lm[1] + '] ' + evil(inp.title) + ' intro one.', 'Second sentence of ' + evil(inp.title) + '.'], notes: Object.fromEntries(ts.map((t) => [t.id, '[' + lm[1] + '] Note on ' + t.la + ' (p' + (t.p || 3) + ', text ' + String(inp.text || '').length + ', exam ' + (inp.exam || []).length + ').'])),
+          q: ts.length >= 4 ? [{ q: '[' + lm[1] + '] Which structure is ' + ts[0].la + '?', ans: ts[0].id, opts: ts.slice(1, 4).map((t) => t.id) }] : [] };
+        if (FN_DROP) delete ans.notes;
+      } else if (om) {
         /* outline: a topic for every page that has bold text (the first bold line is its title); its terms are the Latin pairs «Capital lower» of the page */
         ans = { topics: (inp.pages || []).filter((pg) => pg.em && pg.em.length).map((pg) => ({ title: pg.em[0], pages: [pg.n], terms: [...new Set(pg.text.match(/\b[A-Z][a-z]+ [a-z]{4,}\b/g) || [])] })) };
         if (FN_DROP) delete ans.topics;
@@ -419,7 +425,7 @@ http.createServer(async (req, res) => {
         if (FN_DROP) delete ans.parts;
       }
       text = JSON.stringify(ans);
-      if (FN_TRUNC && (FN_TRUNC === '1' || pm)) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }   // trunc=plan cuts only the plan
+      if (FN_TRUNC && (FN_TRUNC === '1' || (FN_TRUNC === 'plan' && pm) || (FN_TRUNC === 'lesson' && lm))) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }   // trunc=plan cuts only the plan, trunc=lesson only a lesson
     } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length, thinking: think || null })
       : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
     send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: stop, usage: { input_tokens: 10, output_tokens: 10 } });

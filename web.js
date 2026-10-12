@@ -8,7 +8,7 @@
      user      — the signed-in person
      sample    — Claude, through the Supabase Edge Function "corpus-ai" (the site owner's API key,
                  a daily allowance per user). Until that function is deployed, AI features stay hidden.
-   Beyond window.claude, window.CORPUS_WEB.courseAI.translate (and .outline, .plan; signed-in people only) asks the same function for the
+   Beyond window.claude, window.CORPUS_WEB.courseAI.translate (and .outline, .plan, .lesson; signed-in people only) asks the same function for the
    "translate" task: the function builds the prompt itself and pays from the course allowance first (supabase/ai.sql);
    window.CORPUS_WEB.aiCourse = { left, free } tells what is left of it.
    Beyond window.claude, window.CORPUS_WEB.shares passes a deck or folder to another person by a short
@@ -651,7 +651,9 @@
     /* outline: the topics of one material ({name, pages:[{n,text,em}]}); plan: the parts and lessons of a course (task "plan" of the function) */
     var outline = function (lang, input, opts) { return call({ task: 'outline', purpose: 'course', lang: lang, input: input }, opts); };
     var plan = function (lang, input, opts) { return call({ task: 'plan', purpose: 'course', lang: lang, input: input }, opts); };
-    return Object.freeze({ translate: translate, outline: outline, plan: plan });
+    /* lesson: the texts of one lesson of a course ({title, terms:[{id,la,p}], text, exam:[string]}) → {intro, notes, q} (task "lesson") */
+    var lesson = function (lang, input, opts) { return call({ task: 'lesson', purpose: 'course', lang: lang, input: input }, opts); };
+    return Object.freeze({ translate: translate, outline: outline, plan: plan, lesson: lesson });
   }
 
   /* ---------- user ---------- */

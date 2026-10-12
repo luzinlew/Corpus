@@ -450,6 +450,11 @@ async def main():
             check('each call is counted (photo = 2)', used == 6, str(used))
             r = await pg.evaluate("""(async()=>{const out=[];for(let i=0;i<2;i++){try{await S.sample('more');out.push('ok');}catch(e){out.push(e.code);}}return out;})()""")
             check('daily limit (6 of 6) stops further calls', r == ['quota_exceeded', 'quota_exceeded'], json.dumps(r))
+            # a failed request shows its reason under the error (code: message of the function), so a broken setup is not a silent «try again»
+            r = await pg.evaluate("""(async()=>{CH.turns=[];CH.dead=false;await chatSend('Mis on os frontale?');const t=CH.turns[CH.turns.length-1];
+                                   return {err:!!t.err,content:t.content,det:t.det||''};})()""")
+            check('chat error shows the reason (code: message)', r['err'] and r['det'].startswith('quota_exceeded: ') and 'limit' in r['det'], json.dumps(r))
+            check('…and the reason of a cancelled request is not shown', await pg.evaluate("aiErrDetail({code:'cancelled',message:'x'})===''&&aiErrDetail({code:'unavailable',message:' a\\n b '})==='unavailable: a b'"), '')
 
             await import_folder(pg)
             st = await state_when(lambda st: {'decks', 'folders', 'packs', 'plates'} <= set(d['coll'] for d in st['docs']))

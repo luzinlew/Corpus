@@ -631,6 +631,7 @@ button.ppitem{padding:0;background:none;text-align:left}
 .ch-msg.a{align-self:flex-start;background:var(--surface2);border-bottom-left-radius:4px}
 .ch-msg.a.wait{color:var(--ink3)}
 .ch-msg.err{align-self:center;background:var(--bad-soft);color:var(--bad);font-size:13.5px}
+.ch-det{display:block;margin-top:4px;font-size:12px;opacity:.8;overflow-wrap:anywhere}
 .ch-empty{margin:auto 0;text-align:center;color:var(--ink2);font-size:14px;line-height:1.5;padding:10px}
 .ch-chips{display:flex;gap:6px;overflow-x:auto;padding:6px 12px 2px;flex:none;scrollbar-width:none}
 .ch-chips::-webkit-scrollbar{display:none}
@@ -5661,7 +5662,7 @@ function chatRenderCtx(){
 function chatRender(){
   chatRenderCtx();
   const log=$('#chLog');if(!log)return;
-  log.innerHTML=CH.turns.length?CH.turns.map(t=>'<div class="ch-msg '+(t.err?'err':t.role==='user'?'u':'a')+(t.wait?' wait':'')+'">'+(t.role==='user'||t.err?esc(t.content):chMd(t.content))+'</div>').join(''):
+  log.innerHTML=CH.turns.length?CH.turns.map(t=>'<div class="ch-msg '+(t.err?'err':t.role==='user'?'u':'a')+(t.wait?' wait':'')+'">'+(t.role==='user'||t.err?esc(t.content):chMd(t.content))+(t.err&&t.det?'<small class="ch-det" data-noi18n>'+esc(t.det)+'</small>':'')+'</div>').join(''):
     '<div class="ch-empty">Спросите что угодно про текущую карточку или анатомию в целом. Claude видит, какая структура отмечена'+(S.imgOK?', и может посмотреть на фото':'')+'.</div>';
   log.scrollTop=log.scrollHeight;
   const chips=$('#chChips');if(chips)chips.innerHTML=CH.turns.length>6?'':CH_CHIPS.map(t=>'<button type="button">'+esc(t)+'</button>').join('');
@@ -5705,7 +5706,7 @@ async function chatSend(text){
       if(code==='not_granted'||code==='sampling_disabled')CH.dead=true;
       if(code==='images_unavailable')S.imgOK=false;
       if(images)CH.imgFor=null;
-      CH.turns.push({role:'assistant',content:msg,err:true});
+      CH.turns.push({role:'assistant',content:msg,err:true,det:aiErrDetail(e)});
     }
   }
   CH.busy=false;CH.ctl=null;chatRender();
@@ -5825,6 +5826,8 @@ async function genMnemonics(c,avoid){
   const arr=Array.isArray(r)?r:(r&&Array.isArray(r.hints)?r.hints:[]);
   return arr.map(x=>String(x==null?'':x).replace(/^\s*\d+[).]\s*/,'').replace(/^["«»“”„\s]+|["«»“”„\s]+$/g,'').replace(/\s+/g,' ').trim()).filter(x=>x&&x.length<=240).slice(0,3);
 }
+/* the reason of a failed AI request as the function gave it (code: message), shown small under the error text: without it a broken setup looks the same as a passing hiccup */
+function aiErrDetail(e){if(!e||!e.code||e.code==='cancelled')return '';const m=String(e.message||'').replace(/\s+/g,' ').trim().slice(0,160);return String(e.code).slice(0,40)+(m?': '+m:'');}
 function mnemonicErr(e){const c=e&&e.code;return c==='quota_exceeded'?'Лимит ИИ на сегодня исчерпан — он обновится завтра.':c==='not_granted'||c==='sampling_disabled'?'Доступ к Claude для этой страницы не разрешён.':c==='rate_limited'?'Слишком много запросов — попробуйте через минуту.':'Не получилось придумать подсказку — попробуйте ещё раз.';}
 function hintDialog(c,o){
   const term=isText(c)?c.front:c.term;const canAI=!!S.sample&&!!term;const shown=[];
@@ -5841,7 +5844,7 @@ function hintDialog(c,o){
         if(vs.length){shown.push(...vs);box.innerHTML=vs.map((t,i)=>'<button type="button" class="hvar" data-i="'+i+'">'+esc(t)+'</button>').join('');
           $$('.hvar',box).forEach(b=>b.onclick=()=>{inp.value=vs[+b.dataset.i];$$('.hvar',box).forEach(x=>x.classList.toggle('on',x===b));});
           lab.textContent='Ещё варианты';}else lab.textContent='Придумать с Claude';}
-      catch(e){toast(mnemonicErr(e));lab.textContent=shown.length?'Ещё варианты':'Придумать с Claude';}
+      catch(e){const d=aiErrDetail(e);toast(tr(mnemonicErr(e))+(d?' ('+d+')':''),d?6000:3000);lab.textContent=shown.length?'Ещё варианты':'Придумать с Claude';}
       ai.disabled=false;};
     $$('[data-s]',ov).forEach(b=>b.onclick=()=>dismissOverlay(b.dataset.s==='1'?(inp.value.replace(/\s+/g,' ').trim()||null):null));
   });
@@ -5851,7 +5854,7 @@ async function edHintAI(btn){
   const setB=on=>{const b=$('[data-act=edHintAI]');if(b){b.disabled=on;b.classList.toggle('wait',on);}};
   while(true){
     setB(true);
-    let vs=null;try{vs=await genMnemonics(c,shown.concat(c.hint?[c.hint]:[]));}catch(e){toast(mnemonicErr(e));}
+    let vs=null;try{vs=await genMnemonics(c,shown.concat(c.hint?[c.hint]:[]));}catch(e){const d=aiErrDetail(e);toast(tr(mnemonicErr(e))+(d?' ('+d+')':''),d?6000:3000);}
     setB(false);if(!vs||!vs.length||!cardById(c.id))return;shown.push(...vs);
     const v=await actionSheet('Выберите подсказку',vs.map((t,i)=>({v:'h'+i,icon:'spark',label:t,raw:1})).concat([{v:'more',icon:'rotate',label:'Ещё варианты'}]));
     if(v==='more')continue;
@@ -6722,7 +6725,7 @@ if(window.__TEST__){
   window.platesOf=platesOf;window.cardsOfDeck=cardsOfDeck;window.cardsOfPlate=cardsOfPlate;
   window.plateExcluded=plateExcluded;window.cardExcluded=cardExcluded;window.weakness=weakness;window.weakOrder=weakOrder;
   window.schedule=schedule;window.deckCounts=deckCounts;window.sessCounts=sessCounts;
-  window.crT=crT;window.crSrcLang=crSrcLang;window.crGuessLang=crGuessLang;window.crTrClean=crTrClean;window.crKind=crKind;window.crSrcName=crSrcName;window.CR_TRERR=CR_TRERR;window.CR_TRQ=CR_TRQ;window.crNoteOf=crNoteOf;window.crTrFits=crTrFits;window.crTrAccept=crTrAccept;window.crTrReq=crTrReq;window.crTrParts=crTrParts;window.crTrChunks=crTrChunks;window.crTrMissing=crTrMissing;window.crBytes=crBytes;window.crMask=crMask;window.crHas=crHas;window.crNoteT=crNoteT;window.crNeedTr=crNeedTr;window.__crAuto=n=>{CR_TR_AUTO_N=n;};window.crTrPrompt=crTrPrompt;window.crTranslate=crTranslate;window.crTrBackground=crTrBackground;Object.defineProperty(window,'CR_TASK_OFF',{get:()=>CR_TASK_OFF,set:v=>{CR_TASK_OFF=v;}});window.__crTranslate=f=>{if(f){window.__crTrOrig=window.__crTrOrig||crTranslate;crTranslate=f;}else if(window.__crTrOrig){crTranslate=window.__crTrOrig;}};
+  window.chatSend=chatSend;window.aiErrDetail=aiErrDetail;Object.defineProperty(window,'CH',{get:()=>CH});window.crT=crT;window.crSrcLang=crSrcLang;window.crGuessLang=crGuessLang;window.crTrClean=crTrClean;window.crKind=crKind;window.crSrcName=crSrcName;window.CR_TRERR=CR_TRERR;window.CR_TRQ=CR_TRQ;window.crNoteOf=crNoteOf;window.crTrFits=crTrFits;window.crTrAccept=crTrAccept;window.crTrReq=crTrReq;window.crTrParts=crTrParts;window.crTrChunks=crTrChunks;window.crTrMissing=crTrMissing;window.crBytes=crBytes;window.crMask=crMask;window.crHas=crHas;window.crNoteT=crNoteT;window.crNeedTr=crNeedTr;window.__crAuto=n=>{CR_TR_AUTO_N=n;};window.crTrPrompt=crTrPrompt;window.crTranslate=crTranslate;window.crTrBackground=crTrBackground;Object.defineProperty(window,'CR_TASK_OFF',{get:()=>CR_TASK_OFF,set:v=>{CR_TASK_OFF=v;}});window.__crTranslate=f=>{if(f){window.__crTrOrig=window.__crTrOrig||crTranslate;crTranslate=f;}else if(window.__crTrOrig){crTranslate=window.__crTrOrig;}};
   window.cramMenu=cramMenu;window.cramMenuFolder=cramMenuFolder;window.pickPlates=pickPlates;window.plateMenu=plateMenu;window.dismissOverlay=dismissOverlay;
   window.applyLook=applyLook;window.ocrWorker=ocrWorker;window.ocrClean=ocrClean;window.edAuto=edAuto;window.edOCR=edOCR;window.createCard=createCard;window.parsePairs=parsePairs;window.STG=STG;window.loadImage=loadImage;window.toCanvas=toCanvas;window.rotateCanvas=rotateCanvas;window.__setCR=o=>{CR=o;};window.plateUrl=plateUrl;window.deckCounts=deckCounts;window.createArrow=createArrow;window.setArrow=setArrow;window.autoTail=autoTail;window.isArrow=isArrow;window.studyMasks=studyMasks;window.edMasks=edMasks;window.cropApply=cropApply;window.openPractice=openPractice;window.edDelete=edDelete;window.edUndo=edUndo;window.setupCard=setupCard;window.META=META;window.scheduleFSRS=scheduleFSRS;window.scheduleSM2=scheduleSM2;window.fState=fState;window.fIvl=fIvl;window.fR=fR;window.fMem=fMem;window.fForgetS=fForgetS;window.fRecallS=fRecallS;window.fShortS=fShortS;window.fNextD=fNextD;window.fInitD=fInitD;window.fInitS=fInitS;window.retrievability=retrievability;window.importFile=importFile;window.addNote=addNote;window.notesOfDeck=notesOfDeck;window.tImport=tImport;window.tEdit=tEdit;window.aOf=aOf;window.qOf=qOf;window.setupCard=setupCard;window.distractors=distractors;window.buildExport=buildExport;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.startGlobalStudy=startGlobalStudy;window.globalCounts=globalCounts;window.folderCounts=folderCounts;
   Object.defineProperty(window,'RATING',{get:()=>RATING});

@@ -4108,7 +4108,7 @@ function cnDraftOk(o,id){
     m.kind=['pdf','img','text'].indexOf(m.kind)>=0?m.kind:'text';if(CN_ROLES.indexOf(m.role)<0)m.role=m.kind==='img'?'pics':'extra';
     if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';
     m.lang=cnLangOk(m.lang);if(!m.lang)delete m.lang;m.chunks=cnStrs(m.chunks);if(typeof m.qdoc!=='string')delete m.qdoc;
-    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);
+    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.slp!==undefined)m.slp=typeof m.slp==='string'&&/^[01\-]*$/.test(m.slp)?m.slp.slice(0,CN_LIM.pages):'';if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);
     return m;});
   return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,planAt:Math.max(0,+o.planAt||0),bldAt:Math.max(0,+o.bldAt||0),courseId:typeof o.courseId==='string'&&o.courseId.length<80?o.courseId:'',lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
 }
@@ -4174,7 +4174,7 @@ async function cnPush(d){
 }
 const cnQuotaText=()=>T3('Не сохранено в облаке — освободите место (удалите ненужные фото или черновики).','Not saved in the cloud: free some space (delete photos or drafts you do not need).','Pilve ei salvestatud – vabasta ruumi (kustuta mittevajalikud fotod või mustandid).');
 const cnDelIds=ids=>{if(S.db)ids.forEach(id=>enq('ctext/'+id,{coll:'ctext',id:id,op:'del'}));};
-const cnMatIds=m=>(m.chunks||[]).concat(m.qdoc?[m.qdoc]:[],(m.lab||[]).filter(x=>x&&x!=='-'));
+const cnMatIds=(m,did)=>(m.chunks||[]).concat(m.qdoc?[m.qdoc]:[],(m.lab||[]).filter(x=>x&&x!=='-'),did?String(m.slp||'').split('').map((c,i)=>c==='1'?did+'.'+m.id+'.s'+(i+1):'').filter(Boolean):[]);
 const cnBytes=d=>d.mats.reduce((a,m)=>a+(+m.bytes||0),0);
 const cnAllBytes=()=>Array.from(CDRAFTS.values()).reduce((a,d)=>a+cnBytes(d),0);
 /* ---- originals on this device. Any failure (no IndexedDB in a private window, no room) is not an error: the text is in the cloud anyway ---- */
@@ -4214,11 +4214,13 @@ function cnTO(p,task){
 /* The text of one page. Lines are put together by y (items within half a letter height are one line, left to right; a gap wider than ~0.15 of the height is a space).
    em — what stands out: a bold font (the name of the font is known only after the operator list is read: commonObjs) or letters taller than 1.3 × the median of the page. Two columns are read as one: this is a heuristic.
    At most 50 000 text items of a page are taken. */
-async function cnPageText(pg,task){
+async function cnPageText(pg,task,lib){
   const tc=await cnTO(pg.getTextContent(),task);
   const its=tc.items.filter(i=>typeof i.str==='string'&&i.str.trim()&&i.transform).slice(0,CN_LIM.items);
-  if(!its.length)return {text:'',em:[]};
-  try{await cnTO(pg.getOperatorList(),task);}catch(e){if(e&&e.code==='timeout')throw e;}
+  let ol=null;try{ol=await cnTO(pg.getOperatorList(),task);}catch(e){if(e&&e.code==='timeout')throw e;}
+  /* big pictures of the page (a slide with a drawing) — for the kind of the page, see cnSlideInfo */
+  let vp=null,imgs=[];try{vp=pg.getViewport({scale:1});if(ol&&lib&&lib.OPS)imgs=cnPageImages(ol,lib.OPS,vp);}catch(e){}
+  if(!its.length)return {text:'',em:[],sl:imgs.length?{ty:'fig',head:'',ni:imgs.length,ar:vp?r2(vp.width/vp.height):1.5,c:[]}:null};
   const bold={},isBold=fn=>{if(fn in bold)return bold[fn];let b=false;try{const f=pg.commonObjs.get(fn);b=/bold|black|heavy|demi/i.test((f&&f.name)||'')||!!(f&&f.bold);}catch(e){}return bold[fn]=b;};
   const hs=its.map(i=>i.height||Math.abs(i.transform[3])||0).filter(h=>h>0).sort((a,b)=>a-b),med=hs.length?hs[hs.length>>1]:0;
   const A=its.map(i=>{const h=i.height||Math.abs(i.transform[3])||med||10;return {s:i.str,x:i.transform[4],y:i.transform[5],w:i.width||0,h:h,em:isBold(i.fontName)||(med>0&&h>med*1.3)};}).sort((a,b)=>b.y-a.y);
@@ -4238,7 +4240,43 @@ async function cnPageText(pg,task){
     if(run)endRun();
     out.push(s.replace(/\s+/g,' ').trim());
   });
-  return {text:out.filter(Boolean).join('\n'),em:em};
+  let sl=null;try{sl=cnSlideInfo(lines,vp,imgs);}catch(e){}
+  return {text:out.filter(Boolean).join('\n'),em:em,sl:sl};
+}
+/* The kind of a slide (T-031). fig: the page has a big picture; its short standalone pieces of text (the captions of the text layer; a line is cut into pieces where the gap is wide) are {t,x,y,w,h} in percent
+   and the biggest line at the top is the head (not a caption). list: no picture and at least 5 short Latin lines: the lines with the indent (x) and bold — they tell the importance of the structures.
+   Anything else is a slide of no use for a course: null. */
+function cnSlideInfo(lines,vp,imgs){
+  if(!vp||!lines.length)return null;
+  const W=vp.width,H=vp.height,ni=(imgs||[]).length;
+  const frac=l=>{try{return vp.convertToViewportPoint(l.its[0].x,l.y)[1]/H;}catch(e){return 1;}};
+  const join=a=>{let t='';a.forEach((it,k)=>{const prev=a[k-1],gap=prev?it.x-(prev.x+prev.w)>0.15*Math.min(it.h,prev.h):false;t+=(prev&&(gap||/\s$/.test(prev.s)||/^\s/.test(it.s))?' ':'')+it.s;});return t.replace(/\s+/g,' ').trim();};
+  const rect=a=>{const x0=Math.min(...a.map(i=>i.x)),x1=Math.max(...a.map(i=>i.x+i.w)),y0=Math.min(...a.map(i=>i.y-0.22*i.h)),y1=Math.max(...a.map(i=>i.y+0.85*i.h)),r=vp.convertToViewportRectangle([x0,y0,x1,y1]);
+    const ax=Math.min(r[0],r[2]),bx=Math.max(r[0],r[2]),ay=Math.min(r[1],r[3]),by=Math.max(r[1],r[3]),pd=0.4,x=Math.max(0,ax/W*100-pd),y=Math.max(0,ay/H*100-pd);
+    return {x:r2(x),y:r2(y),w:r2(Math.max(0.3,Math.min(100-x,(bx-ax)/W*100+2*pd))),h:r2(Math.max(0.3,Math.min(100-y,(by-ay)/H*100+2*pd)))};};
+  const hs=lines.map(l=>l.h).sort((a,b)=>a-b),med=hs[hs.length>>1]||10;
+  let hi=-1,hh=0;
+  lines.forEach((l,i)=>{if(frac(l)<0.3&&l.h>=med*1.15&&l.h>hh&&join(l.its).length<=80){hh=l.h;hi=i;}});
+  const head=hi>=0?join(lines[hi].its).slice(0,100):'';
+  const segs=[];
+  lines.forEach((l,li)=>{if(li===hi)return;let cur=[];const flush=()=>{if(cur.length)segs.push(cur);cur=[];};
+    l.its.forEach(it=>{const prev=cur[cur.length-1];if(prev&&it.x-(prev.x+prev.w)>2.2*Math.min(it.h,prev.h))flush();cur.push(it);});flush();});
+  const caps=segs.map(a=>({t:join(a),r:a})).filter(c=>c.t.length>=2&&c.t.length<=60);
+  if(ni>0)return {ty:'fig',head:head,ni:ni,ar:r2(W/H),c:caps.slice(0,120).map(c=>Object.assign({t:c.t},rect(c.r)))};
+  if(caps.filter(c=>cnLatin(c.t)).length>=5){
+    const ls=lines.map((l,i)=>({t:join(l.its).slice(0,120),x:Math.round(l.its[0].x),b:l.its.every(it=>it.em)||i===hi?1:0})).filter(x=>x.t).slice(0,80);
+    return {ty:'list',head:head,ni:0,ls:ls};
+  }
+  return null;
+}
+/* a page record from the cloud */
+function cnSlOk(o){
+  if(!o||typeof o!=='object')return null;
+  const ty=o.ty==='fig'||o.ty==='list'?o.ty:'';if(!ty)return null;
+  const s=(v,n)=>typeof v==='string'?v.slice(0,n):'',num=v=>Number.isFinite(+v)?+v:0,r={ty:ty,head:s(o.head,100),ni:Math.max(0,Math.min(99,Math.round(+o.ni||0))),ar:Number.isFinite(+o.ar)&&+o.ar>0.2&&+o.ar<5?+o.ar:1.5};
+  if(ty==='fig')r.c=(Array.isArray(o.c)?o.c:[]).slice(0,120).map(x=>x&&typeof x.t==='string'?{t:x.t.slice(0,80),x:num(x.x),y:num(x.y),w:num(x.w),h:num(x.h)}:null).filter(Boolean);
+  else r.ls=(Array.isArray(o.ls)?o.ls:[]).slice(0,80).map(x=>x&&typeof x.t==='string'?{t:x.t.slice(0,120),x:Math.round(num(x.x)),b:x.b?1:0}:null).filter(Boolean);
+  return r;
 }
 /* Exam questions from the lines of the text (heuristic). A question starts with «1.» / «1)» (the number, then a space or the end of the line) or with «küsimus 1» / «question 1» / «вопрос 1»
    (also «küsimus nr 1:», «Вопрос №1.»). Numbers must follow each other: 1, 2, 3 …, a restart at 1, or a gap of up to two (a lost number) — so «2.5 mm» or a stray «7.» in a lecture do not count.
@@ -4260,8 +4298,8 @@ function cnSink(d,m){
   const enc=new TextEncoder(),ids=[];let cur=[],bytes=0,ci=0,chars=0,tb=0,sample='',lines=[];
   const pre=m.gen?'g'+m.gen+'_':'',flush=async()=>{if(!cur.length)return;const id=d.id+'.'+m.id+'.'+pre+(ci++),data={pages:cur};cur=[];bytes=0;if(S.db)await cnWrite('ctext',id,data);ids.push(id);m.chunks=ids.slice();};
   return {
-    async add(n,text,em){
-      text=String(text).slice(0,CN_LIM.pageChars);const pg={n:n,text:text,em:em||[]},b=enc.encode(JSON.stringify(pg)).length;
+    async add(n,text,em,sl){
+      text=String(text).slice(0,CN_LIM.pageChars);const pg={n:n,text:text,em:em||[]};if(sl)pg.sl=sl;const b=enc.encode(JSON.stringify(pg)).length;
       if(cur.length&&bytes+b>CN_LIM.chunk)await flush();
       cur.push(pg);bytes+=b;chars+=text.length;tb+=enc.encode(text).length;m.bytes=tb;
       if(sample.length<8000)sample+=text+'\n';
@@ -4287,7 +4325,7 @@ async function cnRead(d,m,file,retry){
   if(t.dead)return;
   let sink=null,doc=null;
   try{
-    if(retry){cnDelIds(cnMatIds(m));m.gen=(m.gen||0)+1;m.chunks=[];delete m.qdoc;delete m.qn;m.bytes=0;m.chars=0;t.local=true;}
+    if(retry){cnDelIds(cnMatIds(m,d.id));delete m.slp;m.gen=(m.gen||0)+1;m.chunks=[];delete m.qdoc;delete m.qn;m.bytes=0;m.chars=0;t.local=true;}
     else{
       const ok=await cnPut(cnKey(d.id,m.id),file);
       if(t.dead){cnDelBlobs(d.id,m.id);return;}
@@ -4297,7 +4335,7 @@ async function cnRead(d,m,file,retry){
     if(m.kind==='pdf'){
       let lib;try{lib=await cnTO(cnPdfLib());}catch(e){throw {code:'lib'};}
       let buf;try{buf=new Uint8Array(await cnTO(file.arrayBuffer()));}catch(e){throw {code:'broken'};}
-      const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,maxImageSize:1});t.task=task;
+      const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false});t.task=task;
       try{doc=await cnTO(task.promise,task);}
       catch(e){throw {code:e&&e.code==='timeout'?'timeout':e&&e.name==='PasswordException'?'encrypted':'broken'};}
       if(t.dead){return;}
@@ -4305,7 +4343,7 @@ async function cnRead(d,m,file,retry){
       m.pages=doc.numPages;t.total=doc.numPages;t.prog=0;cnPaint();
       for(let i=1;i<=doc.numPages;i++){
         if(t.dead){sink.drop();return;}
-        try{const pg=await cnTO(doc.getPage(i),task),r=await cnPageText(pg,task);pg.cleanup();await sink.add(i,r.text,r.em);}
+        try{const pg=await cnTO(doc.getPage(i),task),r=await cnPageText(pg,task,lib);pg.cleanup();await sink.add(i,r.text,r.em,r.sl);}
         catch(e){if(e&&e.code)throw e;throw {code:'broken'};}
         t.prog=i;cnPaint();
       }
@@ -4387,7 +4425,7 @@ function cnAddPhotos(d,files,cam){
 }
 function cnDropMat(d,m){
   const t=cnT(d.id,m.id);t.dead=true;if(t.task)try{t.task.destroy();}catch(e){}
-  cnDelBlobs(d.id,m.id);cnDelIds(cnMatIds(m).concat(m.kind==='img'?Array.from({length:m.photos||0},(_,i)=>d.id+'.'+m.id+'.l'+i):[]));   // подписи фото: id известны и по номеру
+  cnDelBlobs(d.id,m.id);cnDelIds(cnMatIds(m,d.id).concat(m.kind==='img'?Array.from({length:m.photos||0},(_,i)=>d.id+'.'+m.id+'.l'+i):[]));   // подписи фото: id известны и по номеру
 }
 function cnRemoveMat(d,m){
   d.mats=d.mats.filter(x=>x!==m);if(d._dirty)d._dirty.delete(m.id);d.gone.push(m.id);d.gone=d.gone.slice(-200);cnDropMat(d,m);cnSave(d);cnPaint();
@@ -4603,7 +4641,7 @@ async function cnPagesOf(m){
   const out=[];
   for(const id of m.chunks||[]){
     const o=await cnDocData('ctext',id);
-    (o&&Array.isArray(o.pages)?o.pages:[]).forEach(p=>{if(p&&Number.isFinite(+p.n)&&typeof p.text==='string')out.push({n:+p.n,text:p.text,em:(Array.isArray(p.em)?p.em:[]).filter(x=>typeof x==='string').map(x=>x.slice(0,200)).slice(0,60)});});
+    (o&&Array.isArray(o.pages)?o.pages:[]).forEach(p=>{if(p&&Number.isFinite(+p.n)&&typeof p.text==='string')out.push({n:+p.n,text:p.text,em:(Array.isArray(p.em)?p.em:[]).filter(x=>typeof x==='string').map(x=>x.slice(0,200)).slice(0,60),sl:cnSlOk(p.sl)});});
   }
   return out;
 }
@@ -4611,23 +4649,32 @@ async function cnQsOf(m){const o=m.qdoc?await cnDocData('ctext',m.qdoc):null;ret
 /* ---- запуск, остановка ---- */
 function cnRunStart(d){
   const old=d._run;if(old&&old.state==='run')return old;
-  const r={d:d,cancel:false,ac:new AbortController(),i:0,dt:{},err:null,spent:0,est:cnEst(d),state:'run',labs:new Map(),topics:[],cache:old&&old.state!=='done'?old.cache:{outl:new Map(),plan:null}};   // ответы ИИ переживают «Повторить», отмену и возврат к материалам, но не «Пересоставить»
+  const r={d:d,cancel:false,ac:new AbortController(),i:0,dt:{},err:null,spent:0,est:cnEst(d),state:'run',labs:new Map(),topics:[],pages:new Map(),pdf:new Map(),sm:null,cache:old&&old.state!=='done'?old.cache:{outl:new Map(),plan:null}};   // ответы ИИ переживают «Повторить», отмену и возврат к материалам, но не «Пересоставить»
   d._run=r;cnRun(d,r);return r;
 }
 function cnRunStop(d){const r=d&&d._run;if(r&&r.state==='run'){r.cancel=true;r.state='stop';try{r.ac.abort();}catch(e){}}}
 async function cnRun(d,r){
   try{
     await cnStepLabels(d,r);if(r.cancel)return;
-    const src=await cnStepOutline(d,r);if(r.cancel)return;
-    const qs=await cnStepExam(d,r);if(r.cancel)return;
-    const T=await cnStepTerms(d,r,src,qs);if(r.cancel)return;
+    await cnStepSlideOcr(d,r);if(r.cancel)return;
+    const sm=await cnSlideDetect(d,r);if(r.cancel)return;
+    let T;
+    if(sm){   // слайды с рисунками: уроки — страницы-рисунки, ИИ только группирует их (T-031)
+      r.sm=sm;r.est=5;r.i=1;r.dt.out={k:0,n:0,topics:0,sl:sm.cands.length,ls:sm.lists.length};cnRPaint();
+      const qs=await cnStepExam(d,r);if(r.cancel)return;
+      T=await cnStepSlideTerms(d,r,sm,qs);if(r.cancel)return;
+    }else{
+      const src=await cnStepOutline(d,r);if(r.cancel)return;
+      const qs=await cnStepExam(d,r);if(r.cancel)return;
+      T=await cnStepTerms(d,r,src,qs);if(r.cancel)return;
+    }
     await cnStepPlan(d,r,T);if(r.cancel)return;
     r.state='done';r.i=5;cnRPaint();
     if(view.name==='courseNew'&&view.did===d.id&&view.step===2)go({name:'courseNew',did:d.id,step:3});
   }catch(e){
     if(r.cancel)return;
     r.state='err';r.err=cnRunErr(e);cnRPaint();
-  }
+  }finally{cnBldFree(r);}
 }
 function cnRunErr(e){
   const c=e&&e.code;
@@ -4644,7 +4691,7 @@ function cnRunErr(e){
 async function cnOcrLabels(img,hook){
   const det=detectLabels(img,img.naturalWidth,img.naturalHeight,{merge:false});
   let w;try{w=await ocrWorker();}catch(e){throw {code:'ocr'};}
-  const bs=det.boxes.slice().sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,150),got=[],out=[],seen=new Set();let ok=false;
+  const bs=det.boxes.filter(b=>!(hook.skip&&hook.skip(b))).sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,150),got=[],out=[],seen=new Set();let ok=false;
   hook.step(0,bs.length);
   for(let k=0;k<bs.length;k++){
     if(hook.stop())break;
@@ -4890,8 +4937,8 @@ async function cnStepPlan(d,r,T){
   }
   if(r.cancel)return;
   let doc=null;
-  if(!fb){try{doc=cnPlanBuild(raw,T);}catch(e){if(e&&e.code==='invalid_json'){fb=true;r.cache.plan=null;}else throw e;}}
-  if(fb){doc=cnPlanBuild(cnFallbackRaw(T.inp),T,true);doc.fallback=true;}
+  if(!fb){try{doc=T.sm?cnSlidePlanBuild(raw,T):cnPlanBuild(raw,T);}catch(e){if(e&&e.code==='invalid_json'){fb=true;r.cache.plan=null;}else throw e;}}
+  if(fb){doc=T.sm?cnSlidePlanBuild({parts:[{name:T3('Уроки','Lessons','Õppetunnid'),lessons:T.sm.cands.map(c=>({cand:c.id,title:''}))}]},T,true):cnPlanBuild(cnFallbackRaw(T.inp),T,true);doc.fallback=true;}
   doc.fp=cnFp(d);
   if(JSON.stringify(doc).length>CN_PL.doc)throw {code:'limit'};
   await cnWrite('cplan',d.id,doc);
@@ -4900,6 +4947,176 @@ async function cnStepPlan(d,r,T){
   d._plan=doc;d._planErr='';d.planAt=doc.at;
   if(d.bldAt||d.courseId){d.bldAt=0;d.courseId='';d._bld=null;d._bldDirty=(d._bldDirty||0)+1;}   // the course that was built stays as it is; the next build makes a new one
   cnSave(d);
+}
+/* ================= слайды с рисунками (T-031) =================
+   Страница PDF бывает рисунком (fig: большая картинка, подписи — короткие куски текста слоя), списком (list) или ничем; тип и подписи текстового слоя записаны при чтении в page.sl.
+   Подписи, которые есть только в растре, читает OCR на отрисовке страницы ~2400 px (шаг 2, ctext/<черновик>.<материал>.s<стр>, пометка m.slp: '1' нашли, '-' искали, '0' ещё нет).
+   Режим слайдов: страниц с картинкой ≥ 3, и у двух из них ≥ 3 подписей. Урок = страница-рисунок, структуры = её подписи, рамки = их боксы; важность — по слайдам-спискам
+   (жирное или первый уровень без жирного → P1, пункт → P2), вопросам экзамена (P1) и тексту других страниц (P2); только подпись → P3. ИИ plan группирует уроки и называет их. */
+const cnSlId=(d,m,n)=>d.id+'.'+m.id+'.s'+n;
+const cnPdfMats=d=>d.mats.filter(m=>m.kind==='pdf'&&m.role!=='exam'&&m.status==='ready'&&(m.chunks||[]).length);
+async function cnSlPages(d,r,m){let a=r.pages.get(m.id);if(!a){a=await cnPagesOf(m);r.pages.set(m.id,a);}return a;}
+const cnInBox=(b,c)=>{const x=b.x+b.w/2,y=b.y+b.h/2;return x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h;};
+/* the captions printed in the picture of a page: the page is drawn at ~2400 px and read like a photo; what the text layer already named is not read again */
+async function cnPageOcr(d,m,p,r){
+  const o=await cnBldOpenPdf(d,r,m);
+  let pg;try{pg=await cnTO(o.doc.getPage(p.n),o.task);}catch(e){throw {code:'pic'};}
+  const cv=document.createElement('canvas');
+  try{
+    const v1=pg.getViewport({scale:1}),sc=Math.min(4,2400/Math.max(v1.width,v1.height,1)),vp=pg.getViewport({scale:sc});
+    cv.width=Math.max(1,Math.round(vp.width));cv.height=Math.max(1,Math.round(vp.height));
+    const cx=cv.getContext('2d',{willReadFrequently:true});cx.fillStyle='#fff';cx.fillRect(0,0,cv.width,cv.height);
+    try{await cnTO(pg.render({canvasContext:cx,viewport:vp}).promise);}catch(e){throw {code:'pic'};}
+    cv.naturalWidth=cv.width;cv.naturalHeight=cv.height;
+    const known=(p.sl&&p.sl.c)||[],L=r.dt.lab;
+    return await cnOcrLabels(cv,{stop:()=>r.cancel,step:(k,n)=>{L.bn=n;L.bk=k;if(k)cnRPaint();},skip:b=>known.some(c=>cnInBox(b,c))});
+  }finally{try{pg.cleanup();}catch(e){}cv.width=cv.height=0;}
+}
+async function cnStepSlideOcr(d,r){
+  const L=r.dt.lab;if(!L)return;L.pn=0;L.pk=0;L.pskip=0;
+  const todo=[];let nfig=0;
+  for(const m of cnPdfMats(d)){
+    const pgs=await cnSlPages(d,r,m);if(r.cancel)return;
+    m.slp=String(m.slp||'').padEnd(m.pages||0,'0').slice(0,m.pages||0);
+    pgs.forEach(p=>{if(p.sl&&p.sl.ty==='fig'){nfig++;if(m.slp[p.n-1]==='0')todo.push({m:m,p:p});}});
+  }
+  if(nfig<3)return;   // not a deck of slides: the pictures are not read
+  todo.splice(80);L.pn=todo.length;cnRPaint();
+  let touched=false;
+  try{
+    for(const j of todo){
+      if(r.cancel)return;
+      L.pk++;L.bn=0;cnRPaint();
+      if(L.ocr){L.pskip++;continue;}
+      let res;try{res=await cnPageOcr(d,j.m,j.p,r);}catch(e){res=undefined;if(e&&e.code==='ocr')L.ocr=true;}
+      if(r.cancel)return;
+      if(!res){L.pskip++;continue;}
+      const ch=c=>{j.m.slp=j.m.slp.slice(0,j.p.n-1)+c+j.m.slp.slice(j.p.n);touched=true;};
+      if(res.out.length){await cnWrite('ctext',cnSlId(d,j.m,j.p.n),{n:j.p.n,labels:res.out});ch('1');}
+      else if(res.ok)ch('-');
+      cnDirty(d,j.m);
+    }
+  }finally{if(touched||todo.length){todo.forEach(j=>cnDirty(d,j.m));cnSave(d);}}
+  cnRPaint();
+}
+/* A caption of two lines is one name («Processus» / «zygomaticus»): a line that starts with a lower-case letter, or a line that follows a single noun that needs its pair («Processus», «Ala», a hyphen),
+   is joined to the line above it when the gap is at most 1.2 of the height and the left edges or the centres are within one height (as the editor does, ocrMergeLines); the frame is the union. ar = width / height of the page */
+function cnMergeLabels(labs,ar){
+  const L=labs.map(x=>Object.assign({},x));let ch=true;
+  const dangling=t=>/-$/.test(t)||(!/\s/.test(t)&&cnWeak(cnNorm(t)));
+  while(ch){ch=false;
+    for(let bi=0;bi<L.length&&!ch;bi++){
+      const B=L[bi];let best=null,bd=Infinity;
+      for(const A of L){
+        if(A===B)continue;
+        const h=Math.min(A.h,B.h),vg=B.y-(A.y+A.h);
+        if(vg<-0.8*h||vg>1.2*h||B.y<A.y+A.h*0.5)continue;
+        if(!(/^[a-zäöõü]/.test(B.t)||dangling(A.t)))continue;
+        const lx=h/ar,al=Math.min(Math.abs(A.x-B.x),Math.abs(A.x+A.w/2-(B.x+B.w/2)));
+        if(al>lx||Math.min(A.x+A.w,B.x+B.w)-Math.max(A.x,B.x)<=0)continue;
+        if(vg<bd){bd=vg;best=A;}
+      }
+      if(!best)continue;
+      const A=best,x0=Math.min(A.x,B.x),y0=Math.min(A.y,B.y),x1=Math.max(A.x+A.w,B.x+B.w),y1=Math.max(A.y+A.h,B.y+B.h);
+      Object.assign(A,{x:r2(x0),y:r2(y0),w:r2(x1-x0),h:r2(y1-y0),t:/-$/.test(A.t)?A.t.slice(0,-1)+B.t:A.t+' '+B.t,ocr:!!(A.ocr||B.ocr)});
+      L.splice(bi,1);ch=true;
+    }
+  }
+  return L;
+}
+/* German words of a caption (the atlases come from German books) are cut out: «Sonde im Canalis hypoglossalis» → «Canalis hypoglossalis»; no Latin name left — no caption */
+const CN_DE=new Set('mit der die das des dem den im und von zum zur ein eine rest sonde zweigeteilt innere inneres äußere öffnung'.split(' '));
+const cnDeCut=t=>String(t).split(/\s+/).filter(w=>!CN_DE.has(w.toLowerCase().replace(/[^a-zäöüß]/g,''))).join(' ');
+/* the captions of a page → structures: merged lines, German words cut out, Latin names only, no duplicates; a single word that is a part of a longer caption of the page, a single word without a capital
+   and a single common noun («Processus», «Facies») are dropped */
+function cnSlideTerms(raw,ar){
+  const seen=new Set(),all=[];
+  cnMergeLabels(raw,ar).forEach(c=>{const t=cnLatin(cnDeCut(c.t)),k=cnNorm(t);if(!t||k.length<2||seen.has(k))return;seen.add(k);all.push({la:t,k:k,bx:[c.x,c.y,c.w,c.h],ocr:!!c.ocr});});
+  const parts=new Set();all.forEach(t=>{if(/\s/.test(t.k))t.k.split(' ').forEach(w=>parts.add(w));});
+  return all.filter(t=>/\s/.test(t.k)||(/^[A-Z]/.test(t.la)&&!parts.has(t.k)&&!cnWeak(t.k)));
+}
+/* the pages that are lessons and the pages that are lists → {cands, lists} or null (the old way) */
+async function cnSlideDetect(d,r){
+  const cands=[],lists=[];let nfig=0,nlab=0;
+  for(const m of cnPdfMats(d)){
+    const pgs=await cnSlPages(d,r,m),sp=String(m.slp||'');
+    for(const p of pgs){
+      if(!p.sl)continue;
+      if(p.sl.ty==='list'){lists.push({m:m,p:p});continue;}
+      nfig++;
+      let raw=(p.sl.c||[]).map(c=>Object.assign({},c,{ocr:false}));
+      if(sp[p.n-1]==='1'){
+        const o=await cnDocData('ctext',cnSlId(d,m,p.n));if(r.cancel)return null;
+        raw=raw.concat((o&&Array.isArray(o.labels)?o.labels:[]).filter(x=>x&&typeof x.t==='string'&&[x.x,x.y,x.w,x.h].every(v=>Number.isFinite(+v))).map(x=>({t:x.t,x:+x.x,y:+x.y,w:+x.w,h:+x.h,ocr:true})));
+      }
+      const terms=cnSlideTerms(raw,p.sl.ar||1.5);
+      if(terms.length>=3){nlab++;cands.push({m:m,n:p.n,head:p.sl.head||'',terms:terms});}
+    }
+  }
+  return nfig>=3&&nlab>=2?{cands:cands,lists:lists,nfig:nfig}:null;
+}
+/* importance and the sources of the structures; the input of the plan */
+async function cnStepSlideTerms(d,r,sm,qs){
+  r.i=3;cnRPaint();
+  const entries=[];
+  sm.lists.forEach(({m,p})=>{
+    const ls=p.sl.ls||[],xs=Array.from(new Set(ls.map(l=>Math.round(l.x/6)))).sort((a,b)=>a-b),anyB=ls.some(l=>l.b);
+    ls.forEach(l=>{const strong=l.b||(!anyB&&Math.round(l.x/6)===xs[0]);
+      l.t.split(';').forEach(part=>{const k=cnStem(part);if(k)entries.push({k:k,h:' '+k+' ',p:strong?1:2,src:'l|'+cnNameOf(m.name)+'|'+p.n});});});
+  });
+  const other=[];
+  for(const m of cnTextMats(d)){(await cnSlPages(d,r,m)).forEach(p=>{if(!p.sl&&p.text)other.push({m:m,n:p.n,h:' '+cnStem(p.text)+' '});});if(r.cancel)return null;}
+  qs.forEach(q=>{q.hay=' '+cnStem(q.q)+' ';});
+  const cs=[];let k=0,cnt=[0,0,0,0],cut=0;
+  sm.cands.forEach((c,i)=>{
+    if(i>=CN_PL.lessons){cut+=c.terms.length;return;}
+    const terms=c.terms.slice(0,CN_PL.perLesson).map(t=>{
+      const key=' '+cnStem(t.la)+' ',weak=cnWeak(t.k);let best=null;
+      entries.forEach(e=>{if(e.k===cnStem(t.la)||(!weak&&e.h.indexOf(key)>=0)){if(!best||e.p<best.p)best=e;}});
+      let ex=null;if(!weak)for(const q of qs)if(q.hay.indexOf(key)>=0){ex=q;break;}
+      let tx=null;if(!weak&&!best&&!ex)for(const o of other)if(o.h.indexOf(key)>=0){tx=o;break;}
+      const p=ex?1:best?best.p:tx?2:3,ps=[];
+      if(best)ps.push(best.src);if(ex)ps.push('q|'+cnNameOf(ex.m.name)+'|'+ex.k);if(!ps.length)ps.push(tx?'t|'+cnNameOf(tx.m.name)+'|'+tx.n:'f');
+      cnt[p]++;
+      return {id:'t'+(++k),la:t.la,p:p,src:ps.join('~'),bx:t.bx,ocr:t.ocr};
+    });
+    cs.push({id:'c'+(i+1),m:c.m,n:c.n,head:c.head,terms:terms});
+  });
+  r.dt.terms={n:k,p1:cnt[1],p2:cnt[2],p3:cnt[3],dropped:cut};cnRPaint();
+  const inp={mode:'slides',name:(d.name||'Course').slice(0,300),
+    cands:cs.map(c=>({id:c.id,page:c.n,head:c.head.slice(0,200),terms:c.terms.map(t=>({id:t.id,la:t.la,p:t.p}))})),
+    lists:sm.lists.slice(0,60).map(({m,p})=>({page:p.n,head:(p.sl.head||'').slice(0,200),items:(p.sl.ls||[]).map(l=>l.t.slice(0,200)).slice(0,60)})),
+    exam:qs.slice(0,CN_PL.exam).map((q,i)=>({id:'q'+(i+1),q:q.q.slice(0,600)}))};
+  const fit=()=>JSON.stringify(inp).length<=CN_PL.planJson;
+  if(!fit())inp.exam.forEach(e=>{e.q=e.q.slice(0,120);});
+  if(!fit())inp.exam=[];
+  if(!fit())inp.lists.forEach(l=>{l.items=l.items.slice(0,20);});
+  if(!fit())inp.lists=[];
+  if(!fit())throw {code:'toolarge'};
+  return {inp:inp,sm:{cands:cs},cut:[]};
+}
+/* the answer of plan in the slides mode: {parts:[{name, lessons:[{cand, title}]}], drop:[term ids]}; known candidates only, each once; the rest goes to a tail part */
+function cnSlidePlanBuild(raw,T,soft){
+  if(!raw||!Array.isArray(raw.parts))throw {code:'invalid_json'};
+  const byC=new Map(T.sm.cands.map(c=>[c.id,c])),used=new Set(),drop=new Set((Array.isArray(raw.drop)?raw.drop:[]).filter(x=>typeof x==='string')),str=(v,n)=>typeof v==='string'?v.replace(/\s+/g,' ').trim().slice(0,n):'';
+  const lost=[];let li=0,pi=0;const parts=[];
+  const mk=(c,title)=>{
+    const ts=c.terms.filter(t=>{if(drop.has(t.id)){lost.push(t.la);return false;}return true;});
+    if(!ts.length||li>=CN_PL.lessons)return null;
+    return {id:'l'+(++li),title:str(title,80)||c.head.slice(0,80)||ts[0].la,pic:'g:'+c.m.id+':'+c.n,off:false,terms:ts.map(t=>{const o={id:t.id,la:t.la.slice(0,80),p:t.p,src:t.src.slice(0,200)};if(t.bx)o.bx=t.bx;return o;})};
+  };
+  raw.parts.slice(0,CN_PL.parts).forEach(p=>{
+    if(!p||!Array.isArray(p.lessons))return;
+    const ls=[];
+    p.lessons.forEach(l=>{const c=l&&typeof l.cand==='string'?byC.get(l.cand):null;if(!c||used.has(c.id))return;used.add(c.id);const x=mk(c,l.title);if(x)ls.push(x);});
+    if(ls.length)parts.push({id:'a'+(++pi),name:str(p.name,40)||T3('Часть ','Part ','Osa ')+(pi+1),lessons:ls});
+  });
+  const rest=T.sm.cands.filter(c=>!used.has(c.id)).map(c=>mk(c,'')).filter(Boolean);
+  if(rest.length)parts.push({id:'a'+(++pi),name:T3('Прочее','Other','Muu'),lessons:rest});
+  if(!parts.length&&!soft)throw {code:'invalid_json'};
+  const doc={at:Date.now(),lang:LANG,slides:true,parts:parts};
+  if(lost.length)doc.lost=lost.slice(0,300).map(x=>String(x).slice(0,80));
+  return doc;
 }
 /* ---- экран шага 2 ---- */
 const CN_MASC='<svg width="92" height="92" viewBox="0 0 120 120" aria-hidden="true" style="stroke:none"><path d="M60 8C92 8 108 30 106 56c-1 14-6 22-12 26v10c0 8-6 12-14 12H40c-8 0-14-4-14-12V82c-6-4-11-12-12-26C12 30 28 8 60 8z" style="fill:#F7EFE1;stroke:#2B2622;stroke-width:3.4;stroke-linejoin:round"/><circle cx="25" cy="74" r="6.5" style="fill:#F4A98A;opacity:.55"/><circle cx="95" cy="74" r="6.5" style="fill:#F4A98A;opacity:.55"/><path d="M60 70c-4 0-5 6 0 10 5-4 4-10 0-10z" style="fill:#2B2622"/><ellipse cx="42" cy="56" rx="13" ry="15" style="fill:#2B2622"/><circle cx="46.5" cy="50" r="4.5" style="fill:#fff"/><ellipse cx="78" cy="56" rx="13" ry="15" style="fill:#2B2622"/><circle cx="82.5" cy="50" r="4.5" style="fill:#fff"/><path d="M14 22L60 4l46 18-46 18z" style="fill:#2B2622"/><path d="M34 31v12c13 9 39 9 52 0V31" style="fill:#2B2622"/><path d="M106 22v22" style="stroke:#E8A13A;stroke-width:5;stroke-linecap:round"/></svg>';
@@ -4917,10 +5134,10 @@ function cnHeadHtml(d,on,title){
 function cnReadRows(r){
   const dt=r.dt,L=dt.lab,O=dt.out,E=dt.exam,TT=dt.terms,done=r.state==='done';
   const det=[
-    !L?'':L.photos===0?T3('Фото не добавлены','No photos added','Fotosid pole lisatud'):r.i===0&&!done?T3('фото '+L.k+' из '+L.n,'photo '+L.k+' of '+L.n,'foto '+L.k+' / '+L.n)+(L.bn?T3(' · рамка '+L.bk+' из '+L.bn,' · frame '+L.bk+' of '+L.bn,' · raam '+L.bk+' / '+L.bn):''):
+    !L?'':L.photos===0?T3('Фото не добавлены','No photos added','Fotosid pole lisatud'):r.i===0&&!done?T3('фото '+L.k+' из '+L.n,'photo '+L.k+' of '+L.n,'foto '+L.k+' / '+L.n)+(L.pn?T3(' · страницы '+L.pk+' из '+L.pn,' · pages '+L.pk+' of '+L.pn,' · lehti '+L.pk+' / '+L.pn):'')+(L.bn?T3(' · рамка '+L.bk+' из '+L.bn,' · frame '+L.bk+' of '+L.bn,' · raam '+L.bk+' / '+L.bn):''):
       T3('Подписи найдены на '+L.withLab+' из '+L.photos+' фото','Labels found on '+L.withLab+' of '+L.photos+' photos','Silte leitud '+L.withLab+' / '+L.photos+' fotolt')+
       (L.bad?T3(' · не распознано: '+L.bad,' · not recognised: '+L.bad,' · tuvastamata: '+L.bad):'')+(L.skip?(L.ocr?T3(' · распознавание текста не запустилось',' · text recognition did not start',' · teksti tuvastus ei käivitunud'):T3(' · пропущено '+L.skip+': оригинала нет на этом устройстве',' · skipped '+L.skip+': the original is not on this device',' · vahele jäetud '+L.skip+': originaali pole selles seadmes')):''),
-    !O?'':r.i===1&&!done?T3('запрос '+O.k+' из '+O.n,'request '+O.k+' of '+O.n,'päring '+O.k+' / '+O.n):T3('Тем: '+O.topics,'Topics: '+O.topics,'Teemasid: '+O.topics),
+    !O?'':O.sl!==undefined?T3('Слайдов с рисунком: '+O.sl+' · списков: '+O.ls,'Slides with a picture: '+O.sl+' · lists: '+O.ls,'Pildiga slaide: '+O.sl+' · loetelusid: '+O.ls):r.i===1&&!done?T3('запрос '+O.k+' из '+O.n,'request '+O.k+' of '+O.n,'päring '+O.k+' / '+O.n):T3('Тем: '+O.topics,'Topics: '+O.topics,'Teemasid: '+O.topics),
     !E?'':E.n?plx(E.n,['вопрос — их темы станут P1','вопроса — их темы станут P1','вопросов — их темы станут P1'],['question: its topics become P1','questions: their topics become P1'],['küsimus – selle teemad muutuvad P1-ks','küsimust – nende teemad muutuvad P1-ks']):T3('Вопросов нет','No questions','Küsimusi pole'),
     !TT?'':T3('Терминов: '+TT.n+' · P1 '+TT.p1+' · P2 '+TT.p2+' · P3 '+TT.p3,'Terms: '+TT.n+' · P1 '+TT.p1+' · P2 '+TT.p2+' · P3 '+TT.p3,'Termineid: '+TT.n+' · P1 '+TT.p1+' · P2 '+TT.p2+' · P3 '+TT.p3),
     T3('Один урок — один рисунок','One lesson, one picture','Üks õppetund – üks pilt')];
@@ -4965,9 +5182,9 @@ function cnReadHtml(d){
 function cnPlanDoc(o){
   if(!o||typeof o!=='object'||!Array.isArray(o.parts))return null;
   const s=(v,n)=>typeof v==='string'?v.slice(0,n):'';
-  return {bld:cnBldDoc(o.bld),at:+o.at||0,ed:+o.ed||0,fp:s(o.fp,40),edited:!!o.edited,fallback:!!o.fallback,lost:(Array.isArray(o.lost)?o.lost:[]).filter(x=>typeof x==='string').slice(0,300).map(x=>x.slice(0,80)),lang:cnLangOk(o.lang),parts:o.parts.slice(0,40).map(p=>({id:s(p&&p.id,20),name:s(p&&p.name,80),lessons:(Array.isArray(p&&p.lessons)?p.lessons:[]).slice(0,CN_PL.lessons).map(l=>({
+  return {bld:cnBldDoc(o.bld),at:+o.at||0,ed:+o.ed||0,fp:s(o.fp,40),edited:!!o.edited,fallback:!!o.fallback,slides:!!o.slides,lost:(Array.isArray(o.lost)?o.lost:[]).filter(x=>typeof x==='string').slice(0,300).map(x=>x.slice(0,80)),lang:cnLangOk(o.lang),parts:o.parts.slice(0,40).map(p=>({id:s(p&&p.id,20),name:s(p&&p.name,80),lessons:(Array.isArray(p&&p.lessons)?p.lessons:[]).slice(0,CN_PL.lessons).map(l=>({
     id:s(l&&l.id,20),title:s(l&&l.title,80),pic:l&&typeof l.pic==='string'&&/^[pg]:/.test(l.pic)?l.pic.slice(0,80):null,off:!!(l&&l.off),
-    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>{const r={id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)};if(t&&(+t.pu===1||+t.pu===2||+t.pu===3))r.pu=+t.pu;return r;})}))}))};
+    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>{const r={id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)};if(t&&Array.isArray(t.bx)&&t.bx.length===4&&t.bx.every(v=>Number.isFinite(+v)))r.bx=t.bx.map(v=>r2(+v));if(t&&(+t.pu===1||+t.pu===2||+t.pu===3))r.pu=+t.pu;return r;})}))}))};
 }
 function cnPlanLoad(d){
   d._planLoad=true;d._planErr='';
@@ -4982,6 +5199,7 @@ function cnSrcText(s){
     if(k==='q')return nm+', '+T3('вопрос','question','küsimus')+' '+n;
     if(k==='u')return T3('добавлено вами','added by you','sinu lisatud');
     if(k==='t')return nm+', '+pg+' '+n;
+    if(k==='l')return nm+', '+pg+' '+n+' · '+T3('список','list','loetelu');
     return T3('только на рисунке','only on the picture','ainult pildil');}).join('; ');
 }
 /* рисунок урока: [имя, найден ли] */
@@ -5502,7 +5720,7 @@ function cnLessonClean(raw,l){
   if(!intro.length&&!Object.keys(notes).length&&!q.length)throw {code:'invalid_json'};
   return {intro:intro,notes:notes,q:q};
 }
-const cnSrcShort=s=>{const a=String(s||'').split('~')[0].split('|');return (a[0]==='b'||a[0]==='q'||a[0]==='t')&&a[1]?a[1].slice(0,12):'';};
+const cnSrcShort=s=>{const a=String(s||'').split('~')[0].split('|');return (a[0]==='b'||a[0]==='q'||a[0]==='t'||a[0]==='l')&&a[1]?a[1].slice(0,12):'';};
 /* ---- один урок ---- */
 function cnBldErrCode(e){const c=e&&e.code;return c==='orig'?'orig':c==='blank'?'blank':c==='quota_or_state'?'space':c==='offline'?'net':c==='pic'||c==='too_large'||c==='unsupported_type'?'pic':c==='rate_limited'?'rate':'up';}
 async function cnBldOne(d,b,it){
@@ -5513,7 +5731,11 @@ async function cnBldOne(d,b,it){
   if(!l.pic){b.dt.pic='';return fail('nopic');}
   const name0=cnPicName(d,l.pic);b.dt.pic=name0||'';cnBPaint();
   let pic,up=null;
-  try{pic=await cnBldPic(d,b,l.pic,l.terms);}catch(e){if(b.cancel)return null;return fail(cnBldErrCode(e));}
+  /* a structure with a box of the plan (slides mode) has its frame; the others are looked for among the captions of the picture */
+  const frames=new Map();
+  l.terms.forEach(t=>{if(t.bx&&t.bx.length===4)frames.set(t.id,{x:t.bx[0],y:t.bx[1],w:t.bx[2],h:t.bx[3]});});
+  const rest=l.terms.filter(t=>!frames.has(t.id));
+  try{pic=await cnBldPic(d,b,l.pic,rest);}catch(e){if(b.cancel)return null;return fail(cnBldErrCode(e));}
   if(b.cancel)return null;
   /* the id of the upload is written down at once: a pause, a refusal of the AI or a reload do not lose it; the same picture is not uploaded twice */
   const pv=bl.pa[l.id];
@@ -5527,7 +5749,7 @@ async function cnBldOne(d,b,it){
   if(b.cancel)return null;
   /* 1 · рамки */
   b.i=1;b.dt.labels=pic.labels.length;
-  const frames=cnBldMatch(l.terms,pic.labels);b.dt.frames=frames.size;cnBPaint();
+  cnBldMatch(rest,pic.labels).forEach((v,k)=>frames.set(k,v));b.dt.frames=frames.size;cnBPaint();
   /* 2 · отрывки и вопросы экзамена */
   b.i=2;cnBPaint();
   let tx;try{tx=await cnBldText(d,b,l);}catch(e){if(b.cancel)return null;return fail(cnBldErrCode(e));}
@@ -8397,7 +8619,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnBldMatch=cnBldMatch;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnSlideTerms=cnSlideTerms;window.cnBldMatch=cnBldMatch;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;

@@ -408,6 +408,10 @@ http.createServer(async (req, res) => {
         /* outline: a topic for every page that has bold text (the first bold line is its title); its terms are the Latin pairs «Capital lower» of the page */
         ans = { topics: (inp.pages || []).filter((pg) => pg.em && pg.em.length).map((pg) => ({ title: pg.em[0], pages: [pg.n], terms: [...new Set(pg.text.match(/\b[A-Z][a-z]+ [a-z]{4,}\b/g) || [])] })) };
         if (FN_DROP) delete ans.topics;
+      } else if (inp.mode === 'slides') {
+        /* plan, slides mode: one part «Luud» holding every candidate in order, titled by the head of its slide; a term named ATTACK is dropped */
+        ans = { parts: [{ name: evil((inp.cands[0] && inp.cands[0].head) ? 'Luud' : 'Luud'), lessons: (inp.cands || []).map((c) => ({ cand: c.id, title: evil(c.head || c.terms[0].la) })) }], drop: (inp.cands || []).flatMap((c) => c.terms.filter((x) => /ATTACK/.test(x.la)).map((x) => x.id)) };
+        if (FN_DROP) delete ans.parts;
       } else {
         /* plan: a part for every topic, a lesson for every term of it; the picture is the photo with the most labels equal to the terms of the lesson (here one: the term itself),
            the terms that are in no topic (only on the pictures) go into the last part «Atlas» */

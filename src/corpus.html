@@ -1372,7 +1372,7 @@ function normCard(c){
 
 /* ---------- persistence: serialized, coalesced per document ---------- */
 const WQ={keys:[],jobs:new Map(),busy:false,retries:new Map()};
-function getObj(coll,id){if(coll==='decks')return deckById(id);if(coll==='plates')return plateById(id);if(coll==='terms')return cardById(id);if(coll==='stats')return S.stats[id];if(coll==='meta')return META;if(coll==='folders')return folderById(id);if(coll==='exams')return examById(id);return null;}
+function getObj(coll,id){if(coll==='decks')return deckById(id);if(coll==='plates')return plateById(id);if(coll==='terms')return cardById(id);if(coll==='stats')return S.stats[id];if(coll==='meta')return META;if(coll==='folders')return folderById(id);if(coll==='exams')return examById(id);if(coll==='cdraft')return CDRAFTS.get(id)||null;if(coll==='ctext')return CTEXT.get(id)||null;return null;}
 function isLocalPlate(pid){const p=plateById(pid);return !!(p&&p._local);}
 function clean(o){const r={};for(const k in o){if(k==='id'||k==='url'||k[0]==='_')continue;r[k]=o[k];}return JSON.parse(JSON.stringify(r));}
 /* a name or hint typed on one photo of a linked label is the name/hint of the whole group */
@@ -1585,7 +1585,7 @@ const app=document.getElementById('app');
 let view={name:'loading'};
 const SCREENS={};
 /* ---------- motion ---------- */
-const DEPTH={home:0,library:0,courses:0,calendar:0,globalStats:0,settings:0,folder:1,deck:2,study:3,editor:3,practice:3,courseLesson:3,crop:3};
+const DEPTH={home:0,library:0,courses:0,calendar:0,globalStats:0,settings:0,folder:1,deck:2,study:3,editor:3,practice:3,courseLesson:3,courseNew:3,crop:3};
 let NAV=null,LASTTAB=null;
 function RM(){if(typeof META!=='undefined'&&META.calm)return true;try{return matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}}
 function go(v){
@@ -4021,7 +4021,7 @@ function crHomeHtml(f,multi){
     (cur.s.k?T3('шаг '+cur.s.k+' из '+cur.s.n,'step '+cur.s.k+' of '+cur.s.n,'samm '+cur.s.k+' / '+cur.s.n):cur.s.st==='cur'?T3('начат','started','alustatud'):T3('новый урок','new lesson','uus õppetund'))+'</small></span></button>':'';
   const leg=(p,a,b)=>'<div class="cleg"><span class="chip p'+p+'">P'+p+'</span><span><b>'+a+'</b> — '+b+'</span></div>';
   return '<div class="page tabbed crs chome"><header class="chead">'+(multi?'<button class="ibtn" data-act="crList" aria-label="'+T3('Все курсы','All courses','Kõik kursused')+'">'+ic('back')+'</button>':'')+
-    '<div class="chtt"><div class="chname" data-noi18n>'+esc(f.name)+'</div><div class="chsub">'+plx(parts.length,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(all.length)+'</div></div></header>'+
+    '<div class="chtt"><div class="chname" data-noi18n>'+esc(f.name)+'</div><div class="chsub">'+plx(parts.length,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(all.length)+'</div></div>'+cnNewBtn()+'</header>'+cnDraftsHtml()+
     '<div class="chero"><div class="chtop"><div><div class="chl">'+T3('Пройдено уроков','Lessons completed','Läbitud õppetunde')+'</div><div class="chn"><b>'+nP+'</b><span>'+T3('из ','of ','/ ')+all.length+'</span></div></div>'+kostik(56,'joy')+'</div>'+crBar(nP,all.length)+
       '<div class="ctiles">'+(rev.length?'<button class="ctile crev" data-fid="'+esc(f.id)+'">'+rin+'</button>':'<div class="ctile crnone">'+rin+'</div>')+
       '<div class="ctile"><span class="ctn"><b>'+(items.length-items.filter(c=>c.type==='new').length)+'</b><small> / '+items.length+'</small></span><span>'+T3('структур пройдено','structures done','struktuuri läbitud')+'</span></div></div>'+cta+'</div>'+
@@ -4038,11 +4038,11 @@ SCREENS.courses={
   html(){
     const fs=crFolders(),f=fs.find(x=>x.id===view.fid)||(fs.length===1?fs[0]:null);
     if(f)return crHomeHtml(f,fs.length>1);
-    const head='<header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div></header>';
+    const head='<header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div>'+cnNewBtn()+'</header>'+cnDraftsHtml();
     if(!fs.length){
       return '<div class="page tabbed crs">'+head+'<div class="sv-empty">'+kostik(60,'hi','kk-float')+'<div class="kbubble big">'+
         T3('Здесь будут курсы: уроки по фото с подписями, фактами и вопросами. Импортируйте файл курса в Настройках.','Courses will live here: lessons on photos with labels, facts and questions. Import a course file in Settings.','Siia tulevad kursused: fotode õppetunnid siltide, faktide ja küsimustega. Impordi kursuse fail Seadetes.')+'</div>'+
-        '<button class="btn primary" data-act="importPick">'+ic('import',18)+T3('Импортировать файл курса','Import a course file','Impordi kursuse fail')+'</button>'+starterBtn()+'</div></div>';
+        '<button class="btn primary" data-act="importPick">'+ic('import',18)+T3('Импортировать файл курса','Import a course file','Impordi kursuse fail')+'</button>'+starterBtn()+cnNewBtn(true)+'</div></div>';
     }
     return '<div class="page tabbed crs">'+head+'<div class="ccards">'+fs.map(f=>{
       const ls=crParts(f.id,3).reduce((a,x)=>a.concat(x.ls),[]),dn=ls.filter(L=>crPass(crStatus(L))).length,due=crDueList(ls.reduce((a,L)=>a.concat(L.items),[])).length,
@@ -4052,7 +4052,7 @@ SCREENS.courses={
         (due?'<span class="cpill due">'+ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+due+'</span>':started?'<span class="cpill done">'+ic('check',13)+T3('Всё повторено','All repeated','Kõik korratud')+'</span>':'<span class="cpill new">'+T3('Не начат','Not started','Alustamata')+'</span>')+'</span>'+crBar(dn,ls.length)+'</button>';}).join('')+'</div></div>';
   },
   mount(){
-    mountImgFallbacks();
+    mountImgFallbacks();cnMountCourses();
     const from=()=>({name:'courses',fid:view.fid});
     document.querySelectorAll('.crs .clrow').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from()));
     document.querySelectorAll('.crs .ccta').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from(),b.dataset.step));
@@ -4066,6 +4066,372 @@ SCREENS.courses={
     {const cta=document.querySelector('.crs .ccta');const p=cta&&plateById(cta.dataset.pid);if(p)crTrBackground(p);}
   }
 };
+/* ================= «Новый курс», шаг 1: материалы и роли (T-017) =================
+   Всё за флагом localStorage['corpus.create']='1' (его ставит ?create=1, снимает ?create=0), только на сайте и не в демо: ИИ-лимиты курсов нужны гостю-аккаунту.
+   Облако: cdraft/<id> — черновик (название, материалы, роли), ctext/<черновик>.<материал>.<n> — текст страниц кусками ≤200 КБ, ctext/….q — вопросы экзамена.
+   Оригиналы PDF и фото — только на устройстве, в IndexedDB «corpus-local», хранилище «mats» (ключ <черновик>/<материал>[/<номер фото>]).
+   Эти коллекции bootData не читает: черновики грузятся при открытии вкладки «Курсы», текст — при открытии черновика. */
+const CN_LIM={pdfBytes:50*1048576,pages:400,photos:60,chars:2000000,mats:20,chunk:200000,pageChars:60000};
+const CN_ROLES=['base','extra','pics','exam'];
+const CN_EXAM_RE=/k[üu]simus|вопрос|question|kollokvium|eksam|exam/i;
+try{const q=new URLSearchParams(location.search).get('create');if(q==='1')localStorage.setItem('corpus.create','1');else if(q==='0')localStorage.removeItem('corpus.create');}catch(e){}
+const cnOn=()=>{const W=window.CORPUS_WEB;if(!W||W.guest)return false;try{return localStorage.getItem('corpus.create')==='1';}catch(e){return false;}};
+const CDRAFTS=new Map(),CTEXT=new Map(),CN_T=new Map(),CN_TL=new Map();let CN_LOAD=null,CN_Q=Promise.resolve(),CN_PDF=null,CN_IDB=null,CN_TM=0,CN_SEQ=0;
+/* что не хранится в облаке: ход чтения, «оригинал здесь», «идёт чтение» — по ключу <черновик>/<материал> */
+function cnT(did,mid){const k=did+'/'+mid;let t=CN_T.get(k);if(!t){t={};CN_T.set(k,t);}return t;}
+function cnDraftOk(o,id){
+  const mats=(Array.isArray(o.mats)?o.mats:[]).filter(m=>m&&typeof m==='object'&&typeof m.id==='string'&&m.id&&typeof m.name==='string').map(m=>{
+    m.kind=['pdf','img','text'].indexOf(m.kind)>=0?m.kind:'text';if(CN_ROLES.indexOf(m.role)<0)m.role=m.kind==='img'?'pics':'extra';
+    if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';return m;});
+  return Object.assign({},o,{id:id,name:String(o.name||''),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,mats:mats});
+}
+function cnLoad(){
+  if(!S.db)return Promise.resolve();
+  if(!CN_LOAD)CN_LOAD=S.db.collection('cdraft').get().then(g=>{g.docs.forEach(x=>{if(!CDRAFTS.has(x.id))CDRAFTS.set(x.id,cnDraftOk(x.data()||{},x.id));});},e=>{CN_LOAD=null;throw e;});
+  return CN_LOAD;
+}
+/* the text of one draft (later steps read it; here it is also what «the draft survives a reload» stands on) */
+function cnLoadText(did){
+  if(!S.db)return Promise.resolve();
+  if(!CN_TL.has(did))CN_TL.set(did,S.db.collection('ctext').get().then(g=>{g.docs.forEach(x=>{if(x.id.indexOf(did+'.')===0&&!CTEXT.has(x.id))CTEXT.set(x.id,x.data()||{});});},e=>{CN_TL.delete(did);throw e;}));
+  return CN_TL.get(did);
+}
+function cnSave(d){delete d._new;d.updatedAt=Date.now();if(S.db)enq('cdraft/'+d.id,{coll:'cdraft',id:d.id,op:'set'});}
+const cnSaveText=id=>{if(S.db)enq('ctext/'+id,{coll:'ctext',id:id,op:'set'});};
+const cnDelDoc=(coll,id)=>{if(S.db)enq(coll+'/'+id,{coll:coll,id:id,op:'del'});};
+/* ---- originals on this device. Any failure (no IndexedDB in a private window, no room) is not an error: the text is in the cloud anyway ---- */
+function cnDb(){
+  if(!CN_IDB){
+    CN_IDB=new Promise((res,rej)=>{try{const r=indexedDB.open('corpus-local',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('mats'))r.result.createObjectStore('mats');};
+      r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('idb'));r.onblocked=()=>rej(new Error('idb blocked'));}catch(e){rej(e);}});
+    CN_IDB.catch(()=>{CN_IDB=null;});
+  }
+  return CN_IDB;
+}
+function cnIdb(mode,fn){
+  return cnDb().then(db=>new Promise((res,rej)=>{let rq;try{const tx=db.transaction('mats',mode);rq=fn(tx.objectStore('mats'));tx.oncomplete=()=>res(rq&&rq.result);tx.onerror=tx.onabort=()=>rej(tx.error||new Error('idb'));}catch(e){rej(e);}}));
+}
+const cnPut=(key,blob)=>cnIdb('readwrite',st=>st.put(blob,key)).then(()=>true,()=>false);
+const cnHas=key=>cnIdb('readonly',st=>st.count(key)).then(n=>n>0,()=>null);   // null — IndexedDB is not available
+const cnKeys=(did,mid)=>IDBKeyRange.bound(did+'/'+mid,did+'/'+mid+'/￿');
+function cnDelBlobs(did,mid){try{return cnIdb('readwrite',st=>st.delete(mid?cnKeys(did,mid):IDBKeyRange.bound(did+'/',did+'/￿'))).catch(()=>{});}catch(e){return Promise.resolve();}}
+/* which originals are on this device (the draft may have been made on another one) */
+function cnCheckLocal(d){
+  d.mats.forEach(m=>{const t=cnT(d.id,m.id);if(t.run||t.local!==undefined)return;
+    cnHas(d.id+'/'+m.id+(m.kind==='img'?'/0':'')).then(r=>{t.local=r===true;t.lost=r===true?'':r===null?'nodb':'other';cnPaint();});});
+}
+/* ---- pdf.js: loaded only when a PDF is added ---- */
+function cnPdfLib(){
+  if(!CN_PDF)CN_PDF=import(new URL('vendor/pdfjs/pdf.min.mjs',location.href).href).then(m=>{m.GlobalWorkerOptions.workerSrc=new URL('vendor/pdfjs/pdf.worker.min.mjs',location.href).href;return m;},e=>{CN_PDF=null;throw e;});
+  return CN_PDF;
+}
+/* The text of one page. Lines are put together by y (items within half a letter height are one line, left to right; a gap wider than ~0.15 of the height is a space).
+   em — what stands out: a bold font (the name of the font is known only after the operator list is read: commonObjs) or letters taller than 1.3 × the median of the page. Two columns are read as one: this is a heuristic. */
+async function cnPageText(pg){
+  const tc=await pg.getTextContent();
+  const its=tc.items.filter(i=>typeof i.str==='string'&&i.str.trim()&&i.transform);
+  if(!its.length)return {text:'',em:[]};
+  try{await pg.getOperatorList();}catch(e){}
+  const bold={},isBold=fn=>{if(fn in bold)return bold[fn];let b=false;try{const f=pg.commonObjs.get(fn);b=/bold|black|heavy|demi/i.test((f&&f.name)||'')||!!(f&&f.bold);}catch(e){}return bold[fn]=b;};
+  const hs=its.map(i=>i.height||Math.abs(i.transform[3])||0).filter(h=>h>0).sort((a,b)=>a-b),med=hs.length?hs[hs.length>>1]:0;
+  const A=its.map(i=>{const h=i.height||Math.abs(i.transform[3])||med||10;return {s:i.str,x:i.transform[4],y:i.transform[5],w:i.width||0,h:h,em:isBold(i.fontName)||(med>0&&h>med*1.3)};}).sort((a,b)=>b.y-a.y);
+  const lines=[];
+  A.forEach(it=>{const l=lines[lines.length-1];if(l&&Math.abs(l.y-it.y)<=Math.max(2,0.5*Math.min(l.h,it.h)))l.its.push(it);else lines.push({y:it.y,h:it.h,its:[it]});});
+  const em=[],out=[];
+  lines.forEach(l=>{
+    l.its.sort((a,b)=>a.x-b.x);
+    let s='',run='',prev=null;
+    const endRun=()=>{const r=run.replace(/\s+/g,' ').trim();if(r.length>=2&&em.length<80&&em.indexOf(r.slice(0,200))<0)em.push(r.slice(0,200));run='';};
+    l.its.forEach(it=>{
+      const gap=prev?it.x-(prev.x+prev.w)>0.15*Math.min(it.h,prev.h):false,sp=prev&&(gap||/\s$/.test(prev.s)||/^\s/.test(it.s))?' ':'';
+      s+=sp+it.s;
+      if(it.em)run+=(run?sp:'')+it.s;else if(run)endRun();
+      prev=it;
+    });
+    if(run)endRun();
+    out.push(s.replace(/\s+/g,' ').trim());
+  });
+  return {text:out.filter(Boolean).join('\n'),em:em};
+}
+/* Exam questions from the lines of the text (heuristic). A question starts with «1.» / «1)» (the number, then a space or the end of the line) or with «küsimus 1» / «question 1» / «вопрос 1»
+   (also «küsimus nr 1:», «Вопрос №1.»). Numbers must follow each other: 1, 2, 3 …, a restart at 1, or a gap of up to two (a lost number) — so «2.5 mm» or a stray «7.» in a lecture do not count.
+   The lines after the start belong to the question until the next start. At most 300 questions, 400 letters each. */
+const CN_QA=/^\s*(\d{1,3})\s*[.)](?:\s+(.*))?$/,CN_QB=/^\s*(?:küsimus|question|вопрос)\s*(?:nr\.?|№|#)?\s*(\d{1,3})\s*[.):\-–—]?(?:\s+(.*))?$/i;
+function cnQuestions(lines){
+  const out=[];let cur=null,last=0;
+  const end=()=>{if(cur){const q=cur.t.replace(/\s+/g,' ').trim().slice(0,400);if(q.length>=3)out.push(q);}cur=null;};
+  lines.forEach(line=>{
+    const m=CN_QA.exec(line)||CN_QB.exec(line);
+    if(m){const n=+m[1];if(n===1||(n>last&&n<=last+(last?3:0))){end();if(out.length>=300)return;last=n;cur={t:m[2]||''};return;}}
+    if(cur&&line.trim())cur.t+=' '+line.trim();
+  });
+  end();
+  return out.slice(0,300);
+}
+const cnChars=d=>d.mats.reduce((a,m)=>a+(+m.chars||0),0);
+/* the writer of the text of one material: pages go into chunks of ≤200 KB, each is a document ctext/<draft>.<material>.<n> */
+function cnSink(d,m){
+  const enc=new TextEncoder(),ids=[];let cur=[],bytes=0,ci=0,chars=0,sample='',lines=[];
+  const flush=()=>{if(!cur.length)return;const id=d.id+'.'+m.id+'.'+ci++;ids.push(id);CTEXT.set(id,{pages:cur});cnSaveText(id);cur=[];bytes=0;};
+  return {
+    add(n,text,em){
+      text=String(text).slice(0,CN_LIM.pageChars);const pg={n:n,text:text,em:em||[]},b=enc.encode(JSON.stringify(pg)).length;
+      if(cur.length&&bytes+b>CN_LIM.chunk)flush();
+      cur.push(pg);bytes+=b;chars+=text.length;m.chars=chars;
+      if(sample.length<8000)sample+=text+'\n';
+      text.split('\n').forEach(l=>lines.push(l));
+      if(cnChars(d)>CN_LIM.chars)throw {code:'limit'};
+    },
+    done(){
+      flush();m.chunks=ci;const qs=cnQuestions(lines);
+      if(qs.length){const id=d.id+'.'+m.id+'.q';ids.push(id);CTEXT.set(id,{qs:qs});cnSaveText(id);m.qn=qs.length;}else delete m.qn;
+      m.lang=chars>=20?crGuessLang(sample.slice(0,8000)):'';
+      if(!m.lang)delete m.lang;
+    },
+    drop(){ids.forEach(id=>{CTEXT.delete(id);cnDelDoc('ctext',id);});ids.length=0;cur=[];m.chars=0;delete m.chunks;}
+  };
+}
+async function cnRead(d,m,file){
+  const t=cnT(d.id,m.id);
+  const fin=(st,err)=>{t.run=false;if(t.dead)return;m.status=st;if(err)m.err=err;else delete m.err;d.lang=cnLang(d)||d.lang||'';if(!d.lang)delete d.lang;cnSave(d);cnPaint();};
+  if(t.dead)return;
+  let sink=null,doc=null;
+  try{
+    const ok=await cnPut(d.id+'/'+m.id,file);
+    if(t.dead){cnDelBlobs(d.id,m.id);return;}
+    t.local=ok;t.lost=ok?'':'nodb';
+    sink=cnSink(d,m);
+    if(m.kind==='pdf'){
+      let lib;try{lib=await cnPdfLib();}catch(e){throw {code:'lib'};}
+      try{doc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer()),isEvalSupported:false,maxImageSize:1}).promise;}
+      catch(e){throw {code:e&&e.name==='PasswordException'?'encrypted':'broken'};}
+      if(doc.numPages>CN_LIM.pages){d.mats=d.mats.filter(x=>x!==m);cnDropMat(d,m);cnSave(d);t.run=false;cnPaint();toast(T3('В PDF больше 400 страниц — разделите файл.','The PDF has more than 400 pages: split the file.','PDF-is on üle 400 lehekülje – jaga fail osadeks.'),5000);return;}
+      m.pages=doc.numPages;t.total=doc.numPages;t.prog=0;cnPaint();
+      for(let i=1;i<=doc.numPages;i++){
+        if(t.dead){sink.drop();return;}
+        let pg;try{pg=await doc.getPage(i);const r=await cnPageText(pg);pg.cleanup();sink.add(i,r.text,r.em);}
+        catch(e){if(e&&e.code)throw e;throw {code:'broken'};}
+        t.prog=i;cnPaint();
+      }
+    }else{
+      let txt;try{txt=(await file.text()).replace(/^﻿/,'');}catch(e){throw {code:'broken'};}
+      const parts=[];for(let i=0;i<txt.length;){let j=Math.min(txt.length,i+4000);if(j<txt.length){const k=txt.lastIndexOf('\n',j);if(k>i)j=k+1;}parts.push(txt.slice(i,j));i=j;}
+      t.total=parts.length||1;t.prog=0;
+      for(let i=0;i<parts.length;i++){if(t.dead){sink.drop();return;}sink.add(i+1,parts[i],[]);t.prog=i+1;}
+    }
+    if(t.dead){sink.drop();return;}
+    sink.done();
+    fin((+m.chars)>0?'ready':'empty');
+  }catch(e){
+    if(sink)sink.drop();
+    fin('error',(e&&e.code)||'broken');
+  }finally{if(doc)try{doc.destroy();}catch(e){}}
+}
+function cnLang(d){
+  const ok=d.mats.filter(m=>m.lang&&m.status==='ready'&&m.role!=='pics');
+  const m=ok.find(x=>x.role==='base')||ok[0];return m?m.lang:'';
+}
+/* ---- adding, roles, removing ---- */
+function cnDefRole(d,name,kind){
+  if(kind==='img')return 'pics';
+  if(CN_EXAM_RE.test(name))return 'exam';
+  return d.mats.some(m=>m.role==='base')?'extra':'base';
+}
+const cnMid=()=>'m'+Date.now().toString(36)+(++CN_SEQ).toString(36).padStart(2,'0');
+const cnPhotos=d=>d.mats.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
+function cnAddFiles(d,files,cam){
+  const isImg=f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name||'');
+  const isPdf=f=>f.type==='application/pdf'||/\.pdf$/i.test(f.name||''),isTxt=f=>f.type==='text/plain'||/\.txt$/i.test(f.name||'');
+  const imgs=files.filter(isImg),docs=files.filter(f=>!isImg(f)&&(isPdf(f)||isTxt(f)));
+  if(files.length>imgs.length+docs.length)toast(T3('Подходят PDF, фото и .txt — остальное пропущено.','PDF, photos and .txt work; the rest was skipped.','Sobivad PDF, fotod ja .txt – ülejäänu jäeti vahele.'),4000);
+  docs.forEach(f=>cnAddDoc(d,f));
+  if(imgs.length)cnAddPhotos(d,imgs,!!cam);
+}
+function cnAddDoc(d,file){
+  if(d.mats.length>=CN_LIM.mats){toast(T3('В курсе не больше 20 материалов.','A course takes up to 20 materials.','Kursuses on kuni 20 materjali.'),4000);return;}
+  const pdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
+  if(pdf&&file.size>CN_LIM.pdfBytes){toast(T3('PDF больше 50 МБ — его не прочитать.','The PDF is over 50 MB and cannot be read.','PDF on üle 50 MB ja seda ei saa lugeda.'),5000);return;}
+  const kind=pdf?'pdf':'text',name=String(file.name||'').slice(0,120)||(pdf?'PDF':'TXT');
+  const m={id:cnMid(),name:name,kind:kind,role:cnDefRole(d,name,kind),size:file.size,status:'reading',createdAt:Date.now()};
+  d.mats.push(m);cnT(d.id,m.id).run=true;cnSave(d);cnPaint();
+  CN_Q=CN_Q.then(()=>cnRead(d,m,file)).catch(()=>{});
+}
+function cnAddPhotos(d,files,cam){
+  let m=cam?d.mats.find(x=>x.kind==='img'&&x.cam):null;
+  if(!m&&d.mats.length>=CN_LIM.mats){toast(T3('В курсе не больше 20 материалов.','A course takes up to 20 materials.','Kursuses on kuni 20 materjali.'),4000);return;}
+  const room=CN_LIM.photos-cnPhotos(d);
+  if(room<=0){toast(T3('В курсе не больше 60 фото.','A course takes up to 60 photos.','Kursuses on kuni 60 fotot.'),4000);return;}
+  if(files.length>room){toast(T3('В курсе не больше 60 фото — лишние пропущены.','A course takes up to 60 photos; the rest was skipped.','Kursuses on kuni 60 fotot – ülejäänud jäeti vahele.'),4000);files=files.slice(0,room);}
+  if(!m){
+    m={id:cnMid(),name:cam?T3('Снимки с камеры','Camera shots','Kaamera pildid'):files.length===1?String(files[0].name||'').slice(0,120)||T3('Фото','Photo','Foto'):T3('Фото','Photos','Fotod'),kind:'img',role:'pics',photos:0,size:0,status:'ready',createdAt:Date.now()};
+    if(cam)m.cam=true;d.mats.push(m);
+  }
+  const t=cnT(d.id,m.id);t.busy=(t.busy||0)+1;cnSave(d);cnPaint();
+  CN_Q=CN_Q.then(async()=>{
+    let lost=0;
+    for(const f of files){
+      if(t.dead)break;
+      const i=m.photos||0;
+      if(await cnPut(d.id+'/'+m.id+'/'+i,f)){if(t.dead){cnDelBlobs(d.id,m.id);break;}m.photos=i+1;m.size+=f.size;t.local=true;t.lost='';}else lost++;
+    }
+    t.busy--;
+    if(lost)toast(T3('Не удалось сохранить '+lost+' фото на устройстве.','Could not save '+lost+' photo(s) on this device.','Seadmesse ei õnnestunud salvestada '+lost+' fotot.'),5000);
+    if(!t.dead){if(!m.photos)d.mats=d.mats.filter(x=>x!==m);cnSave(d);cnPaint();}
+  }).catch(()=>{});
+}
+function cnDropMat(d,m){
+  const t=cnT(d.id,m.id);t.dead=true;
+  cnDelBlobs(d.id,m.id);
+  const ids=new Set();CTEXT.forEach((v,k)=>{if(k.indexOf(d.id+'.'+m.id+'.')===0)ids.add(k);});
+  for(let i=0;i<(m.chunks||0);i++)ids.add(d.id+'.'+m.id+'.'+i);
+  if(m.qn)ids.add(d.id+'.'+m.id+'.q');
+  ids.forEach(id=>{CTEXT.delete(id);cnDelDoc('ctext',id);});
+}
+function cnRemoveMat(d,m){
+  d.mats=d.mats.filter(x=>x!==m);cnDropMat(d,m);cnSave(d);cnPaint();
+  toast(T3('«'+m.name+'» убран из курса','“'+m.name+'” removed from the course','„'+m.name+'“ eemaldati kursuselt'),2600);
+}
+function cnDeleteDraft(d){
+  d.mats.slice().forEach(m=>cnDropMat(d,m));
+  cnDelBlobs(d.id);
+  CTEXT.forEach((v,k)=>{if(k.indexOf(d.id+'.')===0){CTEXT.delete(k);cnDelDoc('ctext',k);}});
+  CDRAFTS.delete(d.id);cnDelDoc('cdraft',d.id);
+  /* the text that another device added to this draft after it was loaded here is not in memory: ask the cloud what is left */
+  if(S.db)S.db.collection('ctext').get().then(g=>g.docs.forEach(x=>{if(x.id.indexOf(d.id+'.')===0)cnDelDoc('ctext',x.id);}),()=>{});
+}
+function cnNew(){
+  const d={id:newId('cdraft'),name:'',createdAt:Date.now(),updatedAt:Date.now(),mats:[],_new:true};
+  CDRAFTS.set(d.id,d);go({name:'courseNew',did:d.id});
+}
+/* ---- texts ---- */
+const cnRoleName=r=>({base:T3('Основа','Core','Põhi'),extra:T3('Дополнение','Extra','Täiendus'),pics:T3('Картинки','Pictures','Pildid'),exam:T3('Экзамен','Exam','Eksam')})[r];
+const cnRoleHint=r=>({base:T3('Темы курса и главное (P1–P2) ИИ берёт отсюда.','The AI takes the course topics and the essentials (P1–P2) from here.','TI võtab kursuse teemad ja peamise (P1–P2) siit.'),
+  extra:T3('Детали (P2–P3), если их нет в основе.','Details (P2–P3) that the core does not have.','Detailid (P2–P3), mida põhimaterjalis pole.'),
+  pics:T3('Только рисунки для уроков, текст не учитывается.','Only pictures for the lessons; the text is ignored.','Ainult õppetundide pildid, teksti ei arvestata.'),
+  exam:T3('Всё, о чём здесь спрашивают, станет P1.','Everything asked here becomes P1.','Kõik, mida siin küsitakse, muutub P1-ks.')})[r];
+function cnErrText(c){
+  return ({encrypted:T3('PDF защищён паролем','the PDF is password-protected','PDF on parooliga kaitstud'),broken:T3('не удалось прочитать файл','could not read the file','faili ei õnnestunud lugeda'),
+    limit:T3('слишком много текста (лимит 2 МБ)','too much text (the limit is 2 MB)','liiga palju teksti (piir on 2 MB)'),lib:T3('не загрузилось чтение PDF — проверьте соединение','PDF reader did not load: check the connection','PDF-i lugemine ei laadinud – kontrolli ühendust'),
+    interrupted:T3('чтение прервано — добавьте файл снова','reading was interrupted: add the file again','lugemine katkes – lisa fail uuesti')})[c]||T3('не удалось прочитать файл','could not read the file','faili ei õnnestunud lugeda');
+}
+/* the line under the name: [meta, status, progress 0..100 or null, is-error] */
+function cnStat(d,m){
+  const t=cnT(d.id,m.id);
+  const meta=m.kind==='pdf'?(m.pages?T3('PDF · '+m.pages+' стр.','PDF · '+m.pages+' p.','PDF · '+m.pages+' lk'):'PDF'):m.kind==='img'?plx(m.photos||0,['фото','фото','фото'],['photo','photos'],['foto','fotot']):'TXT';
+  if(m.status==='reading'&&t.run){
+    if(t.total)return [meta,T3('читаю '+t.prog+' из '+t.total,'reading '+t.prog+' of '+t.total,'loen '+t.prog+' / '+t.total),Math.round(t.prog/t.total*100),false];
+    return [meta,T3('открываю…','opening…','avan…'),0,false];
+  }
+  if(m.status==='reading')return [meta,cnErrText('interrupted'),null,true];
+  if(m.status==='error')return [meta,cnErrText(m.err),null,true];
+  if(m.kind==='img')return [meta,t.busy?T3('сохраняю…','saving…','salvestan…'):T3('готово','ready','valmis'),null,false];
+  if(m.status==='empty')return [meta,T3('текста нет — это скан?','no text: a scan?','teksti pole – skänn?'),null,false];
+  if(m.role==='exam'&&m.qn)return [meta,plx(m.qn,['вопрос','вопроса','вопросов'],['question','questions'],['küsimus','küsimust']),null,false];
+  if(m.role==='exam')return [meta,T3('текст прочитан, вопросы не найдены','text read, no questions found','tekst loetud, küsimusi ei leitud'),null,false];
+  return [meta,T3('текст прочитан','text read','tekst loetud'),null,false];
+}
+const CN_SPARK='<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="flex:none;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linejoin:round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>';
+const CN_LNAME={ru:[['русском','Russian','vene'],'русском'],en:[['английском','English','inglise'],'английском'],et:[['эстонском','Estonian','eesti'],'эстонском']};
+function cnMatHtml(d,m){
+  const st=cnStat(d,m),t=cnT(d.id,m.id),i=m.kind==='img';
+  const lost=t.lost==='nodb'?T3('оригинал не сохранён на устройстве','the original is not saved on this device','originaal pole selles seadmes salvestatud'):t.lost==='other'?T3('оригинал на другом устройстве','the original is on another device','originaal on teises seadmes'):'';
+  return '<div class="cnf" data-mid="'+esc(m.id)+'"><div class="cnfr"><span class="cnfi">'+(i?'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>'
+      :'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>')+'</span>'+
+    '<div class="cnfm"><span class="cnfn" data-noi18n>'+esc(m.name)+'</span><span class="cnfs'+(st[3]?' bad':'')+'">'+esc(st[0])+' · '+esc(st[1])+'</span>'+
+    (st[2]!==null?'<span class="cnpb"><i style="width:'+st[2]+'%"></i></span>':'')+(lost?'<span class="cnfs">'+esc(lost)+'</span>':'')+'</div>'+
+    '<button class="cnrm" data-cn="rm" data-mid="'+esc(m.id)+'" aria-label="'+esc(T3('Убрать ','Remove ','Eemalda ')+m.name)+'"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'+
+    '<div class="cnrg" role="radiogroup" aria-label="'+esc(T3('Роль файла','File role','Faili roll'))+'">'+CN_ROLES.map(r=>'<button role="radio" class="cnr r-'+r+'" aria-checked="'+(m.role===r)+'" data-cn="role" data-mid="'+esc(m.id)+'" data-r="'+r+'">'+cnRoleName(r)+'</button>').join('')+'</div>'+
+    '<div class="cnrh">'+cnRoleHint(m.role)+'</div></div>';
+}
+const cnBaseOk=d=>d.mats.some(m=>m.role==='base'&&(m.status==='ready'||m.status==='reading'));
+function cnListHtml(d){
+  const lang=cnLang(d),L=CN_LNAME[lang];
+  return (d.mats.length?'<div class="cnh"><span>'+T3('Материалы · ','Materials · ','Materjalid · ')+d.mats.length+'</span><span>'+T3('роль решает, что главное','the role decides what matters most','roll otsustab, mis on peamine')+'</span></div>'+d.mats.map(m=>cnMatHtml(d,m)).join(''):'')+
+    (d.mats.length&&!cnBaseOk(d)?'<div class="cnwarn">'+T3('Отметьте хотя бы один файл как «Основа» — по нему ИИ строит темы курса.','Mark at least one file as “Core”: the AI builds the course topics from it.','Märgi vähemalt üks fail rolliga „Põhi“ – TI koostab selle põhjal kursuse teemad.')+'</div>':'')+
+    (L?'<div class="cnnote"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg><span><b>'+
+      T3('Материалы на '+L[0][0]+'.','Materials in '+L[0][1]+'.','Materjalid on '+L[0][2]+' keeles.')+'</b> '+
+      T3('Уроки будут на вашем языке — '+CN_LNAME[LANG][1]+', латинские названия остаются латинскими. На других языках курс переведётся при первом открытии.',
+        'The lessons will be in your language, '+CN_LNAME[LANG][0][1]+'; Latin names stay Latin. In other languages the course is translated when first opened.',
+        'Õppetunnid tulevad sinu keeles – '+CN_LNAME[LANG][0][2]+' keeles, ladinakeelsed nimetused jäävad ladinakeelseks. Teistes keeltes tõlgitakse kursus esmakordsel avamisel.')+'</span></div>':'')+
+    '<p class="cnpriv">'+T3('Оригиналы PDF остаются на вашем устройстве. В облако уходят только текст страниц и рисунки, выбранные для уроков.','The original PDFs stay on your device. Only the page text and the pictures chosen for lessons go to the cloud.','PDF-i originaalid jäävad sinu seadmesse. Pilve lähevad ainult lehekülgede tekst ja õppetundide jaoks valitud pildid.')+'</p>';
+}
+function cnBarHtml(d){
+  const ok=d.mats.filter(m=>m.status!=='error'),pages=ok.reduce((a,m)=>a+(m.kind==='pdf'?m.pages||0:0),0),photos=ok.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
+  return '<div class="cnsum">'+(cnBaseOk(d)?plx(ok.length,['файл','файла','файлов'],['file','files'],['fail','faili'])+' · '+T3(pages+' стр.',pages+' p.',pages+' lk')+' · '+T3(photos+' фото',photos+' photos',photos+' fotot'):T3('Нужен хотя бы один файл с ролью «Основа»','At least one file with the role “Core” is needed','Vaja on vähemalt üks fail rolliga „Põhi“'))+'</div>'+
+    '<button class="cnmain" disabled>'+CN_SPARK+'<span><b>'+T3('Составить план','Make the plan','Koosta plaan')+'</b><small>'+T3('следующий шаг — скоро','the next step is coming soon','järgmine samm tuleb varsti')+'</small></span></button>';
+}
+function cnScreenHtml(d){
+  const steps=[T3('Материалы','Materials','Materjalid'),T3('План','Plan','Plaan'),T3('Сборка','Build','Koostamine')];
+  return '<div class="page cnw" data-did="'+esc(d.id)+'"><div class="cntop"><button class="cnx" data-cn="close" aria-label="'+esc(T3('Закрыть, черновик сохранится','Close, the draft is kept','Sulge, mustand salvestub'))+'"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>'+
+    '<div class="cntt"><div class="cnti">'+T3('Новый курс','New course','Uus kursus')+'</div><div class="cnsub" id="cnSub" data-noi18n>'+esc(d.name||T3('Без названия','Untitled','Nimeta'))+'</div></div></div>'+
+    '<div class="cnst">'+steps.map((s,i)=>'<div><span class="cnbar1'+(i===0?' on':'')+'"></span><span class="cnsl'+(i===0?' on':'')+'">'+(i+1)+'. '+s+'</span></div>').join('')+'</div>'+
+    '<label class="cnnm"><span>'+T3('Название курса','Course name','Kursuse nimi')+'</span><input id="cnName" value="'+esc(d.name)+'" maxlength="80" autocomplete="off" placeholder="'+esc(T3('Например, Верхняя конечность','For example, Upper limb','Näiteks Ülajäse'))+'"></label>'+
+    '<div class="cndrop"><span class="cndi"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M5 19h14"/></svg></span>'+
+    '<div class="cndt"><b>'+T3('Добавьте материалы','Add materials','Lisa materjalid')+'</b><span>'+T3('PDF лекций и слайдов, фото атласа, вопросы к экзамену — всё, что есть по теме','Lecture and slide PDFs, atlas photos, exam questions: everything you have on the topic','Loengute ja slaidide PDF-id, atlase fotod, eksamiküsimused – kõik, mis teemal on')+'</span></div>'+
+    '<div class="cndb"><button class="cnb1" data-cn="files"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width:2.2"><path d="M12 5v14M5 12h14"/></svg>'+T3('Файлы','Files','Failid')+'</button>'+
+    '<button class="cnb2" data-cn="cam"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>'+T3('Снять фото','Take a photo','Tee foto')+'</button></div></div>'+
+    '<input type="file" id="cnFile" accept=".pdf,application/pdf,image/*,.txt,text/plain" multiple hidden><input type="file" id="cnCam" accept="image/*" capture="environment" hidden>'+
+    '<div id="cnList" class="cnl">'+cnListHtml(d)+'</div></div><div class="cnbarw"><div class="cnbarin" id="cnBar">'+cnBarHtml(d)+'</div></div>';
+}
+function cnPaint(){if(CN_TM)return;CN_TM=setTimeout(()=>{CN_TM=0;cnPaintNow();},30);}
+function cnPaintNow(){
+  const d=view.name==='courseNew'&&CDRAFTS.get(view.did),l=$('#cnList'),b=$('#cnBar');if(!d||!l||!b)return;
+  const ae=document.activeElement,k=e=>e.dataset.cn+'|'+(e.dataset.mid||'')+'|'+(e.dataset.r||''),key=ae&&ae.dataset&&ae.dataset.cn&&l.contains(ae)?k(ae):null;
+  l.innerHTML=cnListHtml(d);b.innerHTML=cnBarHtml(d);
+  if(key){const el=Array.from(l.querySelectorAll('[data-cn]')).find(x=>k(x)===key);if(el)el.focus();}
+}
+function cnClose(d){
+  const nm=$('#cnName');if(nm&&nm.value.trim()!==d.name){d.name=nm.value.trim();if(!d._new||d.name)cnSave(d);}
+  if(d._new&&!d.name&&!d.mats.length)CDRAFTS.delete(d.id);
+  go({name:'courses'});
+}
+SCREENS.courseNew={
+  html(){
+    const d=CDRAFTS.get(view.did);
+    if(!d||!cnOn()){view={name:'courses'};return SCREENS.courses.html();}
+    return cnScreenHtml(d);
+  },
+  mount(){
+    const d=view.name==='courseNew'&&CDRAFTS.get(view.did),root=document.querySelector('.cnw');if(!d||!root)return;
+    root.onclick=e=>{
+      const b=e.target.closest('[data-cn]');if(!b)return;const a=b.dataset.cn,m=d.mats.find(x=>x.id===b.dataset.mid);
+      if(a==='close')cnClose(d);
+      else if(a==='files')$('#cnFile').click();
+      else if(a==='cam')$('#cnCam').click();
+      else if(a==='role'&&m&&m.role!==b.dataset.r&&CN_ROLES.indexOf(b.dataset.r)>=0){m.role=b.dataset.r;cnSave(d);cnPaintNow();}
+      else if(a==='rm'&&m)cnRemoveMat(d,m);
+    };
+    const nm=$('#cnName');
+    nm.oninput=()=>{const s=$('#cnSub');if(s)s.textContent=nm.value.trim()||T3('Без названия','Untitled','Nimeta');};
+    nm.onchange=()=>{const v=nm.value.trim();if(v!==d.name){d.name=v;cnSave(d);}};
+    $('#cnFile').onchange=e=>{const f=Array.from(e.target.files||[]);e.target.value='';if(f.length)cnAddFiles(d,f,false);};
+    $('#cnCam').onchange=e=>{const f=Array.from(e.target.files||[]);e.target.value='';if(f.length)cnAddFiles(d,f,true);};
+    cnCheckLocal(d);
+    cnLoadText(d.id).catch(()=>{});
+  }
+};
+/* ---- on the «Courses» tab: the button and the cards of drafts ---- */
+const cnNewBtn=big=>cnOn()?'<button class="cnnew'+(big?' big':'')+'" data-cn="new"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>'+T3('Новый курс','New course','Uus kursus')+'</button>':'';
+function cnDraftsInner(){
+  const ds=Array.from(CDRAFTS.values()).filter(d=>!d._new).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  return ds.map(d=>'<div class="cnd" data-did="'+esc(d.id)+'"><button class="cndgo" data-cn="open"><span class="cndic"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>'+
+    '<span class="cndn"><b>'+T3('Черновик курса','Course draft','Kursuse mustand')+'</b><small><span data-noi18n>'+esc(d.name||T3('Без названия','Untitled','Nimeta'))+'</span> · '+plx(d.mats.length,['материал','материала','материалов'],['file','files'],['fail','faili'])+'</small></span>'+
+    '<span class="cpill cur">'+T3('Продолжить','Continue','Jätka')+'</span></button>'+
+    '<button class="cndx" data-cn="del" aria-label="'+esc(T3('Удалить черновик','Delete the draft','Kustuta mustand'))+'"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 7V4h4v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button></div>').join('');
+}
+const cnDraftsHtml=()=>cnOn()?'<div class="cnds" id="cnDrafts">'+cnDraftsInner()+'</div>':'';
+function cnMountCourses(){
+  if(!cnOn())return;
+  const root=document.querySelector('.crs');if(!root)return;
+  root.addEventListener('click',e=>{
+    const b=e.target.closest('[data-cn]');if(!b)return;const a=b.dataset.cn,row=b.closest('.cnd'),d=row&&CDRAFTS.get(row.dataset.did);
+    if(a==='new')cnNew();
+    else if(a==='open'&&d)go({name:'courseNew',did:d.id});
+    else if(a==='del'&&d)confirmDialog({title:T3('Удалить черновик?','Delete the draft?','Kas kustutada mustand?'),text:T3('Материалы и прочитанный текст будут удалены. Это нельзя отменить.','The materials and the text read from them will be deleted. This cannot be undone.','Materjalid ja neist loetud tekst kustutatakse. Seda ei saa tagasi võtta.'),ok:T3('Удалить','Delete','Kustuta'),danger:true}).then(y=>{
+      if(!y)return;cnDeleteDraft(d);const el=$('#cnDrafts');if(el)el.innerHTML=cnDraftsInner();toast(T3('Черновик удалён','Draft deleted','Mustand kustutatud'));});
+  });
+  cnLoad().then(()=>{const el=$('#cnDrafts');if(el&&view.name==='courses')el.innerHTML=cnDraftsInner();},()=>{});
+}
 /* open the lesson of one photo; from — the screen the back button returns to */
 function lessonStart(did){
   const ps=platesOf(did).filter(hasLesson);if(!ps.length)return;
@@ -6725,7 +7091,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.CTEXT=CTEXT;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
@@ -7064,6 +7430,69 @@ html.vkb .panel{padding-bottom:12px}
 .ctrs .btn{min-height:30px;padding:0 10px;font-size:12.5px}
 .ctrbusy{display:flex;align-items:center;justify-content:center;gap:10px;padding:26px 0;color:var(--ink2);font-size:14.5px}
 .ctrfrom{margin:0;font-size:12.5px;color:var(--ink3)}
+/* ===== «Новый курс», шаг 1 (T-017): всё под .cnw / .cnd / .cnnew / .cnbarw ===== */
+.cnw{--accent-ink:#5848D6;--learn-ink:#9A5212;--bad-ink:#B13A55;--easy-ink:#3463B5;--ok-ink:#2A7553;--track:rgba(110,92,240,.15);display:flex;flex-direction:column;gap:14px;padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-theme="paper"]) .cnw{--accent-ink:#B9AEFF;--learn-ink:#F2A766;--bad-ink:#F2879B;--easy-ink:#8FB4F5;--ok-ink:#6FD0A2;--track:rgba(156,140,255,.2)}}
+:root[data-theme="dark"] .cnw{--accent-ink:#B9AEFF;--learn-ink:#F2A766;--bad-ink:#F2879B;--easy-ink:#8FB4F5;--ok-ink:#6FD0A2;--track:rgba(156,140,255,.2)}
+.cnw svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cnw button{font:inherit;cursor:pointer}
+.cntop{display:flex;align-items:center;gap:10px;padding:6px 0 0}
+.cnx{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow);color:var(--ink);display:flex;align-items:center;justify-content:center;padding:0}
+.cntt{flex:1;min-width:0;display:flex;flex-direction:column}
+.cnti{font-size:22px;font-weight:600;letter-spacing:-.2px;line-height:1.2}
+.cnsub{font-size:13px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cnst{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.cnst>div{display:flex;flex-direction:column;gap:5px}
+.cnbar1{display:block;height:4px;border-radius:2px;background:var(--track)}.cnbar1.on{background:var(--accent)}
+.cnsl{font-size:12px;color:var(--ink2)}.cnsl.on{color:var(--ink);font-weight:600}
+.cnnm{display:flex;flex-direction:column;gap:6px}
+.cnnm>span{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--ink2);padding:0 4px}
+.cnnm input{height:48px;box-sizing:border-box;width:100%;padding:0 14px;border-radius:14px;border:1px solid var(--glass-line);background:var(--glass-strong);color:var(--ink);font:inherit;font-size:16px;font-weight:500}
+.cndrop{display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 16px 16px;border-radius:22px;border:1.5px dashed var(--mask-edge);background:var(--glass);text-align:center}
+.cndi{width:48px;height:48px;border-radius:50%;background:var(--primary-soft);color:var(--accent-ink);display:flex;align-items:center;justify-content:center}
+.cndt{display:flex;flex-direction:column;gap:2px}.cndt b{font-size:16px;font-weight:600}.cndt span{font-size:13px;color:var(--ink2)}
+.cndb{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.cndb button{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:16px;font-size:14.5px;font-weight:600}
+.cnb1{border:none;background:var(--primary);color:var(--primary-ink)}
+.cnb2{border:1px solid var(--line);background:var(--glass-strong);color:var(--ink)}
+.cnl{display:flex;flex-direction:column;gap:14px}
+.cnh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:0 4px}
+.cnh span:first-child{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--ink2)}.cnh span:last-child{font-size:12.5px;color:var(--ink2)}
+.cnf{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:20px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow)}
+.cnfr{display:flex;align-items:flex-start;gap:10px}
+.cnfi{flex:none;width:40px;height:40px;border-radius:12px;background:var(--surface2);color:var(--ink2);display:flex;align-items:center;justify-content:center}
+.cnfm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.cnfn{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cnfs{font-size:12.5px;color:var(--ink2)}.cnfs.bad{color:var(--bad-ink)}
+.cnpb{display:block;height:4px;margin-top:4px;border-radius:2px;background:var(--track);overflow:hidden}.cnpb i{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.cnrm{flex:none;width:36px;height:36px;margin:-4px -4px 0 0;border-radius:50%;border:none;background:transparent;color:var(--ink2);display:flex;align-items:center;justify-content:center;padding:0}
+.cnrg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding:3px;border-radius:14px;background:var(--surface2)}
+.cnr{min-height:36px;padding:0 2px;border:none;border-radius:11px;font-size:12.5px;font-weight:600;white-space:nowrap;background:transparent;color:var(--ink2)}
+.cnr[aria-checked=true]{box-shadow:0 2px 8px rgba(60,40,110,.12)}
+.cnr.r-base[aria-checked=true]{background:var(--primary-soft);color:var(--accent-ink)}
+.cnr.r-extra[aria-checked=true]{background:var(--hard-soft);color:var(--learn-ink)}
+.cnr.r-pics[aria-checked=true]{background:var(--easy-soft);color:var(--easy-ink)}
+.cnr.r-exam[aria-checked=true]{background:var(--bad-soft);color:var(--bad-ink)}
+.cnrh{font-size:12.5px;color:var(--ink2);padding:0 2px}
+.cnwarn{padding:12px 14px;border-radius:16px;background:var(--hard-soft);color:var(--learn-ink);font-size:13.5px;font-weight:500}
+.cnnote{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:16px;border:1px solid var(--glass-line);background:var(--glass);font-size:13px;line-height:1.45}
+.cnnote svg{flex:none;margin-top:2px;color:var(--accent-ink)}.cnnote b{font-weight:600}
+.cnpriv{margin:0 4px;font-size:12.5px;color:var(--ink2)}
+.cnbarw{position:fixed;left:0;right:0;bottom:0;z-index:30;box-sizing:border-box;padding:12px 16px calc(18px + env(safe-area-inset-bottom,0px));border-radius:26px 26px 0 0;border-top:1px solid var(--glass-line);background:var(--glass-strong);-webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);box-shadow:0 -8px 30px rgba(60,40,110,.10)}
+.cnbarin{display:flex;flex-direction:column;gap:8px;max-width:728px;margin:0 auto}
+.cnsum{font-size:12.5px;color:var(--ink2);text-align:center}
+.cnmain{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:58px;border:none;border-radius:29px;background:var(--surface2);color:var(--ink2);cursor:default}
+.cnmain span{display:flex;flex-direction:column;align-items:flex-start}.cnmain b{font-size:16.5px;font-weight:600}.cnmain small{font-size:12px;opacity:.78}
+.cnnew{display:inline-flex;align-items:center;gap:6px;flex:none;min-height:44px;padding:0 14px;border-radius:16px;border:none;background:var(--primary);color:var(--primary-ink);font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
+.cnnew svg,.cnd svg{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.cnnew.big{align-self:center}
+.cnds:empty{display:none}.cnds{display:flex;flex-direction:column;gap:10px}
+.cnd{display:flex;align-items:stretch;gap:6px}
+.cndgo{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:20px;border:1px dashed var(--mask-edge);background:var(--glass);box-shadow:var(--glass-shadow);color:inherit;font:inherit;text-align:left;cursor:pointer}
+.cndic{flex:none;width:44px;height:44px;border-radius:13px;background:var(--primary-soft);color:var(--accent);display:flex;align-items:center;justify-content:center}
+.cndn{flex:1;min-width:0;display:flex;flex-direction:column}.cndn b{font-size:16px;font-weight:600}.cndn small{font-size:12.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cndx{flex:none;width:44px;border-radius:16px;border:1px solid var(--glass-line);background:var(--glass);color:var(--ink2);display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+.crs .hhead .cnnew{margin-left:8px}.crs .chead .cnnew{margin-left:4px}
 </style>
 </body>
 </html>

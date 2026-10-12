@@ -33,7 +33,7 @@ let FN_DELAY = 0;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429.
    The same switches work for the course outline and plan requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
    trunc — cut short with stop_reason max_tokens; fail_after — 429 from the model service */
-let FN_DROP = false, FN_TRUNC = false, FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
+let FN_DROP = false, FN_TRUNC = false, FN_HANG = '', FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
 let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
 let FN_TAKEERR = '';       // takeerr=1: corpus_ai_take fails (as with a missing private.ai_global: 42P01) for p_units >= 1; takeerr=all: for p_units = 0 too (the status), also in corpus_ai_take_course
 let FN_NOCOURSE = '';   // nocourse=1: the database has no corpus_ai_take_course yet (supabase/ai.sql not run): PostgREST answers PGRST202; nocourse=err: the function fails (500) and has taken nothing
@@ -158,12 +158,12 @@ http.createServer(async (req, res) => {
   if (p === '/__lasttr') { send(res, 200, LAST_TR || {}); return; }   // the last translation request that reached the fake Claude
   if (p === '/__fn') {
     FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0;
-    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = u.searchParams.get('trunc') === '1'; FN_CASE = u.searchParams.get('case') === '1';
+    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = u.searchParams.get('hang') === 'plan' ? 'plan' : ''; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
     FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
     FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0;
     FN_TAKEERR = ['1', 'all'].includes(u.searchParams.get('takeerr')) ? u.searchParams.get('takeerr') : '';
-    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR }); return;
+    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, hang: FN_HANG, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR }); return;
   }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen); statusdelay=ms: the status (p_units=0) comes that much later; takeerr=1|all: the limit RPC fails
 
   /* ---------- auth ---------- */
@@ -392,6 +392,7 @@ http.createServer(async (req, res) => {
       FN_TR_N++;
       LAST_TR = { model: body.model, max_tokens: body.max_tokens, system: body.system, turns: body.messages.length, said, thinking: body.thinking };
       if (FN_FAIL_AFTER >= 0 && FN_TR_N > FN_FAIL_AFTER) { send(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'rate limit (test)' } }); return; }
+      if (FN_HANG && pm) await new Promise((r) => setTimeout(r, 6000));   // hang=plan: the plan request takes longer than the function waits (CORPUS_AI_TIMEOUT_MS)
       let inp = null; try { inp = JSON.parse(said.slice(at + 8)); } catch { /* not JSON */ }
       inp = inp || {};
       const norm = (v) => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -418,7 +419,7 @@ http.createServer(async (req, res) => {
         if (FN_DROP) delete ans.parts;
       }
       text = JSON.stringify(ans);
-      if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
+      if (FN_TRUNC && (FN_TRUNC === '1' || pm)) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }   // trunc=plan cuts only the plan
     } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length, thinking: think || null })
       : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
     send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: stop, usage: { input_tokens: 10, output_tokens: 10 } });

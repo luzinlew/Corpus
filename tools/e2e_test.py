@@ -360,6 +360,15 @@ def plan_files(d):
     im.save(d / 'atlas-sildid.png')
 
 
+def btn_sub(lang, est, left):
+    """The line under «Make the plan» on step 1, worked out from the estimate and what is left (the same rule as the app, spelled out here): too little left → the warning, else «≈ N requests · M left»."""
+    if left is not None and left < est:
+        return {'ru': f'не хватит лимита: нужно ≈{est}, осталось {left}', 'en': f'not enough limit: ≈{est} needed, {left} left'}[lang]
+    ru_n = 'запрос ИИ' if est % 10 == 1 and est % 100 != 11 else 'запроса ИИ' if 2 <= est % 10 <= 4 and not 12 <= est % 100 <= 14 else 'запросов ИИ'
+    base = {'ru': f'≈ {est} {ru_n}', 'en': f'≈ {est} AI request' + ('' if est == 1 else 's')}[lang]
+    return base if left is None else base + {'ru': f' · осталось {left}', 'en': f' · {left} left'}[lang]
+
+
 async def main():
     from playwright.async_api import async_playwright
     # SIGTERM cancels only this task (as asyncio does for SIGINT): Playwright closes normally and the finally below stops the servers
@@ -380,7 +389,7 @@ async def main():
     big_lesson_file(tmp / 'corpus-folder-big.json')
     anki_file(tmp / 'Kolju.apkg')
     deno = [shutil.which('deno')] if shutil.which('deno') else ['npx', '--yes', 'deno']
-    fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key', SUPABASE_SERVICE_ROLE_KEY='service-key')
+    fn_env = dict(os.environ, SUPABASE_URL=API, ANTHROPIC_BASE_URL=API, ANTHROPIC_API_KEY='test-anthropic-key', SUPABASE_SERVICE_ROLE_KEY='service-key', CORPUS_AI_TIMEOUT_MS='1500')   # the model may take 1.5 s here (hang=plan makes the fake take longer)
     api_env = dict(os.environ, FAKE_FN_URL=f'http://localhost:{FN_PORT}', FAKE_AI_LIMIT=str(AI_LIMIT), FAKE_ADMINS='lev@test.ee',
                    FAKE_AI_COURSE_FREE='0')   # no course allowance for the scenarios before «the course allowance» (a translation is paid from the daily one there); that scenario sets it through /__course
     procs = []
@@ -423,7 +432,7 @@ async def main():
                 #  ERR_ABORTED is a request cut short by the test's own reloads, not a failure)
                 pg.on('requestfailed', lambda r: 'fonts.g' not in r.url and 'ERR_ABORTED' not in str(r.failure) and errs.append('failed: ' + r.url + ' (' + str(r.failure) + ')'))
                 pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url)
-                      and not ('/functions/v1/corpus-ai' in r.url and (r.status in (404, 429) or (r.status == 502 and refusal_window['on'])))   # provoked: function off, daily limit; the model service refuses (only inside refusal_window)
+                      and not ('/functions/v1/corpus-ai' in r.url and (r.status in (404, 429) or (r.status in (502, 504) and refusal_window['on'])))   # provoked: function off, daily limit; the model service refuses (only inside refusal_window)
                       and not ('/rpc/corpus_share_open' in r.url and r.status == 404)             # provoked: a wrong share code
                       and not (quota_window['on'] and r.status in (400, 413, 503))                 # provoked: the account limits (see «limits» below)
                       and errs.append(f'http {r.status}: {r.url}'))
@@ -2533,11 +2542,11 @@ async def main():
                 await ui_lang(pg, lang)
                 await pg.evaluate("go({name:'courseNew',did:'" + did + "'})")
                 await pg.wait_for_selector('.cnw .cnf')
-                seen[lang] = await pg.evaluate("({t:document.querySelector('.cnti').innerText,r:[...document.querySelectorAll('.cnf')[0].querySelectorAll('.cnr')].map(b=>b.innerText),s:document.querySelector('.cnfs').innerText,note:document.querySelector('.cnnote').innerText,priv:document.querySelector('.cnpriv').innerText,sum:document.querySelector('.cnsum').innerText,btn:document.querySelector('.cnmain').innerText,lab:document.querySelector('.cnnm span').textContent,cl:document.querySelector('.cnx').getAttribute('aria-label')})")
+                seen[lang] = await pg.evaluate("({t:document.querySelector('.cnti').innerText,r:[...document.querySelectorAll('.cnf')[0].querySelectorAll('.cnr')].map(b=>b.innerText),s:document.querySelector('.cnfs').innerText,note:document.querySelector('.cnnote').innerText,priv:document.querySelector('.cnpriv').innerText,sum:document.querySelector('.cnsum').innerText,btn:document.querySelector('.cnmain').innerText,lab:document.querySelector('.cnnm span').textContent,cl:document.querySelector('.cnx').getAttribute('aria-label'),est:cnEst(CDRAFTS.get(view.did)),left:cnLeft()})")
             check('new course: Russian texts', seen['ru']['t'] == 'Новый курс' and seen['ru']['r'] == ['Основа', 'Дополнение', 'Картинки', 'Экзамен'] and seen['ru']['s'] == 'PDF · 3 стр. · текст прочитан' and seen['ru']['note'].startswith('Материалы на эстонском.')
-                  and seen['ru']['priv'].startswith('В облако уходит только текст страниц. Фото и PDF остаются на этом устройстве') and seen['ru']['btn'].startswith('Составить план') and '≈ 5 запросов ИИ' in seen['ru']['btn'] and seen['ru']['lab'] == 'Название курса' and 'файл' in seen['ru']['sum'], json.dumps(seen['ru'], ensure_ascii=False))
+                  and seen['ru']['priv'].startswith('В облако уходит только текст страниц. Фото и PDF остаются на этом устройстве') and seen['ru']['btn'] == 'Составить план\n' + btn_sub('ru', seen['ru']['est'], seen['ru']['left']) and seen['ru']['lab'] == 'Название курса' and 'файл' in seen['ru']['sum'], json.dumps(seen['ru'], ensure_ascii=False))
             check('new course: English texts', seen['en']['t'] == 'New course' and seen['en']['r'] == ['Core', 'Extra', 'Pictures', 'Exam'] and seen['en']['s'] == 'PDF · 3 p. · text read' and seen['en']['note'].startswith('Materials in Estonian.')
-                  and seen['en']['priv'].startswith('Only the page text goes to the cloud. Photos and PDFs stay on this device') and seen['en']['btn'].startswith('Make the plan') and '≈ 5 AI requests' in seen['en']['btn'] and seen['en']['lab'] == 'Course name', json.dumps(seen['en']))
+                  and seen['en']['priv'].startswith('Only the page text goes to the cloud. Photos and PDFs stay on this device') and seen['en']['btn'] == 'Make the plan\n' + btn_sub('en', seen['en']['est'], seen['en']['left']) and seen['en']['lab'] == 'Course name', json.dumps(seen['en']))
             check('new course: Estonian texts', seen['et']['t'] == 'Uus kursus' and seen['et']['r'] == ['Põhi', 'Täiendus', 'Pildid', 'Eksam'] and seen['et']['s'] == 'PDF · 3 lk · tekst loetud' and seen['et']['note'].startswith('Materjalid on eesti keeles.') and seen['et']['lab'] == 'Kursuse nimi', json.dumps(seen['et'], ensure_ascii=False))
             # the four roles fit on one line (no overlap, no cut text) at 360 and 390 px, in all three languages and both themes
             lay = []
@@ -2704,8 +2713,8 @@ async def main():
             check('plan: roles of the fixtures — lecture Põhi, extra reading Täiendus, «Kollokvium … küsimused» Eksam, picture Pildid',
                   roles == {'Anatoomia loeng.pdf': 'base', 'Lisa lugemine.pdf': 'extra', 'Kollokvium plaan küsimused.pdf': 'exam', 'atlas-sildid.png': 'pics'}, json.dumps(roles, ensure_ascii=False))
             btn = await pg.inner_text('.cnmain')
-            check('plan: with a ready «Core» the button is on: «≈ 5 TI päringut · jäänud 20» (2 outline requests + 3 for the plan; 20 left of the course allowance)',
-                  not await pg.is_disabled('.cnmain') and 'Koosta plaan' in btn and '≈ 5 TI päringut · jäänud 20' in btn, btn)
+            check('plan: with a ready «Core» the button is on: «≈ 7 TI päringut · jäänud 20» (2 outline requests + 5 for the plan; 20 left of the course allowance)',
+                  not await pg.is_disabled('.cnmain') and 'Koosta plaan' in btn and '≈ 7 TI päringut · jäänud 20' in btn, btn)
 
             # --- cancel while the AI reads the Core: the draft is whole, nothing more is sent ---
             urllib.request.urlopen(API + '/__fn?delay=2500')
@@ -2716,34 +2725,48 @@ async def main():
               sp:document.querySelector('.cnspend').innerText,bar:document.querySelector('#cnBar').innerText,on:[...document.querySelectorAll('.cnsl.on')].map(e=>e.innerText),back:[...document.querySelectorAll('.cnstb')].map(e=>e.dataset.s)})""")
             check('plan: step 2 «reading»: title, «you can minimise the app», the check-list with the current step, the spend line, «Tühista»',
                   'TI koostab plaani' in rd['t'] and 'Rakenduse võib minimeerida' in rd['t'] and len(rd['rows']) == 5 and rd['rows'][0].startswith('done|Siltide lugemine fotodelt / Silte leitud') and rd['rows'][1].startswith('cur|Loen „Põhi“ ja „Täiendus“ materjale / päring 1 / 2')
-                  and all(r.startswith('todo|') for r in rd['rows'][2:]) and rd['sp'] == 'Kasutatud 0 / ≈ 5 päringut · kursuste limiit: jäänud 20' and rd['bar'] == 'Tühista' and rd['on'] == ['2. Plaan'] and rd['back'] == ['0'], json.dumps(rd, ensure_ascii=False))
+                  and all(r.startswith('todo|') for r in rd['rows'][2:]) and rd['sp'] == 'Kasutatud 0 / ≈ 7 päringut · kursuste limiit: jäänud 20' and rd['bar'] == 'Tühista' and rd['on'] == ['2. Plaan'] and rd['back'] == ['0'], json.dumps(rd, ensure_ascii=False))
             await pg.click('[data-cn=rcancel]')
             await pg.wait_for_selector('.cnf')
             cn = await pg.evaluate("({st:CDRAFTS.get(view.did)._run.state,n:CDRAFTS.get(view.did).mats.length,view:view.step||1})")
             await pg.wait_for_timeout(3500)
             check('plan: «Tühista» stops the run and goes back to step 1, the draft (4 materials) is whole', cn == {'st': 'stop', 'n': 4, 'view': 1}, json.dumps(cn))
-            check('plan: after the cancel nothing more goes out (one outline request was sent, no second one, no plan) and no plan is written',
-                  tasks_of(ai_p) == ['outline'] and not any(r['coll'] == 'cplan' for r in state()['docs']), json.dumps([tasks_of(ai_p)]))
+            check('plan: after the cancel nothing more goes out (the two outline requests that were sent in parallel, no plan) and no plan is written',
+                  tasks_of(ai_p) == ['outline', 'outline'] and not any(r['coll'] == 'cplan' for r in state()['docs']), json.dumps([tasks_of(ai_p)]))
             u0 = used()
-            check('plan: …the request that was already on its way is the only one paid (1 of the course allowance)', u0 == 1, str(u0))
+            check('plan: …the two requests that were already on their way are paid (2 of the course allowance)', u0 == 2, str(u0))
 
             # --- the limit refuses the plan: understandable text with what is left; no «Retry»; what was done is kept ---
             urllib.request.urlopen(API + '/__fn')
             urllib.request.urlopen(API + f'/__course?free={u0 + 2}&limit=0')
             n0 = len(ai_p)
+            await pg.evaluate("CORPUS_WEB.aiCourse={left:2,free:%d,pool:'course'}" % (u0 + 2))
+            await pg.evaluate("go({name:'courseNew',did:'" + did + "'})")
+            await pg.wait_for_selector('.cnf')
+            sub = await pg.inner_text('.cnmain')
             await pg.click('.cnmain')
+            await pg.wait_for_selector('#layer .dlg')
+            lim_t = await pg.inner_text('#layer .dlg')
+            await pg.click('#layer [data-s="0"]')
+            await pg.wait_for_timeout(300)
+            check('plan: when the limit is known to be too small the button says so («limiit ei piisa: vaja ≈7, jäänud 2») and a click asks first («juba saadetud päringud arvestatakse»); «Tühista» sends nothing',
+                  'limiit ei piisa: vaja ≈7, jäänud 2' in sub and 'juba saadetud päringud arvestatakse' in lim_t and len(ai_p) == n0 and await pg.query_selector('.cnrd') is None, sub + '|' + lim_t)
+            await pg.click('.cnmain')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer [data-s="1"]')
             await pg.wait_for_selector('.cnerr', timeout=120000)
             er = await pg.evaluate("({t:document.querySelector('.cnerr').innerText,retry:!!document.querySelector('[data-cn=rretry]'),back:!!document.querySelector('[data-cn=rback]'),rows:[...document.querySelectorAll('.cnrow')].map(r=>r.className.replace('cnrow ','').split(' ')[0]),sp:document.querySelector('.cnspend').innerText})")
             check('plan: the limit refuses the plan (429): «Kursuste TI limiit on otsas – päringuid jäänud: 0», no «Proovi uuesti», a way back; the plan row is marked',
                   'Kursuste TI limiit on otsas – päringuid jäänud: 0' in er['t'] and not er['retry'] and er['back'] and er['rows'] == ['done', 'done', 'done', 'done', 'bad'] and 'jäänud 0' in er['sp'], json.dumps(er, ensure_ascii=False))
             check('plan: …two outline requests were paid (2 of 2), the plan request was refused and cost nothing', tasks_of(ai_p[n0:]) == ['outline', 'outline', 'plan'] and used() == u0 + 2, json.dumps([tasks_of(ai_p[n0:]), used()]))
-            urllib.request.urlopen(API + f'/__course?free={u0 + 2 + 30}&limit=')
+            urllib.request.urlopen(API + f'/__course?free={u0 + 2 + 300}&limit=')
             await pg.click('[data-cn=rback]')
             await pg.wait_for_selector('.cnf')
+            await pg.evaluate("CORPUS_WEB.aiCourse={left:300,free:300,pool:'course'}")
             n1 = len(ai_p)
             await pg.click('.cnmain')
             await pg.wait_for_selector('.cnph', timeout=120000)
-            check('plan: after the limit is raised the second try pays only the plan (3): the outline answers of the refused run are kept', tasks_of(ai_p[n1:]) == ['plan'] and used() == u0 + 2 + 3, json.dumps([tasks_of(ai_p[n1:]), used()]))
+            check('plan: after the limit is raised the second try pays only the plan (5): the outline answers of the refused run are kept', tasks_of(ai_p[n1:]) == ['plan'] and used() == u0 + 2 + 5, json.dumps([tasks_of(ai_p[n1:]), used()]))
             la = lastai()
             check('plan: the plan request: model claude-sonnet-5-5 with thinking between_tools, 8000 tokens, the function\'s prompt «CORPUS-PLAN et»',
                   la['model'] == 'claude-sonnet-5-5' and la['thinking'] == {'type': 'between_tools'} and la['max_tokens'] == 8000 and la['said'].startswith('CORPUS-PLAN et\n') and la['turns'] == 1, json.dumps({k: la[k] for k in ('model', 'thinking', 'max_tokens')}))
@@ -2763,6 +2786,7 @@ async def main():
                   by['Spina scapulae']['src'] == 'b|Anatoomia loeng|1' and by['Fossa supraspinata']['src'] == 'q|Kollokvium plaan küsimused|1' and by['Caput humeri']['src'] == 'q|Kollokvium plaan küsimused|2'
                   and by['Processus coracoideus']['src'] == 't|Anatoomia loeng|1' and by['Tuberculum infraglenoidale']['src'] == 't|Lisa lugemine|1' and by['Margo medialis']['src'] == 'f', json.dumps({k: v['src'] for k, v in by.items()}, ensure_ascii=False))
             mid_ph = await pg.evaluate("CDRAFTS.get(view.did).mats.find(m=>m.kind==='img').id")
+            mid_ph0 = mid_ph
             les = {l['title']: l for p in doc['parts'] for l in p['lessons']}
             check('plan: the lessons whose structure is printed on the picture have it as their picture (p:<material>:<photo>), the others have none (null)',
                   les['Spina scapulae']['pic'] == f'p:{mid_ph}:0' and les['Margo medialis']['pic'] == f'p:{mid_ph}:0' and les['Processus coracoideus']['pic'] is None, json.dumps({k: v['pic'] for k, v in les.items()}))
@@ -2777,8 +2801,8 @@ async def main():
             check('plan: step 3: «5 osa · 10 õppetundi», legend P1 3 · P2 5 · P3 2, parts numbered with their names, no pictures made from tags in the AI\'s names',
                   sc['h'] == '5 osa · 10 õppetundi' and sc['leg'] == 'P1 · 3 P2 · 5 P3 · 2' and sc['k'] == 'TI soovitab' and sc['n'] == 10 and sc['parts'][0] == '1|Abaluu|4 õppetundi' and sc['parts'][1] == '2|Humerus|2 õppetundi'
                   and sc['parts'][2].startswith('3|<img src=x onerror=window.__xss=7>|') and sc['parts'][4] == '5|Atlas|2 õppetundi' and sc['xss'], json.dumps(sc, ensure_ascii=False))
-            check('plan: …the bar: «≈ 5 TI päringut», «Koosta plaan uuesti» and «Koosta kursus» (off, «järgmine samm tuleb varsti»); step 1 of the header goes back',
-                  'Koosta plaan uuesti' in sc['bar'] and 'Koosta kursus' in sc['bar'] and 'järgmine samm tuleb varsti' in sc['bar'] and '≈ 5 TI päringut' in sc['bar'] and sc['stepb'] == ['0'] and await pg.is_disabled('.cnbtns .cnmain'), sc['bar'])
+            check('plan: …the bar: «≈ 7 TI päringut», «Koosta plaan uuesti» and «Koosta kursus» (off, «järgmine samm tuleb varsti»); step 1 of the header goes back',
+                  'Koosta plaan uuesti' in sc['bar'] and 'Koosta kursus' in sc['bar'] and 'järgmine samm tuleb varsti' in sc['bar'] and '≈ 7 TI päringut' in sc['bar'] and sc['stepb'] == ['0'] and await pg.is_disabled('.cnbtns .cnmain'), sc['bar'])
             ls = await pg.evaluate("""[...document.querySelectorAll('.cnpl')].map(l=>({t:l.querySelector('.cnlt').innerText,m:l.querySelector('.cnplm small').innerText,pp:l.querySelector('.cnpp').innerText.replace(/\\s+/g,' '),warn:!!l.querySelector('.cnwarn')}))""")
             lb2 = {x['t']: x for x in ls}
             check('plan: a lesson shows its picture («pilt: atlas-sildid.png»), the P counters, and for no picture the warning «Sobivat pilti pole …»',
@@ -2809,9 +2833,16 @@ async def main():
             await pg.click('.cnstb[data-s="0"]')
             await pg.wait_for_selector('.cnf')
             check('plan: the first step of the header goes back to the materials', await pg.evaluate("(view.step||1)") == 1 and await pg.query_selector('#cnName') is not None)
+            check('plan: with a plan the bar of step 1 has «Plaani juurde» and «Koosta uuesti»; «Plaani juurde» opens the plan', 'Plaani juurde' in await pg.inner_text('#cnBar') and 'Koosta uuesti' in await pg.inner_text('.cnmain'))
+            await pg.click('[data-cn=toplan]')
+            await pg.wait_for_selector('.cnph')
+            await pg.click('.cnstb[data-s="0"]')
+            await pg.wait_for_selector('.cnf')
             await pg.click('.cnmain')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer [data-s="1"]')
             await pg.wait_for_selector('.cnph', timeout=120000)
-            check('plan: «Koosta plaan» again from step 1 makes the plan once more (2 outlines + the plan; the photo is not read again: its labels are known)',
+            check('plan: «Koosta uuesti» from step 1 makes the plan once more (2 outlines + the plan; the photo is not read again: its labels are known)',
                   tasks_of(ai_p[ct_before:]) == ['outline', 'outline', 'plan'] and await pg.evaluate("CDRAFTS.get(view.did)._run.dt.lab.n")==0, json.dumps(tasks_of(ai_p[ct_before:])))
 
             # --- errors: the AI is not available → «Retry» (what was done is not asked again); an answer in a wrong format → «Retry» ---
@@ -2822,7 +2853,7 @@ async def main():
             await pg.wait_for_selector('.cnerr', timeout=120000)
             et = await pg.evaluate("({t:document.querySelector('.cnerr').innerText,retry:document.querySelector('[data-cn=rretry]')?document.querySelector('[data-cn=rretry]').innerText:null})")
             refusal_window['on'] = False
-            check('plan: the AI is not available (the model service refuses) → «TI pole praegu saadaval …» and «Proovi uuesti»', 'TI pole praegu saadaval' in et['t'] and et['retry'] == 'Proovi uuesti' and tasks_of(ai_p[n2:]) == ['outline', 'outline'], json.dumps([et, tasks_of(ai_p[n2:])], ensure_ascii=False))
+            check('plan: the AI is not available (the model service refuses) → «TI pole praegu saadaval …» and «Proovi uuesti»', 'TI pole praegu saadaval' in et['t'] and et['retry'].startswith('Proovi uuesti') and tasks_of(ai_p[n2:]) == ['outline', 'outline'], json.dumps([et, tasks_of(ai_p[n2:])], ensure_ascii=False))
             urllib.request.urlopen(API + '/__fn')
             n3 = len(ai_p)
             await pg.click('[data-cn=rretry]')
@@ -2838,6 +2869,37 @@ async def main():
                 await pg.click('[data-cn=rretry]')
                 await pg.wait_for_selector('.cnph', timeout=120000)
             check('plan: …and after it the plan is there again', await pg.inner_text('.cnph') == '5 osa · 10 õppetundi')
+
+            # --- the plan comes back cut short or late: a simple plan is built without the AI (nothing more is asked, 5 units paid) ---
+            fbdoc = lambda: next((r['data'] for r in state()['docs'] if r['coll'] == 'cplan'), {})
+            for mode, why in (('trunc=plan', 'cut short'), ('hang=plan', 'late (the function gives up: 504 timeout)')):
+                urllib.request.urlopen(API + '/__fn?' + mode)
+                refusal_window['on'] = True
+                n_f, c_f = len(ai_p), used()
+                await replan_go()
+                await pg.wait_for_selector('.cnph', timeout=120000)
+                refusal_window['on'] = False
+                await state_when(lambda s: next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {}).get('fallback') is True)
+                fd = fbdoc()
+                fl = [l for p in fd['parts'] for l in p['lessons']]
+                ui = await pg.evaluate("({h:document.querySelector('.cnph').innerText,w:[...document.querySelectorAll('.cnwarn')].map(e=>e.innerText).join('|'),ft:[...document.querySelectorAll('.cnlt')].map(e=>e.innerText),bs:document.querySelector('.cnbtns .cnbs').innerText})")
+                check(f'plan: the plan is {why} → a simple plan by topics without a second request: outline ×2 + plan once, 7 units paid', tasks_of(ai_p[n_f:]) == ['outline', 'outline', 'plan'] and used() - c_f == 7, json.dumps([tasks_of(ai_p[n_f:]), used() - c_f]))
+                check(f'plan: …{why}: the bar «TI ei suutnud plaani koostada – koostati lihtne teemade plaan», the cost «võtab veel ≈ 7» under «Koosta plaan uuesti»', 'TI ei suutnud plaani koostada – koostati lihtne teemade plaan' in ui['w'] and ui['bs'] == 'võtab veel ≈ 7', json.dumps(ui, ensure_ascii=False))
+                lsp = next(l for l in fl if l['title'] == 'Spina scapulae')
+                check(f'plan: …{why}: a part per topic (Abaluu, Humerus, ATTACK, Lisa) and «Muu» with «Cetera» for what is only on the picture; lessons of the topic ordered by P, a picture with the most matching labels',
+                      [p['name'] for p in fd['parts']] == ['Abaluu', 'Humerus', 'ATTACK', 'Lisa', 'Muu'] and [t_['la'] for t_ in lsp['terms']] == ['Spina scapulae', 'Fossa supraspinata', 'Processus coracoideus', 'Acromion scapulae'] and lsp['pic'] == f'p:{mid_ph0}:0'
+                      and [l['title'] for l in fd['parts'][4]['lessons']] == ['Cetera'] and sorted(t_['la'] for t_ in fd['parts'][4]['lessons'][0]['terms']) == ['Angulus inferior', 'Margo medialis'] and ui['h'] == '5 osa · 5 õppetundi', json.dumps(fd, ensure_ascii=False)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await replan_go()
+            await pg.wait_for_selector('.cnph', timeout=120000)
+            await state_when(lambda s: not next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {}).get('fallback') and next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {}).get('at', 0) > fd['at'])
+            check('plan: «Koosta plaan uuesti» then makes the real plan again (no «simple plan» bar)', await pg.inner_text('.cnph') == '5 osa · 10 õppetundi' and 'TI ei suutnud' not in await pg.inner_text('#cnPl'), await pg.inner_text('.cnph'))
+            # structures that did not get into the plan: a line with the number and a list
+            await pg.evaluate("(()=>{const d=CDRAFTS.get('" + did + "');d._plan.lost=['Lateral view','Fig'];cnPlanPaint();})()")
+            lt = await pg.inner_text('.cnlost')
+            await pg.click('.cnlost')
+            check('plan: structures that did not get into the plan: «2 struktuuri ei jõudnud plaani» and a list when opened', lt == '2 struktuuri ei jõudnud plaani' and 'Lateral view · Fig' in await pg.inner_text('.cnlostl'), lt)
+            await pg.evaluate("(()=>{const d=CDRAFTS.get('" + did + "');d._plan.lost=[];d._lostOpen=false;cnPlanPaint();})()")
 
             # --- edits of the plan (T-018, B): P, off, picture, a lesson and a structure added, a part renamed; all saved in cplan; stale materials; «Make again» asks first ---
             urllib.request.urlopen(API + '/__course?free=500&limit=')
@@ -3036,10 +3098,10 @@ async def main():
                 await pg.wait_for_selector('.cnph')
                 s3 = await pg.evaluate("({k:document.querySelector('.cnpk').innerText,h:document.querySelector('.cnph').innerText,bar:document.querySelector('#cnBar').innerText.replace(/\\n+/g,' / '),leg:document.querySelector('.cnpleg').innerText.replace(/\\s+/g,' ')})")
                 seen[lang] = [s2, s3]
-            check('plan: step 2 in Russian', seen['ru'][0]['t'] == 'ИИ составляет план | Обычно 1–2 минуты. Можно свернуть приложение.' and seen['ru'][0]['rows'][0] == 'Подписи на фото / Подписи найдены на 1 из 1 фото' and seen['ru'][0]['rows'][1] == 'Читаю «Основу» и «Дополнение» / запрос 1 из 2'
+            check('plan: step 2 in Russian', seen['ru'][0]['t'] == 'ИИ составляет план | Фото читаются на этом устройстве — это может занять несколько минут. Можно свернуть приложение.' and seen['ru'][0]['rows'][0] == 'Подписи на фото / Подписи найдены на 1 из 1 фото' and seen['ru'][0]['rows'][1] == 'Читаю «Основу» и «Дополнение» / запрос 1 из 2'
                   and seen['ru'][0]['sp'].startswith('Израсходовано 1 из ≈ 5 запросов') and seen['ru'][0]['bar'] == 'Отменить', json.dumps(seen['ru'][0], ensure_ascii=False))
-            check('plan: step 2 in English', seen['en'][0]['t'] == 'The AI is making the plan | Usually 1–2 minutes. You can minimise the app.' and seen['en'][0]['rows'][1] == 'Reading “Core” and “Extra” / request 1 of 2' and seen['en'][0]['sp'].startswith('Used 1 of ≈ 5 requests') and seen['en'][0]['bar'] == 'Cancel', json.dumps(seen['en'][0], ensure_ascii=False))
-            check('plan: step 2 in Estonian', seen['et'][0]['t'] == 'TI koostab plaani | Tavaliselt 1–2 minutit. Rakenduse võib minimeerida.' and seen['et'][0]['rows'][1] == 'Loen „Põhi“ ja „Täiendus“ materjale / päring 1 / 2' and seen['et'][0]['sp'].startswith('Kasutatud 1 / ≈ 5 päringut') and seen['et'][0]['bar'] == 'Tühista', json.dumps(seen['et'][0], ensure_ascii=False))
+            check('plan: step 2 in English', seen['en'][0]['t'] == 'The AI is making the plan | Photos are read on this device, which may take a few minutes. You can minimise the app.' and seen['en'][0]['rows'][1] == 'Reading “Core” and “Extra” / request 1 of 2' and seen['en'][0]['sp'].startswith('Used 1 of ≈ 5 requests') and seen['en'][0]['bar'] == 'Cancel', json.dumps(seen['en'][0], ensure_ascii=False))
+            check('plan: step 2 in Estonian', seen['et'][0]['t'] == 'TI koostab plaani | Fotod loetakse selles seadmes, see võib võtta mõne minuti. Rakenduse võib minimeerida.' and seen['et'][0]['rows'][1] == 'Loen „Põhi“ ja „Täiendus“ materjale / päring 1 / 2' and seen['et'][0]['sp'].startswith('Kasutatud 1 / ≈ 5 päringut') and seen['et'][0]['bar'] == 'Tühista', json.dumps(seen['et'][0], ensure_ascii=False))
             check('plan: step 3 in three languages', seen['ru'][1]['k'] == 'ИИ предлагает' and seen['ru'][1]['h'] == '4 части · 8 уроков' and 'Пересоставить план' in seen['ru'][1]['bar'] and 'Собрать курс' in seen['ru'][1]['bar'] and 'следующий шаг — скоро' in seen['ru'][1]['bar']
                   and seen['en'][1]['k'] == 'The AI suggests' and seen['en'][1]['h'] == '4 parts · 8 lessons' and 'Make the plan again' in seen['en'][1]['bar'] and 'Build the course' in seen['en'][1]['bar']
                   and seen['et'][1]['k'] == 'TI soovitab' and seen['et'][1]['h'] == '4 osa · 8 õppetundi' and 'Koosta kursus' in seen['et'][1]['bar'], json.dumps(seen, ensure_ascii=False)[:700])
@@ -3050,7 +3112,7 @@ async def main():
             await ui_lang(pg, 'et')
             await pg.evaluate("go({name:'courseNew',did:'" + did + "'})")
             await pg.wait_for_selector('.cnf')
-            check('plan: the button of step 1 in Russian («Составить план / ≈ 5 запросов ИИ · осталось N»)', b_ru.startswith('Составить план / ≈ 5 запросов ИИ · осталось '), b_ru)
+            check('plan: the button of step 1 in Russian («Составить заново / ≈ 7 запросов ИИ · осталось N»)', b_ru.startswith('Составить заново / ≈ 7 запросов ИИ · осталось '), b_ru)
 
             # --- units: the pure parts ---
             un = await pg.evaluate("""(()=>{
@@ -3066,8 +3128,25 @@ async def main():
             check('plan: «looks like Latin» (≥ 2 letters, no Estonian letters, no digits, no noise) and the merge by normalised Latin (case, spaces, punctuation, accents, æ)',
                   un['lat'] == ['Spina scapulae', 'SPINA scapulae', 'Fossa supraspinata', '', '', '', 'Margo medialis (sin.)', '', 'Os', '', '', 'Angulus inferior', ''] and un['norm'] == [True, 'aesculapius', 'fossa'], json.dumps(un['lat'], ensure_ascii=False))
             check('plan: the answer of the AI is checked — unknown ids and repeated terms dropped, an unknown picture becomes none, empty parts dropped, the rest is reported as left',
-                  un['a'] == {'parts': [{'name': 'A', 'lessons': [{'title': 'x', 'pic': 'p1', 'terms': ['t1', 't2']}, {'title': 'y', 'pic': None, 'terms': ['t3']}]}], 'left': ['t4'], 'lessons': 2}, json.dumps(un['a']))
+                  un['a'] == {'parts': [{'name': 'A', 'lessons': [{'title': 'x', 'pic': 'p1', 'terms': ['t1', 't2']}, {'title': 'y', 'pic': None, 'terms': ['t3']}]}], 'left': ['t4'], 'dropped': [], 'lessons': 2}, json.dumps(un['a']))
             check('plan: …at most 60 lessons (the others are left), at most 40 terms in a lesson, nothing usable → an error («invalid_json»)', un['b'] == [60, [60], 10] and un['c'] == [40] and un['d'] == ['ERR invalid_json'] * 4, json.dumps([un['b'], un['c'], un['d']]))
+
+            un2 = await pg.evaluate("""(()=>{
+              const ex=(q,t)=>(' '+cnStem(q)+' ').indexOf(' '+cnStem(t)+' ')>=0;
+              const T={order:Array.from({length:70},(_,i)=>({id:'t'+i,la:'Os n'+i,p:2,src:'f'})),pics:new Map(),cut:['Extra one']};
+              const lessons=Array.from({length:60},(_,i)=>({title:'L'+i,terms:['t'+i]}));
+              const doc=cnPlanBuild({parts:[{name:'A'.repeat(60),lessons:lessons}],drop:['t60','nope','t0']},T);
+              return {abbr:[cnNorm('Proc. coracoideus')===cnNorm('Processus coracoideus'),cnNorm('m. biceps brachii'),cnNorm('Lig. latum')],
+                stem:[ex('Kirjelda arteriae subclaviae asendit','Arteria subclavia'),ex('Kirjelda arteriae subclaviae asendit','Arteria carotis'),ex('proc. coracoideus on','Processus coracoideus')],
+                weak:[cnWeak('caput'),cnWeak('Caput humeri'),cnWeak('acromion')],
+                lat:['Lateral view','Anterior view','Fig. 3','Figure','Acromion','Atlas','Os','Spina scapulae','a b c d e f g h i j'].map(cnLatin),
+                doc:[doc.parts.length,doc.parts[0].name.length,doc.parts[1].lessons.map(l=>l.title+':'+l.terms.length),doc.parts[1].name,doc.lost,doc.parts.reduce((a,p)=>a+p.lessons.length,0),
+                     doc.parts.reduce((a,p)=>a+p.lessons.reduce((b,l)=>b+l.terms.length,0),0)]};})()""")
+            check('plan: abbreviations at the start are spelled out when terms are merged («Proc. coracoideus» = «Processus coracoideus»); the search in texts is by stems (6 letters): «arteriae subclaviae» finds «Arteria subclavia»; one common word («caput») is weak',
+                  un2['abbr'] == [True, 'musculus biceps brachii', 'ligamentum latum'] and un2['stem'] == [True, False, True] and un2['weak'] == [True, False, False], json.dumps(un2['abbr'] + un2['stem'] + un2['weak']))
+            check('plan: captions are no terms («Lateral view», «Anterior view», «Fig. 3»), a Latin ending is needed, up to 9 words', un2['lat'] == ['', '', '', '', 'Acromion', 'Atlas', 'Os', 'Spina scapulae', ''], json.dumps(un2['lat']))
+            check('plan: what the AI left out goes to a tail lesson «Cetera» even past 60 lessons (10 left in a lesson of its own), what it dropped (and what was cut at 1500) is in doc.lost, a part name is cut to 40',
+                  un2['doc'][0] == 2 and un2['doc'][1] == 40 and un2['doc'][2] == ['Cetera:9'] and un2['doc'][3] and un2['doc'][4] == ['Os n60', 'Extra one'] and un2['doc'][5] == 61 and un2['doc'][6] == 69, json.dumps(un2['doc'], ensure_ascii=False))
 
             # --- delete the draft: cdraft, ctext, cplan and the originals go ---
             await pg.evaluate("go({name:'courses'})")
@@ -3102,7 +3181,7 @@ async def main():
                 'page with a foreign key': with_o(input={'pages': [pg_of(x=1)]}), 'n is 0': with_o(input={'pages': [pg_of(n=0)]}), 'n is 1.5': with_o(input={'pages': [pg_of(n=1.5)]}), 'n is 10000': with_o(input={'pages': [pg_of(n=10000)]}), 'n is a string': with_o(input={'pages': [pg_of(n='1')]}),
                 'text is a number': with_o(input={'pages': [pg_of(text=5)]}), 'text of 6001': with_o(input={'pages': [pg_of(text='a' * 6001)]}),
                 'no em': with_o(input={'pages': [{'n': 1, 'text': 'abc'}]}), 'em of 61': with_o(input={'pages': [pg_of(em=['a'] * 61)]}), 'em string of 201': with_o(input={'pages': [pg_of(em=['a' * 201])]}), 'em with a number': with_o(input={'pages': [pg_of(em=[1])]}),
-                'nothing to read': with_o(input={'pages': [pg_of(text='', em=[])]}),
+                'nothing to read': with_o(input={'pages': [pg_of(text='', em=[])]}), 'nothing to read, an empty bold line': with_o(input={'pages': [pg_of(text='', em=[''])]}),
                 'JSON over 40000': with_o(input={'pages': [pg_of(n=i + 1, text='a' * 6000, em=[]) for i in range(7)]}),
                 'JSON over 40000 because of quotes': with_o(input={'pages': [pg_of(n=i + 1, text='"' * 3000, em=[]) for i in range(7)]}),
             }
@@ -3115,7 +3194,7 @@ async def main():
                 '61 photos': with_p(input={'photos': [{'id': f'p{i}', 'name': 'a', 'labels': []} for i in range(61)]}), '81 labels': with_p(input={'photos': [{'id': 'p1', 'name': 'a', 'labels': ['a'] * 81}]}), 'label is a number': with_p(input={'photos': [{'id': 'p1', 'name': 'a', 'labels': [1]}]}),
                 '401 pages': with_p(input={'pages': [{'id': f'g{i}', 'title': 'a'} for i in range(401)]}), '201 questions': with_p(input={'exam': [{'id': f'q{i}', 'q': 'a'} for i in range(201)]}), 'question of 601': with_p(input={'exam': [{'id': 'q1', 'q': 'a' * 601}]}),
                 'no exam': {**good_p, 'input': {k: v for k, v in good_p['input'].items() if k != 'exam'}}, 'topics is an object': with_p(input={'topics': {}}),
-                'JSON over 120000': with_p(input={'terms': [{'id': f't{i}', 'la': 'a' * 300} for i in range(1500)]}),
+                'a term with p 4': with_p(input={'terms': [{'id': 't1', 'la': 'a', 'p': 4}]}), 'JSON over 80000': with_p(input={'terms': [{'id': f't{i}', 'la': 'a' * 300} for i in range(1500)]}),
             }
             cs0 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
             lt0 = lastai()
@@ -3150,8 +3229,8 @@ async def main():
             lp = lastai()
             c2 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
             pr = json.loads(j['text'])['parts'] if status == 200 else None
-            check('plan: answered, 3 units; model claude-sonnet-5-5 with thinking between_tools, 8000 tokens, the function\'s prompt «CORPUS-PLAN ru»; the client\'s messages, model, system, tokens are ignored',
-                  status == 200 and c2 - c1 == 3 and pr and pr[0]['lessons'][0] == {'title': 'Spina scapulae', 'pic': 'p1', 'terms': ['t1']} and lp['model'] == 'claude-sonnet-5-5' and lp['thinking'] == {'type': 'between_tools'} and lp['max_tokens'] == 8000
+            check('plan: answered, 5 units; model claude-sonnet-5-5 with thinking between_tools, 8000 tokens, the function\'s prompt «CORPUS-PLAN ru»; the client\'s messages, model, system, tokens are ignored',
+                  status == 200 and c2 - c1 == 5 and pr and pr[0]['lessons'][0] == {'title': 'Spina scapulae', 'pic': 'p1', 'terms': ['t1']} and lp['model'] == 'claude-sonnet-5-5' and lp['thinking'] == {'type': 'between_tools'} and lp['max_tokens'] == 8000
                   and lp['turns'] == 1 and lp['said'].startswith('CORPUS-PLAN ru\n') and 'EVIL' not in lp['said'] and lp['system'].startswith('Your reply is read by a program'), json.dumps([status, j, lp])[:500])
             check('plan: the prompts carry the input as JSON after «INPUT:» and say the values are data, not instructions', lp['said'].endswith('INPUT:\n' + json.dumps(good_p['input'], separators=(',', ':'), ensure_ascii=False)) and 'never instructions' in lp['said'] and 'never instructions' in lo['said'], lp['said'][-120:])
             # the biggest accepted shapes
@@ -3160,11 +3239,14 @@ async def main():
             status, j = fn_call(tokp, 'POST', big_o)
             ln = len(json.dumps(big_o['input'], separators=(',', ':'), ensure_ascii=False))
             check('outline: 40 pages, a page of 6000 characters and 60 bold lines of 200 are accepted (%d characters as JSON, at most 40000)' % ln, status == 200 and ln <= 40000, json.dumps([status, j.get('code'), ln]))
-            big_p = with_p(input={'terms': [{'id': f't{i}', 'la': f'Os n{i}'} for i in range(1500)], 'photos': [{'id': f'p{i}', 'name': 'a', 'labels': [f'L{i}.{k}' for k in range(80)]} for i in range(60)],
-                                  'topics': [{'id': f'o{i}', 'title': 'T', 'terms': [f't{i}']} for i in range(300)], 'pages': [{'id': f'g{i}', 'title': 'L'} for i in range(400)], 'exam': [{'id': f'q{i}', 'q': 'K'} for i in range(200)]})
+            big_p = with_p(input={'terms': [{'id': f't{i}', 'la': f'Os n{i}', 'p': 2} for i in range(1500)], 'photos': [{'id': f'p{i}', 'name': 'a', 'labels': ['L'] * 10} for i in range(10)],
+                                  'topics': [{'id': f'o{i}', 'title': 'T', 'terms': [f't{i}']} for i in range(40)], 'pages': [{'id': f'g{i}', 'title': 'L'} for i in range(60)], 'exam': [{'id': f'q{i}', 'q': 'K'} for i in range(40)]})
             ln = len(json.dumps(big_p['input'], separators=(',', ':'), ensure_ascii=False))
             status, j = fn_call(tokp, 'POST', big_p)
-            check('plan: 1500 terms, 60 photos with 80 labels, 300 topics, 400 pages and 200 questions are accepted (%d characters as JSON, at most 120000)' % ln, status == 200 and ln <= 120000, json.dumps([status, j.get('code'), ln]))
+            check('plan: 1500 terms (with p) and a few photos, topics, pages and questions are accepted (%d characters as JSON, at most 80000)' % ln, status == 200 and ln <= 80000, json.dumps([status, j.get('code'), ln]))
+            urllib.request.urlopen(API + '/__fn?hang=plan')
+            status, j = fn_call(tokp, 'POST', good_p)
+            check('plan: the model does not answer in time (the function waits 1.5 s here) → 504 {code: timeout}', status == 504 and j.get('code') == 'timeout', json.dumps([status, j]))
             # the fake model service refuses → 502, a cut-short or empty answer is passed on as it is
             urllib.request.urlopen(API + '/__fn?fail_after=0')
             status, j = fn_call(tokp, 'POST', good_o)

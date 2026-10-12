@@ -4091,9 +4091,9 @@ function cnDraftOk(o,id){
     m.kind=['pdf','img','text'].indexOf(m.kind)>=0?m.kind:'text';if(CN_ROLES.indexOf(m.role)<0)m.role=m.kind==='img'?'pics':'extra';
     if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';
     m.lang=cnLangOk(m.lang);if(!m.lang)delete m.lang;m.chunks=cnStrs(m.chunks);if(typeof m.qdoc!=='string')delete m.qdoc;
-    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);
+    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);
     return m;});
-  return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
+  return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,planAt:Math.max(0,+o.planAt||0),lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
 }
 /* the cloud copy merged into the local draft d: materials by id; the ones this tab changed (d._dirty) stay as they are, the rest are the cloud's; the removed (gone) do not come back */
 function cnMerge(d,c){
@@ -4108,7 +4108,7 @@ function cnMerge(d,c){
   d.mats=out.slice(0,CN_LIM.mats);d.gone=Array.from(gone).slice(-200);
   if(!d._nameDirty&&c.updatedAt){d.name=c.name;}
   d.createdAt=c.createdAt||d.createdAt;d.updatedAt=Math.max(d.updatedAt||0,c.updatedAt||0);
-  d.lang=cnLang(d)||c.lang||'';
+  d.lang=cnLang(d)||c.lang||'';d.planAt=Math.max(d.planAt||0,c.planAt||0);
 }
 /* the drafts of this person (a few small documents): every opening of the tab asks the cloud again */
 function cnLoad(){
@@ -4134,7 +4134,7 @@ function cnSave(d,m){
 }
 function cnPayload(d){
   const o={name:d.name,createdAt:d.createdAt,updatedAt:d.updatedAt,gone:d.gone,mats:d.mats.map(m=>{const r={};for(const k in m)if(k[0]!=='_')r[k]=m[k];return r;})};
-  if(d.lang)o.lang=d.lang;
+  if(d.lang)o.lang=d.lang;if(d.planAt)o.planAt=d.planAt;
   return JSON.parse(JSON.stringify(o));
 }
 async function cnWrite(coll,id,data){
@@ -4157,7 +4157,7 @@ async function cnPush(d){
 }
 const cnQuotaText=()=>T3('Не сохранено в облаке — освободите место (удалите ненужные фото или черновики).','Not saved in the cloud: free some space (delete photos or drafts you do not need).','Pilve ei salvestatud – vabasta ruumi (kustuta mittevajalikud fotod või mustandid).');
 const cnDelIds=ids=>{if(S.db)ids.forEach(id=>enq('ctext/'+id,{coll:'ctext',id:id,op:'del'}));};
-const cnMatIds=m=>(m.chunks||[]).concat(m.qdoc?[m.qdoc]:[]);
+const cnMatIds=m=>(m.chunks||[]).concat(m.qdoc?[m.qdoc]:[],(m.lab||[]).filter(x=>x&&x!=='-'));
 const cnBytes=d=>d.mats.reduce((a,m)=>a+(+m.bytes||0),0);
 const cnAllBytes=()=>Array.from(CDRAFTS.values()).reduce((a,d)=>a+cnBytes(d),0);
 /* ---- originals on this device. Any failure (no IndexedDB in a private window, no room) is not an error: the text is in the cloud anyway ---- */
@@ -4370,7 +4370,7 @@ function cnAddPhotos(d,files,cam){
 }
 function cnDropMat(d,m){
   const t=cnT(d.id,m.id);t.dead=true;if(t.task)try{t.task.destroy();}catch(e){}
-  cnDelBlobs(d.id,m.id);cnDelIds(cnMatIds(m));
+  cnDelBlobs(d.id,m.id);cnDelIds(cnMatIds(m).concat(m.kind==='img'?Array.from({length:m.photos||0},(_,i)=>d.id+'.'+m.id+'.l'+i):[]));   // подписи фото: id известны и по номеру
 }
 function cnRemoveMat(d,m){
   d.mats=d.mats.filter(x=>x!==m);if(d._dirty)d._dirty.delete(m.id);d.gone.push(m.id);d.gone=d.gone.slice(-200);cnDropMat(d,m);cnSave(d);cnPaint();
@@ -4386,11 +4386,11 @@ async function cnRetry(d,m){
 }
 /* deleting a draft: first the cloud copy is read again (another device may have added materials), then its documents, originals and the draft go */
 async function cnDeleteDraft(d){
-  CDRAFTS.delete(d.id);
+  CDRAFTS.delete(d.id);cnRunStop(d);
   if(S.db)try{const g=await S.db.collection('cdraft').doc(d.id).get();if(g.exists)cnMerge(d,cnDraftOk(g.data()||{},d.id));}catch(e){}
   d.mats.slice().forEach(m=>cnDropMat(d,m));
   cnDelBlobs(d.id);
-  if(S.db)enq('cdraft/'+d.id,{coll:'cdraft',id:d.id,op:'del'});
+  if(S.db){enq('cplan/'+d.id,{coll:'cplan',id:d.id,op:'del'});enq('cdraft/'+d.id,{coll:'cdraft',id:d.id,op:'del'});}
 }
 function cnNew(){
   cnLoad().catch(()=>{}).then(()=>{
@@ -4464,9 +4464,9 @@ function cnListHtml(d){
     '<p class="cnpriv">'+T3('В облако уходит только текст страниц. Фото и PDF остаются на этом устройстве; рисунки для уроков загрузятся позже, только выбранные.','Only the page text goes to the cloud. Photos and PDFs stay on this device; the pictures for lessons are uploaded later, only the chosen ones.','Pilve läheb ainult lehekülgede tekst. Fotod ja PDF-id jäävad sellesse seadmesse; õppetundide pildid laaditakse üles hiljem, ainult valitud.')+'</p>';
 }
 function cnBarHtml(d){
-  const ok=d.mats.filter(m=>m.status!=='error'),pages=ok.reduce((a,m)=>a+(m.kind==='pdf'&&m.status==='ready'?m.pages||0:0),0),photos=ok.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
-  return '<div class="cnsum">'+(cnBaseOk(d)?plx(ok.length,['файл','файла','файлов'],['file','files'],['fail','faili'])+' · '+T3(pages+' стр.',pages+' p.',pages+' lk')+' · '+T3(photos+' фото',photos+' photos',photos+' fotot'):T3('Нужен хотя бы один файл с ролью «Основа»','At least one file with the role “Core” is needed','Vaja on vähemalt üks fail rolliga „Põhi“'))+'</div>'+
-    '<button class="cnmain" disabled>'+CN_SPARK+'<span><b>'+T3('Составить план','Make the plan','Koosta plaan')+'</b><small>'+T3('следующий шаг — скоро','the next step is coming soon','järgmine samm tuleb varsti')+'</small></span></button>';
+  const ok=cnPlanOk0(d),left=cnLeft(),ok1=d.mats.filter(m=>m.status!=='error'),pages=ok1.reduce((a,m)=>a+(m.kind==='pdf'&&m.status==='ready'?m.pages||0:0),0),photos=ok1.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
+  return '<div class="cnsum">'+(cnBaseOk(d)?plx(ok1.length,['файл','файла','файлов'],['file','files'],['fail','faili'])+' · '+T3(pages+' стр.',pages+' p.',pages+' lk')+' · '+T3(photos+' фото',photos+' photos',photos+' fotot'):T3('Нужен хотя бы один файл с ролью «Основа»','At least one file with the role “Core” is needed','Vaja on vähemalt üks fail rolliga „Põhi“'))+'</div>'+
+    '<button class="cnmain'+(ok?' on':'')+'" data-cn="plan"'+(ok?'':' disabled')+'>'+CN_SPARK+'<span><b>'+T3('Составить план','Make the plan','Koosta plaan')+'</b><small>'+(ok?esc('≈ '+cnNReq(cnEst(d))+(left!=null?T3(' · осталось '+left,' · '+left+' left',' · jäänud '+left):'')):T3('нужна готовая «Основа»','a ready “Core” is needed','vaja on valmis „Põhi“'))+'</small></span></button>';
 }
 function cnScreenHtml(d){
   const steps=[T3('Материалы','Materials','Materjalid'),T3('План','Plan','Plaan'),T3('Сборка','Build','Koostamine')];
@@ -4489,6 +4489,7 @@ function cnPaintNow(){
   if(key){const el=Array.from(l.querySelectorAll('[data-cn]')).find(x=>k(x)===key);if(el)el.focus();}
 }
 function cnClose(d){
+  cnRunStop(d);
   const nm=$('#cnName');if(nm&&nm.value.trim()!==d.name){d.name=nm.value.trim();d._nameDirty=(d._nameDirty||0)+1;if(!d._new||d.name)cnSave(d);}
   if(d._new&&!d.name&&!d.mats.length)CDRAFTS.delete(d.id);
   go({name:'courses'});
@@ -4497,10 +4498,14 @@ SCREENS.courseNew={
   html(){
     const d=CDRAFTS.get(view.did);
     if(!d||!cnOn()){view={name:'courses'};return SCREENS.courses.html();}
+    if(view.step===2&&d._run)return cnReadHtml(d);
+    if(view.step===3)return cnPlanHtml(d);
     return cnScreenHtml(d);
   },
   mount(){
     const d=view.name==='courseNew'&&CDRAFTS.get(view.did),root=document.querySelector('.cnw');if(!d||!root)return;
+    if((view.step===2&&d._run)||view.step===3){cnMountStep(d,root);return;}
+    $('#cnBar').onclick=e=>{const b=e.target.closest('[data-cn=plan]');if(b&&!b.disabled&&cnPlanOk0(d)){cnRunStart(d);go({name:'courseNew',did:d.id,step:2});}};
     root.onclick=e=>{
       const b=e.target.closest('[data-cn]');if(!b)return;const a=b.dataset.cn,m=d.mats.find(x=>x.id===b.dataset.mid);
       if(a==='close')cnClose(d);
@@ -4519,6 +4524,442 @@ SCREENS.courseNew={
     cnRefresh(d).catch(()=>{});
   }
 };
+/* ================= «Новый курс», шаги 2–3: ИИ читает материалы и составляет план (T-018) =================
+   Шаг 2 («читаю»), по порядку: (а) подписи на фото «Картинки» — на устройстве, без ИИ: detectLabels + распознавание текста; результат на фото [{t,x,y,w,h}] (проценты, как у рамок)
+   лежит в ctext/<черновик>.<материал>.l<номер фото>, id — в m.lab[номер] ('' — ещё не искали, '-' — искали, нашли пусто); (б) outline — ИИ, тема за темой, для каждой «Основы» и «Дополнения»
+   кусками ≤40 стр. / ≤36 000 знаков (1 единица курсового лимита за кусок); (в) вопросы экзамена из m.qdoc; (г) свод терминов и важность — считает приложение, не ИИ:
+   P1 — термин жирным в «Основе» или в вопросе экзамена, P2 — в тексте «Основы»/«Дополнения» (всё, что назвал outline), P3 — только на рисунке; склеивание по нормализованной латыни;
+   (д) plan — один запрос ИИ (3 единицы): id частей/уроков/рисунков, ответ проверяется (cnPlanClean). Текст берётся по m.chunks по id, коллекция ctext целиком не читается.
+   План — документ cplan/<черновик> {at, lang, parts:[{id,name,lessons:[{id,title,pic,off,terms:[{id,la,p,src}]}]}]} ≤800 КБ; pic — 'p:<материал>:<номер фото>' или 'g:<материал>:<страница>';
+   src — коды 'b|файл|стр' (жирным), 'q|файл|номер' (вопрос), 't|файл|стр' (в тексте), 'f' (только на рисунке) через '~', текст по языку собирается при показе.
+   В cdraft: planAt — когда составлен план (по нему черновик открывается на шаге 3). Запущенное чтение живёт в памяти (d._run); готовые ответы outline и plan остаются в d._run.cache,
+   «Повторить» их не заказывает снова. */
+const CN_PL={outPages:40,outJson:36000,topics:300,terms:1500,photos:60,labels:80,pages:400,exam:200,planJson:115000,lessons:60,perLesson:40,parts:30,doc:800000};
+const cnNorm=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/æ/gi,'ae').replace(/œ/gi,'oe').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+/* «похоже на латынь»: буквы A–Z (без эстонских ä ö õ ü š ž), не меньше двух, есть гласная, нет пяти согласных подряд, не больше шести слов; иначе '' */
+function cnLatin(s){
+  s=String(s==null?'':s).replace(/\s+/g,' ').trim();
+  if(!s||s.length>60||/[äöõüšž]/i.test(s))return '';
+  s=s.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/^[^A-Za-z]+|[^A-Za-z)]+$/g,'');
+  if(!/^[A-Za-z][A-Za-z .,\-()']*$/.test(s))return '';
+  const ws=s.split(' ');
+  if(s.replace(/[^A-Za-z]/g,'').length<2||ws.length>6||!/[aeiouy]/i.test(s)||ws.some(w=>/[^aeiouy\W\d_]{5,}/i.test(w)))return '';
+  return s;
+}
+const cnNameOf=n=>String(n||'').replace(/\.[A-Za-z0-9]{2,4}$/,'').replace(/[|~]/g,' ').trim().slice(0,40);
+const cnPhotoName=(m,i)=>{const s=(m.sigs||[])[i],k=typeof s==='string'?s.lastIndexOf('|'):-1;return k>0?s.slice(0,k):m.name;};
+const cnTextMats=d=>d.mats.filter(m=>(m.role==='base'||m.role==='extra')&&m.status==='ready'&&(m.chunks||[]).length).sort((a,b)=>(a.role==='base'?0:1)-(b.role==='base'?0:1));
+/* ≈ сколько запросов уйдёт: кусок на каждые 40 страниц или ~30 КБ текста и 3 единицы на план */
+const cnEst=d=>cnTextMats(d).reduce((a,m)=>a+Math.max(1,Math.ceil((m.pages||0)/CN_PL.outPages),Math.ceil((m.bytes||0)/30000)),0)+3;
+const cnPlanOk0=d=>d.mats.some(m=>m.role==='base'&&m.status==='ready'&&(m.chunks||[]).length)&&!d.mats.some(m=>{const t=cnT(d.id,m.id);return t.run||t.busy;});
+/* сколько запросов осталось: курсовой лимит, если он есть, иначе дневной */
+function cnLeft(){
+  const W=window.CORPUS_WEB,c=W&&W.aiCourse,a=W&&W.ai;
+  if(c&&c.free>0&&Number.isFinite(+c.left))return Math.max(0,+c.left);
+  return a&&Number.isFinite(a.limit)?Math.max(0,a.limit-(+a.used||0)):null;
+}
+const cnNReq=n=>plx(n,['запрос ИИ','запроса ИИ','запросов ИИ'],['AI request','AI requests'],['TI päring','TI päringut']);
+async function cnDocData(coll,id){
+  if(!S.db)throw {code:'offline'};
+  for(let n=0;;n++){
+    try{const g=await S.db.collection(coll).doc(id).get();return g.exists?(g.data()||null):null;}
+    catch(e){if(n<2){await new Promise(r=>setTimeout(r,500+Math.random()*700));continue;}throw {code:'offline'};}
+  }
+}
+async function cnPagesOf(m){
+  const out=[];
+  for(const id of m.chunks||[]){
+    const o=await cnDocData('ctext',id);
+    (o&&Array.isArray(o.pages)?o.pages:[]).forEach(p=>{if(p&&Number.isFinite(+p.n)&&typeof p.text==='string')out.push({n:+p.n,text:p.text,em:(Array.isArray(p.em)?p.em:[]).filter(x=>typeof x==='string').map(x=>x.slice(0,200)).slice(0,60)});});
+  }
+  return out;
+}
+async function cnQsOf(m){const o=m.qdoc?await cnDocData('ctext',m.qdoc):null;return (o&&Array.isArray(o.qs)?o.qs:[]).filter(x=>typeof x==='string').map(x=>x.slice(0,400));}
+/* ---- запуск, остановка ---- */
+function cnRunStart(d){
+  const old=d._run;if(old&&old.state==='run')return old;
+  const r={d:d,cancel:false,ac:new AbortController(),i:0,dt:{},err:null,spent:0,est:cnEst(d),state:'run',labs:new Map(),topics:[],cache:old&&old.state!=='done'?old.cache:{outl:new Map(),plan:null}};   // ответы ИИ переживают «Повторить», отмену и возврат к материалам, но не «Пересоставить»
+  d._run=r;cnRun(d,r);return r;
+}
+function cnRunStop(d){const r=d&&d._run;if(r&&r.state==='run'){r.cancel=true;r.state='stop';try{r.ac.abort();}catch(e){}}}
+async function cnRun(d,r){
+  try{
+    await cnStepLabels(d,r);if(r.cancel)return;
+    const src=await cnStepOutline(d,r);if(r.cancel)return;
+    const qs=await cnStepExam(d,r);if(r.cancel)return;
+    const T=await cnStepTerms(d,r,src,qs);if(r.cancel)return;
+    await cnStepPlan(d,r,T);if(r.cancel)return;
+    r.state='done';r.i=5;cnRPaint();
+    if(view.name==='courseNew'&&view.did===d.id&&view.step===2)go({name:'courseNew',did:d.id,step:3});
+  }catch(e){
+    if(r.cancel)return;
+    r.state='err';r.err=cnRunErr(e);cnRPaint();
+  }
+}
+function cnRunErr(e){
+  const c=e&&e.code;
+  if(c==='quota_exceeded')return {k:'quota'};
+  if(c==='invalid_json'||c==='empty_completion'||c==='invalid_input')return {k:'format'};
+  if(c==='quota'||c==='limit'||c==='broken')return {k:'store'};
+  if(c==='noterms'||c==='toolarge')return {k:c};
+  if(c==='offline')return {k:'net'};
+  if(!c)console.error('plan',e);
+  return {k:'ai'};
+}
+/* (а) подписи на фото — на устройстве */
+async function cnLabelOne(d,m,i,r){
+  const blob=await cnGet(cnKey(d.id,m.id,i));if(!blob)return null;   // оригинала на этом устройстве нет
+  const url=URL.createObjectURL(blob);
+  try{
+    const img=await loadImage(url);
+    const det=detectLabels(img,img.naturalWidth,img.naturalHeight,{merge:false});
+    let w;try{w=await ocrWorker();}catch(e){throw {code:'ocr'};}
+    const bs=det.boxes.slice().sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,150),got=[],out=[],seen=new Set();
+    for(const b of bs){
+      if(r.cancel)break;
+      let t='';try{t=await ocrOne(w,img,b,det.lh);}catch(e){continue;}
+      if(t)got.push({t:t,x:b.x,y:b.y,w:b.w,h:b.h});
+    }
+    /* two boxes of one line close together (a word is cut off from the next) are one label */
+    const gx=1.6*det.lh/img.naturalWidth*100,rows=[];
+    got.sort((a,b)=>a.x-b.x).forEach(g=>{
+      const p=rows.find(q=>Math.abs((q.y+q.h/2)-(g.y+g.h/2))<=0.5*Math.min(q.h,g.h)&&g.x-(q.x+q.w)<=gx);
+      if(p){const x1=Math.max(p.x+p.w,g.x+g.w),y0=Math.min(p.y,g.y),y1=Math.max(p.y+p.h,g.y+g.h);p.t=p.t+' '+g.t;p.w=x1-p.x;p.y=y0;p.h=y1-y0;}else rows.push(g);
+    });
+    rows.sort((a,b)=>(a.y-b.y)||(a.x-b.x)).forEach(g=>{
+      const t=cnLatin(g.t),k=cnNorm(t);if(!t||seen.has(k)||out.length>=CN_PL.labels)return;seen.add(k);
+      out.push({t:t,x:r2(g.x),y:r2(g.y),w:r2(g.w),h:r2(g.h)});
+    });
+    return out;
+  }finally{URL.revokeObjectURL(url);}
+}
+async function cnStepLabels(d,r){
+  r.i=0;
+  const ms=d.mats.filter(m=>m.kind==='img'&&m.role==='pics'&&m.status==='ready'&&(m.photos||0)>0),L=r.dt.lab={k:0,n:0,photos:0,skip:0,ocr:false,withLab:0},todo=[];
+  ms.forEach(m=>{const a=(m.lab||[]).slice(0,m.photos);while(a.length<m.photos)a.push('');m.lab=a;L.photos+=m.photos;a.forEach((x,i)=>{if(!x)todo.push({m:m,i:i});});});
+  L.n=todo.length;cnRPaint();
+  try{
+    for(const j of todo){
+      if(r.cancel)return;
+      L.k++;cnRPaint();
+      if(L.ocr){L.skip++;continue;}
+      let res;
+      try{res=await cnLabelOne(d,j.m,j.i,r);}catch(e){res=undefined;if(e&&e.code==='ocr')L.ocr=true;}
+      if(r.cancel)return;
+      if(!res){L.skip++;continue;}
+      if(res.length){const id=d.id+'.'+j.m.id+'.l'+j.i;await cnWrite('ctext',id,{i:j.i,labels:res});j.m.lab[j.i]=id;r.labs.set(j.m.id+'.'+j.i,res.map(x=>x.t));}else j.m.lab[j.i]='-';
+      cnDirty(d,j.m);
+    }
+  }finally{
+    ms.forEach(m=>{L.withLab+=(m.lab||[]).filter(x=>x&&x!=='-').length;});
+    if(todo.length){ms.forEach(m=>cnDirty(d,m));cnSave(d);}
+  }
+  cnRPaint();
+}
+/* (б) outline */
+function cnOutClean(raw,items){
+  if(!raw||!Array.isArray(raw.topics))throw {code:'invalid_json'};
+  const pn=new Set(items.map(x=>x.n)),out=[];
+  raw.topics.slice(0,60).forEach(t=>{
+    if(!t||typeof t.title!=='string')return;
+    const title=t.title.replace(/\s+/g,' ').trim().slice(0,200);if(!title)return;
+    let pages=Array.from(new Set((Array.isArray(t.pages)?t.pages:[]).map(Number).filter(n=>pn.has(n)))).slice(0,40);if(!pages.length)pages=[items[0].n];
+    const seen=new Set(),terms=[];
+    (Array.isArray(t.terms)?t.terms:[]).forEach(x=>{const c=cnLatin(x),k=cnNorm(c);if(c&&k&&!seen.has(k)&&terms.length<80){seen.add(k);terms.push(c);}});
+    out.push({title:title,pages:pages,terms:terms});
+  });
+  return out;
+}
+async function cnStepOutline(d,r){
+  r.i=1;const O=r.dt.out={k:0,n:0,topics:0},src=[],jobs=[],W=window.CORPUS_WEB;
+  r.topics=[];cnRPaint();
+  if(!W||!W.courseAI)throw {code:'unavailable'};
+  for(const m of cnTextMats(d)){
+    const pages=await cnPagesOf(m);if(r.cancel)return src;
+    src.push({m:m,pages:pages});
+    let cur=[],size=0;
+    const flush=()=>{if(cur.length)jobs.push({m:m,items:cur,key:m.id+'.'+(m.gen||0)+'.'+cur[0].n+'-'+cur[cur.length-1].n+'.'+cur.length});cur=[];size=0;};
+    pages.forEach(p=>{
+      const it={n:p.n,text:p.text.slice(0,6000),em:p.em.slice(0,60)};
+      if(!it.text.trim()&&!it.em.length)return;
+      const len=JSON.stringify(it).length+1;
+      if(cur.length&&(cur.length>=CN_PL.outPages||size+len>CN_PL.outJson))flush();
+      cur.push(it);size+=len;
+    });
+    flush();
+  }
+  O.n=jobs.length;r.est=jobs.length+3;cnRPaint();
+  for(const j of jobs){
+    if(r.cancel)return src;
+    O.k++;cnRPaint();
+    let res=r.cache.outl.get(j.key);
+    if(!res){
+      const raw=await W.courseAI.outline(j.m.lang||d.lang||LANG,{name:j.m.name.slice(0,200),pages:j.items},{signal:r.ac.signal});
+      res=cnOutClean(raw,j.items);r.cache.outl.set(j.key,res);r.spent++;
+    }
+    res.forEach(t=>r.topics.push({title:t.title,pages:t.pages,terms:t.terms,m:j.m}));
+    O.topics=r.topics.length;
+  }
+  cnRPaint();return src;
+}
+/* (в) вопросы экзамена */
+async function cnStepExam(d,r){
+  r.i=2;const qs=[];
+  for(const m of d.mats.filter(x=>x.role==='exam'&&x.status==='ready'&&x.qdoc)){
+    (await cnQsOf(m)).forEach((q,k)=>qs.push({m:m,k:k+1,q:q}));
+    if(r.cancel)return qs;
+  }
+  r.dt.exam={n:qs.length};cnRPaint();return qs;
+}
+/* (г) свод терминов: латынь из outline и с подписей на фото, важность и источник; вход для plan */
+async function cnStepTerms(d,r,src,qs){
+  r.i=3;cnRPaint();
+  const M=new Map(),order=[];
+  const touch=la=>{const c=cnLatin(la),k=cnNorm(c);if(!c||k.length<2)return null;let t=M.get(k);if(!t){t={k:k,la:c,idx:order.length,top:null,figs:0,id:'',p:3,src:'f'};M.set(k,t);order.push(t);}return t;};
+  const topics=r.topics.map((tp,i)=>({id:'o'+(i+1),title:tp.title,tp:tp,terms:[]}));
+  topics.forEach(o=>o.tp.terms.forEach(la=>{const t=touch(la);if(!t)return;if(!t.top)t.top={m:o.tp.m,n:o.tp.pages[0]};if(o.terms.indexOf(t)<0)o.terms.push(t);}));
+  const photos=[];
+  for(const m of d.mats.filter(x=>x.kind==='img'&&x.role==='pics'&&x.status==='ready')){
+    for(let i=0;i<(m.photos||0)&&photos.length<CN_PL.photos;i++){
+      const lid=(m.lab||[])[i];if(!lid||lid==='-')continue;
+      let labs=r.labs.get(m.id+'.'+i);
+      if(!labs){const o=await cnDocData('ctext',lid);labs=(o&&Array.isArray(o.labels)?o.labels:[]).map(x=>x&&x.t);if(r.cancel)return null;}
+      const seen=new Set(),ls=[];
+      labs.forEach(la=>{const t=touch(la);if(!t||seen.has(t.k))return;seen.add(t.k);t.figs++;if(ls.length<CN_PL.labels)ls.push(t.la);});
+      if(ls.length)photos.push({id:'p'+(photos.length+1),m:m,i:i,name:cnPhotoName(m,i).slice(0,200),labels:ls});
+    }
+  }
+  if(!order.length)throw {code:'noterms'};
+  const refs=[],pseen=new Set();
+  topics.forEach(o=>o.tp.pages.forEach(n=>{
+    const k=o.tp.m.id+':'+n;if(pseen.has(k)||o.tp.m.kind!=='pdf'||refs.length>=CN_PL.pages)return;pseen.add(k);
+    const s=src.find(x=>x.m===o.tp.m),pg=s&&s.pages.find(p=>p.n===n);
+    refs.push({id:'g'+(refs.length+1),m:o.tp.m,n:n,title:((pg&&(pg.em[0]||pg.text.split('\n')[0]))||'').replace(/\s+/g,' ').trim().slice(0,80)});
+  }));
+  src.forEach(s=>s.pages.forEach(p=>{p.hay=' '+cnNorm(p.text)+' ';p.emn=p.em.map(e=>' '+cnNorm(e)+' ');}));
+  qs.forEach(q=>{q.hay=' '+cnNorm(q.q)+' ';});
+  let n=0;
+  for(const t of order){
+    if(++n%40===0){await new Promise(rs=>setTimeout(rs,0));if(r.cancel)return null;}
+    const key=' '+t.k+' ';let bold=null,ex=null,tx=null;
+    for(const s of src){if(s.m.role!=='base')continue;for(const p of s.pages)if(p.emn.some(e=>e.indexOf(key)>=0)){bold={m:s.m,n:p.n};break;}if(bold)break;}
+    for(const q of qs)if(q.hay.indexOf(key)>=0){ex={m:q.m,k:q.k};break;}
+    if(!bold&&!ex&&!t.top)for(const s of src){const p=s.pages.find(x=>x.hay.indexOf(key)>=0);if(p){tx={m:s.m,n:p.n};break;}}
+    t.p=bold||ex?1:t.top||tx?2:3;
+    const ps=[];
+    if(bold)ps.push('b|'+cnNameOf(bold.m.name)+'|'+bold.n);
+    if(ex)ps.push('q|'+cnNameOf(ex.m.name)+'|'+ex.k);
+    if(!ps.length){const w=t.top||tx;ps.push(w?'t|'+cnNameOf(w.m.name)+'|'+w.n:'f');}
+    t.src=ps.join('~');
+  }
+  order.sort((a,b)=>a.p-b.p||a.idx-b.idx);
+  const dropped=order.splice(CN_PL.terms).length;
+  order.forEach((t,i)=>{t.id='t'+(i+1);});
+  const keep=new Set(order),cnt=[0,0,0,0];order.forEach(t=>cnt[t.p]++);
+  r.dt.terms={n:order.length,p1:cnt[1],p2:cnt[2],p3:cnt[3],dropped:dropped};cnRPaint();
+  const inp={name:(d.name||'Course').slice(0,300),
+    topics:topics.map(o=>({id:o.id,title:o.title.slice(0,300),terms:o.terms.filter(t=>keep.has(t)).map(t=>t.id)})).filter(o=>o.terms.length).slice(0,CN_PL.topics),
+    terms:order.map(t=>({id:t.id,la:t.la})),
+    photos:photos.map(p=>({id:p.id,name:p.name,labels:p.labels})),
+    pages:refs.map(g=>({id:g.id,title:g.title})),
+    exam:qs.slice(0,CN_PL.exam).map((q,i)=>({id:'q'+(i+1),q:q.q.slice(0,600)}))};
+  const fit=()=>JSON.stringify(inp).length<=CN_PL.planJson;
+  if(!fit())inp.pages=[];
+  if(!fit())inp.exam.forEach(e=>{e.q=e.q.slice(0,120);});
+  if(!fit())inp.photos.forEach(p=>{p.labels=p.labels.slice(0,30);});
+  if(!fit())inp.photos=inp.photos.slice(0,30);
+  if(!fit())inp.exam=[];
+  if(!fit())throw {code:'toolarge'};
+  const pics=new Map();photos.forEach(p=>pics.set(p.id,'p:'+p.m.id+':'+p.i));refs.forEach(g=>{if(inp.pages.length)pics.set(g.id,'g:'+g.m.id+':'+g.n);});
+  return {inp:inp,order:order,pics:pics};
+}
+/* (д) ответ plan проверяется: только известные id, не больше 60 уроков и 40 терминов в уроке, термин не больше одного раза; всё, что осталось, идёт в конец (left) */
+function cnPlanClean(raw,all,pics){
+  if(!raw||!Array.isArray(raw.parts))throw {code:'invalid_json'};
+  const known=new Set(all),used=new Set(),parts=[],str=(v,n)=>typeof v==='string'?v.replace(/\s+/g,' ').trim().slice(0,n):'';
+  let lessons=0;
+  raw.parts.slice(0,CN_PL.parts).forEach(p=>{
+    if(!p||!Array.isArray(p.lessons))return;
+    const ls=[];
+    p.lessons.forEach(l=>{
+      if(!l||lessons>=CN_PL.lessons)return;
+      const ts=[];(Array.isArray(l.terms)?l.terms:[]).forEach(id=>{if(typeof id==='string'&&known.has(id)&&!used.has(id)&&ts.length<CN_PL.perLesson){used.add(id);ts.push(id);}});
+      if(!ts.length)return;
+      lessons++;ls.push({title:str(l.title,80),pic:typeof l.pic==='string'&&pics.has(l.pic)?l.pic:null,terms:ts});
+    });
+    if(ls.length)parts.push({name:str(p.name,80),lessons:ls});
+  });
+  if(!parts.length)throw {code:'invalid_json'};
+  return {parts:parts,left:all.filter(id=>!used.has(id)),lessons:lessons};
+}
+function cnPlanBuild(raw,T){
+  const c=cnPlanClean(raw,T.order.map(t=>t.id),T.pics),byId=new Map(T.order.map(t=>[t.id,t]));
+  const tm=id=>{const t=byId.get(id);return {id:t.id,la:t.la.slice(0,80),p:t.p,src:t.src.slice(0,200)};};
+  const parts=c.parts.map(p=>({name:p.name,lessons:p.lessons}));
+  if(c.left.length&&c.lessons<CN_PL.lessons){
+    const ls=[];let n=c.lessons;
+    for(let i=0;i<c.left.length&&n<CN_PL.lessons;i+=CN_PL.perLesson,n++)ls.push({title:'Cetera'+(ls.length?' '+(ls.length+1):''),pic:null,terms:c.left.slice(i,i+CN_PL.perLesson)});
+    if(ls.length)parts.push({name:T3('Прочее','Other','Muu'),lessons:ls});
+  }
+  let pi=0,li=0;
+  return {at:Date.now(),lang:LANG,parts:parts.map((p,i)=>({id:'a'+(++pi),name:p.name||T3('Часть ','Part ','Osa ')+(i+1),lessons:p.lessons.map(l=>({id:'l'+(++li),title:l.title||byId.get(l.terms[0]).la,pic:l.pic?T.pics.get(l.pic):null,off:false,terms:l.terms.map(tm)}))}))};
+}
+async function cnStepPlan(d,r,T){
+  r.i=4;cnRPaint();
+  const W=window.CORPUS_WEB,key=JSON.stringify(T.inp);
+  let raw=r.cache.plan&&r.cache.plan.k===key?r.cache.plan.res:null;
+  if(!raw){raw=await W.courseAI.plan(LANG,T.inp,{signal:r.ac.signal});r.spent+=3;r.cache.plan={k:key,res:raw};}
+  if(r.cancel)return;
+  const doc=cnPlanBuild(raw,T);
+  if(JSON.stringify(doc).length>CN_PL.doc)throw {code:'limit'};
+  await cnWrite('cplan',d.id,doc);
+  if(r.cancel)return;
+  d._plan=doc;d._planErr='';d.planAt=doc.at;cnSave(d);
+}
+/* ---- экран шага 2 ---- */
+const CN_MASC='<svg width="92" height="92" viewBox="0 0 120 120" aria-hidden="true" style="stroke:none"><path d="M60 8C92 8 108 30 106 56c-1 14-6 22-12 26v10c0 8-6 12-14 12H40c-8 0-14-4-14-12V82c-6-4-11-12-12-26C12 30 28 8 60 8z" style="fill:#F7EFE1;stroke:#2B2622;stroke-width:3.4;stroke-linejoin:round"/><circle cx="25" cy="74" r="6.5" style="fill:#F4A98A;opacity:.55"/><circle cx="95" cy="74" r="6.5" style="fill:#F4A98A;opacity:.55"/><path d="M60 70c-4 0-5 6 0 10 5-4 4-10 0-10z" style="fill:#2B2622"/><ellipse cx="42" cy="56" rx="13" ry="15" style="fill:#2B2622"/><circle cx="46.5" cy="50" r="4.5" style="fill:#fff"/><ellipse cx="78" cy="56" rx="13" ry="15" style="fill:#2B2622"/><circle cx="82.5" cy="50" r="4.5" style="fill:#fff"/><path d="M14 22L60 4l46 18-46 18z" style="fill:#2B2622"/><path d="M34 31v12c13 9 39 9 52 0V31" style="fill:#2B2622"/><path d="M106 22v22" style="stroke:#E8A13A;stroke-width:5;stroke-linecap:round"/></svg>';
+const CN_CHK='<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width:3"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const CN_SP14='<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width:2.4"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>';
+function cnStepsHtml(on,back){
+  const steps=[T3('Материалы','Materials','Materjalid'),T3('План','Plan','Plaan'),T3('Сборка','Build','Koostamine')];
+  return '<div class="cnst">'+steps.map((s,i)=>{const inner='<span class="cnbar1'+(i===on?' on':'')+'"></span><span class="cnsl'+(i===on?' on':'')+'">'+(i+1)+'. '+s+'</span>';
+    return i<on&&back?'<button class="cnstb" data-cn="step" data-s="'+i+'">'+inner+'</button>':'<div>'+inner+'</div>';}).join('')+'</div>';
+}
+function cnHeadHtml(d,on){
+  return '<div class="cntop"><button class="cnx" data-cn="close" aria-label="'+esc(T3('Закрыть, черновик сохранится','Close, the draft is kept','Sulge, mustand salvestub'))+'"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>'+
+    '<div class="cntt"><div class="cnti">'+T3('Новый курс','New course','Uus kursus')+'</div><div class="cnsub" data-noi18n>'+esc(d.name||T3('Без названия','Untitled','Nimeta'))+'</div></div></div>'+cnStepsHtml(on,true);
+}
+function cnReadRows(r){
+  const dt=r.dt,L=dt.lab,O=dt.out,E=dt.exam,TT=dt.terms,done=r.state==='done';
+  const det=[
+    !L?'':L.photos===0?T3('Фото не добавлены','No photos added','Fotosid pole lisatud'):r.i===0&&!done?T3('фото '+L.k+' из '+L.n,'photo '+L.k+' of '+L.n,'foto '+L.k+' / '+L.n):
+      T3('Подписи найдены на '+L.withLab+' из '+L.photos+' фото','Labels found on '+L.withLab+' of '+L.photos+' photos','Silte leitud '+L.withLab+' / '+L.photos+' fotolt')+
+      (L.skip?(L.ocr?T3(' · распознавание текста не запустилось',' · text recognition did not start',' · teksti tuvastus ei käivitunud'):T3(' · пропущено '+L.skip+': оригинала нет на этом устройстве',' · skipped '+L.skip+': the original is not on this device',' · vahele jäetud '+L.skip+': originaali pole selles seadmes')):''),
+    !O?'':r.i===1&&!done?T3('запрос '+O.k+' из '+O.n,'request '+O.k+' of '+O.n,'päring '+O.k+' / '+O.n):T3('Тем: '+O.topics,'Topics: '+O.topics,'Teemasid: '+O.topics),
+    !E?'':E.n?plx(E.n,['вопрос — их темы станут P1','вопроса — их темы станут P1','вопросов — их темы станут P1'],['question: its topics become P1','questions: their topics become P1'],['küsimus – selle teemad muutuvad P1-ks','küsimust – nende teemad muutuvad P1-ks']):T3('Вопросов нет','No questions','Küsimusi pole'),
+    !TT?'':T3('Терминов: '+TT.n+' · P1 '+TT.p1+' · P2 '+TT.p2+' · P3 '+TT.p3,'Terms: '+TT.n+' · P1 '+TT.p1+' · P2 '+TT.p2+' · P3 '+TT.p3,'Termineid: '+TT.n+' · P1 '+TT.p1+' · P2 '+TT.p2+' · P3 '+TT.p3),
+    T3('Один урок — один рисунок','One lesson, one picture','Üks õppetund – üks pilt')];
+  const names=[T3('Подписи на фото','Labels on the photos','Siltide lugemine fotodelt'),T3('Читаю «Основу» и «Дополнение»','Reading “Core” and “Extra”','Loen „Põhi“ ja „Täiendus“ materjale'),
+    T3('Вопросы экзамена','Exam questions','Eksami küsimused'),T3('Свод терминов и важность','Terms and importance','Terminid ja olulisus'),T3('Делю на части и уроки','Splitting into parts and lessons','Jagan osadeks ja õppetundideks')];
+  return names.map((n,i)=>[n,det[i],done||i<r.i?'done':i===r.i?(r.state==='err'?'bad':'cur'):'todo']);
+}
+function cnRunErrText(k,left){
+  const m={quota:T3('Лимит ИИ для курсов исчерпан'+(left!=null?' — осталось запросов: '+left:'')+'. Для плана нужно ещё несколько запросов; уже сделанное сохранено.','The AI limit for courses is used up'+(left!=null?' — requests left: '+left:'')+'. The plan needs a few more; what is done is kept.','Kursuste TI limiit on otsas'+(left!=null?' – päringuid jäänud: '+left:'')+'. Plaanile on vaja veel mõnda päringut; tehtu on salvestatud.'),
+    ai:T3('ИИ сейчас недоступен. Проверьте соединение и повторите — сделанное не пропадёт.','The AI is not available now. Check the connection and retry: what is done is kept.','TI pole praegu saadaval. Kontrolli ühendust ja proovi uuesti – tehtu säilib.'),
+    format:T3('ИИ ответил в неожиданном формате. Повторите.','The AI answered in an unexpected format. Retry.','TI vastas ootamatus vormingus. Proovi uuesti.'),
+    store:T3('Не удалось сохранить в облаке. Проверьте соединение и повторите.','Could not save to the cloud. Check the connection and retry.','Pilve salvestamine ebaõnnestus. Kontrolli ühendust ja proovi uuesti.'),
+    net:T3('Не удалось прочитать текст из облака. Проверьте соединение и повторите.','Could not read the text from the cloud. Check the connection and retry.','Teksti ei õnnestunud pilvest lugeda. Kontrolli ühendust ja proovi uuesti.'),
+    noterms:T3('В материалах не нашлось анатомических названий. Проверьте, что «Основа» — текст по анатомии, а не скан.','No anatomical names were found. Check that the “Core” is anatomy text, not a scan.','Materjalides ei leitud anatoomilisi nimetusi. Kontrolli, et „Põhi“ on anatoomiatekst, mitte skänn.'),
+    toolarge:T3('Материалов слишком много для одного плана. Уберите часть файлов.','There is too much material for one plan. Remove some files.','Materjali on ühe plaani jaoks liiga palju. Eemalda mõned failid.')};
+  return m[k]||m.ai;
+}
+function cnReadInner(d){
+  const r=d._run;if(!r)return '';
+  const left=cnLeft();
+  let h='<div class="cnrhd">'+CN_MASC+'<b>'+T3('ИИ составляет план','The AI is making the plan','TI koostab plaani')+'</b><span>'+T3('Обычно 1–2 минуты. Можно свернуть приложение.','Usually 1–2 minutes. You can minimise the app.','Tavaliselt 1–2 minutit. Rakenduse võib minimeerida.')+'</span></div>'+
+    '<div class="cnck">'+cnReadRows(r).map(x=>'<div class="cnrow '+x[2]+'"><span class="cndot">'+(x[2]==='done'?CN_CHK:x[2]==='cur'?CN_SP14:x[2]==='bad'?'!':'')+'</span><span class="cnrx"><b>'+esc(x[0])+'</b><small>'+esc(x[1])+'</small></span></div>').join('')+'</div>'+
+    '<div class="cnspend">'+esc(T3('Израсходовано '+r.spent+' из ≈ '+r.est+' запросов','Used '+r.spent+' of ≈ '+r.est+' requests','Kasutatud '+r.spent+' / ≈ '+r.est+' päringut')+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):''))+'</div>';
+  if(r.state==='err')h+='<div class="cnwarn cnerr" role="alert">'+esc(cnRunErrText(r.err.k,left))+'</div>';
+  return h;
+}
+function cnReadBar(d){
+  const r=d._run;
+  if(r&&r.state==='err')return (r.err.k==='quota'?'':'<button class="cnmain on" data-cn="rretry"><b>'+T3('Повторить','Retry','Proovi uuesti')+'</b></button>')+'<button class="cnbtn2" data-cn="rback">'+T3('К материалам','Back to the materials','Tagasi materjalide juurde')+'</button>';
+  return '<button class="cnbtn2" data-cn="rcancel">'+T3('Отменить','Cancel','Tühista')+'</button>';
+}
+let CN_RT=0;
+function cnRPaint(){
+  if(CN_RT)return;
+  CN_RT=setTimeout(()=>{CN_RT=0;const d=view.name==='courseNew'&&view.step===2&&CDRAFTS.get(view.did),el=$('#cnRd'),b=$('#cnBar');if(!d||!d._run||!el)return;el.innerHTML=cnReadInner(d);if(b)b.innerHTML=cnReadBar(d);},30);
+}
+function cnReadHtml(d){
+  return '<div class="page cnw" data-did="'+esc(d.id)+'">'+cnHeadHtml(d,1)+'<div id="cnRd" class="cnrd">'+cnReadInner(d)+'</div></div><div class="cnbarw"><div class="cnbarin" id="cnBar">'+cnReadBar(d)+'</div></div>';
+}
+/* ---- экран шага 3: план ---- */
+function cnPlanDoc(o){
+  if(!o||typeof o!=='object'||!Array.isArray(o.parts))return null;
+  const s=(v,n)=>typeof v==='string'?v.slice(0,n):'';
+  return {at:+o.at||0,lang:cnLangOk(o.lang),parts:o.parts.slice(0,40).map(p=>({id:s(p&&p.id,20),name:s(p&&p.name,80),lessons:(Array.isArray(p&&p.lessons)?p.lessons:[]).slice(0,CN_PL.lessons).map(l=>({
+    id:s(l&&l.id,20),title:s(l&&l.title,80),pic:l&&typeof l.pic==='string'&&/^[pg]:/.test(l.pic)?l.pic.slice(0,80):null,off:!!(l&&l.off),
+    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>({id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)}))}))}))};
+}
+function cnPlanLoad(d){
+  d._planLoad=true;d._planErr='';
+  cnDocData('cplan',d.id).then(o=>{const p=cnPlanDoc(o);if(p)d._plan=p;else d._planErr='bad';},()=>{d._planErr='net';}).then(()=>{d._planLoad=false;cnPlanPaint();});
+}
+function cnSrcText(s){
+  if(!s||s==='f')return T3('только на рисунке','only on the picture','ainult pildil');
+  const pg=T3('стр.','p.','lk');
+  return String(s).split('~').map(x=>{const a=x.split('|'),k=a[0],nm=a[1]||'',n=a[2]||'';
+    if(k==='b')return nm+', '+pg+' '+n+' · '+T3('жирным','bold','rasvases');
+    if(k==='q')return nm+', '+T3('вопрос','question','küsimus')+' '+n;
+    if(k==='t')return nm+', '+pg+' '+n;
+    return T3('только на рисунке','only on the picture','ainult pildil');}).join('; ');
+}
+/* рисунок урока: [имя, найден ли] */
+function cnPicName(d,pic){
+  if(!pic)return null;const a=String(pic).split(':'),m=d.mats.find(x=>x.id===a[1]);if(!m)return null;
+  if(a[0]==='p')return cnPhotoName(m,+a[2]||0);
+  return cnNameOf(m.name)+', '+T3('стр.','p.','lk')+' '+(+a[2]||0);
+}
+function cnPCount(l){const c=[0,0,0,0];l.terms.forEach(t=>c[t.p]++);return c;}
+function cnPlanInner(d){
+  const doc=d._plan;
+  if(!doc)return d._planErr?'<div class="cnwarn" role="alert">'+esc(d._planErr==='net'?T3('Не удалось загрузить план. Проверьте соединение.','Could not load the plan. Check the connection.','Plaani ei õnnestunud laadida. Kontrolli ühendust.'):T3('План не читается — составьте его заново.','The plan cannot be read: make it again.','Plaani ei saa lugeda – koosta see uuesti.'))+'</div>'+
+    (d._planErr==='net'?'<button class="cnretry" data-cn="pload">'+T3('Повторить','Retry','Proovi uuesti')+'</button>':''):'<p class="cnpriv">'+T3('Загружаю план…','Loading the plan…','Laen plaani…')+'</p>';
+  const tot=[0,0,0,0];let nl=0;doc.parts.forEach(p=>p.lessons.forEach(l=>{nl++;cnPCount(l).forEach((n,i)=>{tot[i]+=n;});}));
+  const sum=Math.max(1,tot[1]+tot[2]+tot[3]),open=d._open||(d._open=new Set());
+  const pp=(c)=>'<span class="cnpp"><em class="p1">P1 '+c[1]+'</em><em class="p2">P2 '+c[2]+'</em><em class="p3">P3 '+c[3]+'</em></span>';
+  let h='<div class="cnpsum"><div class="cnpk">'+CN_SP14+T3('ИИ предлагает','The AI suggests','TI soovitab')+'</div><div class="cnph" id="cnPH">'+
+    plx(doc.parts.length,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(nl)+'</div>'+
+    '<div class="cnpx1">'+crNS(tot[1]+tot[2]+tot[3])+'</div>'+
+    '<div class="cnpbar"><span class="p1" style="width:'+(tot[1]/sum*100)+'%"></span><span class="p2" style="width:'+(tot[2]/sum*100)+'%"></span><span class="p3" style="width:'+(tot[3]/sum*100)+'%"></span></div>'+
+    '<div class="cnpleg"><span><i class="p1"></i>P1 · '+tot[1]+'</span><span><i class="p2"></i>P2 · '+tot[2]+'</span><span><i class="p3"></i>P3 · '+tot[3]+'</span></div></div>'+
+    '<p class="cnpriv">'+T3('Нажмите на урок — увидите его структуры и откуда взята важность.','Tap a lesson to see its structures and where the importance comes from.','Puuduta õppetundi – näed selle struktuure ja kust olulisus pärineb.')+'</p>';
+  doc.parts.forEach((p,pi)=>{
+    h+='<div class="cnpt"><span class="cnpn">'+(pi+1)+'</span><b data-noi18n>'+esc(p.name)+'</b><small>'+crNL(p.lessons.length)+'</small></div>';
+    p.lessons.forEach(l=>{
+      const c=cnPCount(l),pn=cnPicName(d,l.pic),isOpen=open.has(l.id),isP=l.pic&&l.pic[0]==='g';
+      h+='<div class="cnpl'+(isOpen?' open':'')+'" data-lid="'+esc(l.id)+'"><button class="cnplh" data-cn="lopen" data-lid="'+esc(l.id)+'" aria-expanded="'+isOpen+'"><span class="cnpic'+(pn?'':' none')+'">'+
+        (!pn?'!':isP?'<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h5"/></svg>':'<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>')+'</span>'+
+        '<span class="cnplm"><i class="cnlt" data-noi18n>'+esc(l.title)+'</i><small data-noi18n>'+(pn?esc(T3('рисунок: ','picture: ','pilt: ')+pn):esc(T3('рисунка нет','no picture','pilti pole')))+'</small>'+pp(c)+'</span>'+
+        '<svg class="cnchev" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>'+
+        (pn?'':'<div class="cnwarn sm">'+T3('Подходящего рисунка нет — урок будет только с вопросами','No suitable picture: the lesson will have questions only','Sobivat pilti pole – õppetunnis on ainult küsimused')+'</div>')+
+        (isOpen?'<div class="cnpx">'+l.terms.map(t=>'<div class="cnpr"><span><i data-noi18n>'+esc(t.la)+'</i><small data-noi18n>'+esc(cnSrcText(t.src))+'</small></span><em class="pc p'+t.p+'">P'+t.p+'</em></div>').join('')+
+          '<div class="cnphint">'+T3('P1 — жирным в «Основе» или спрашивают на экзамене. P2 — упомянуто в «Основе» или «Дополнении». P3 — только на рисунке.','P1: bold in the Core or asked in the exam. P2: mentioned in the Core or Extra. P3: only on the picture.','P1 – rasvases „Põhis“ või eksamil küsitakse. P2 – mainitud „Põhis“ või „Täiendus“. P3 – ainult pildil.')+'</div></div>':'')+'</div>';
+    });
+  });
+  return h;
+}
+function cnPlanBar(d){
+  const left=cnLeft(),n=cnEst(d);
+  return '<div class="cnsum">'+esc('≈ '+cnNReq(n)+(left!=null?T3(' · осталось '+left,' · '+left+' left',' · jäänud '+left):''))+'</div>'+
+    '<div class="cnbtns"><button class="cnbtn2" data-cn="replan"'+(cnPlanOk0(d)?'':' disabled')+'>'+T3('Пересоставить план','Make the plan again','Koosta plaan uuesti')+'</button>'+
+    '<button class="cnmain" disabled>'+CN_SPARK+'<span><b>'+T3('Собрать курс','Build the course','Koosta kursus')+'</b><small>'+T3('следующий шаг — скоро','the next step is coming soon','järgmine samm tuleb varsti')+'</small></span></button></div>';
+}
+function cnPlanHtml(d){
+  return '<div class="page cnw" data-did="'+esc(d.id)+'">'+cnHeadHtml(d,1)+'<div id="cnPl" class="cnpl0">'+cnPlanInner(d)+'</div></div><div class="cnbarw"><div class="cnbarin" id="cnBar">'+cnPlanBar(d)+'</div></div>';
+}
+function cnPlanPaint(){
+  const d=view.name==='courseNew'&&view.step===3&&CDRAFTS.get(view.did),el=$('#cnPl');if(!d||!el)return;
+  const sy=window.scrollY;el.innerHTML=cnPlanInner(d);const b=$('#cnBar');if(b)b.innerHTML=cnPlanBar(d);window.scrollTo(0,sy);
+}
+/* шаги 2 и 3: нажатия */
+function cnMountStep(d,root){
+  const act=(a,b)=>{
+    if(a==='close'){cnRunStop(d);cnClose(d);}
+    else if(a==='step'){cnRunStop(d);go({name:'courseNew',did:d.id});}
+    else if(a==='rcancel'){cnRunStop(d);go({name:'courseNew',did:d.id});toast(T3('Остановлено. Черновик цел.','Stopped. The draft is kept.','Peatatud. Mustand on alles.'),3500);}
+    else if(a==='rback')go({name:'courseNew',did:d.id});
+    else if(a==='rretry'){cnRunStart(d);cnRPaint();}
+    else if(a==='lopen'){const id=b.dataset.lid,o=d._open||(d._open=new Set());if(o.has(id))o.delete(id);else o.add(id);cnPlanPaint();}
+    else if(a==='pload'&&!d._planLoad)cnPlanLoad(d);
+    else if(a==='replan'&&cnPlanOk0(d)){cnRunStart(d);go({name:'courseNew',did:d.id,step:2});}
+  };
+  const h=e=>{const b=e.target.closest('[data-cn]');if(b)act(b.dataset.cn,b);};
+  root.onclick=h;const bar=$('#cnBar');if(bar)bar.onclick=h;
+  if(view.step===3&&!d._plan&&!d._planLoad&&!d._planErr)cnPlanLoad(d);
+}
 /* ---- on the «Courses» tab: the button and the cards of drafts ---- */
 const cnNewBtn=big=>cnOn()?'<button class="cnnew'+(big?' big':'')+'" data-cn="new"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>'+T3('Новый курс','New course','Uus kursus')+'</button>':'';
 function cnDraftsInner(){
@@ -4535,7 +4976,7 @@ function cnMountCourses(){
   root.addEventListener('click',e=>{
     const b=e.target.closest('[data-cn]');if(!b)return;const a=b.dataset.cn,row=b.closest('.cnd'),d=row&&CDRAFTS.get(row.dataset.did);
     if(a==='new')cnNew();
-    else if(a==='open'&&d)go({name:'courseNew',did:d.id});
+    else if(a==='open'&&d)go(d.planAt?{name:'courseNew',did:d.id,step:3}:{name:'courseNew',did:d.id});
     else if(a==='del'&&d)confirmDialog({title:T3('Удалить черновик?','Delete the draft?','Kas kustutada mustand?'),text:T3('Материалы и прочитанный текст будут удалены. Это нельзя отменить.','The materials and the text read from them will be deleted. This cannot be undone.','Materjalid ja neist loetud tekst kustutatakse. Seda ei saa tagasi võtta.'),ok:T3('Удалить','Delete','Kustuta'),danger:true}).then(y=>{
       if(!y)return;cnDeleteDraft(d);const el=$('#cnDrafts');if(el)el.innerHTML=cnDraftsInner();toast(T3('Черновик удалён','Draft deleted','Mustand kustutatud'));});
   });
@@ -7200,7 +7641,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
@@ -7604,6 +8045,46 @@ html.vkb .panel{padding-bottom:12px}
 .cndn{flex:1;min-width:0;display:flex;flex-direction:column}.cndn b{font-size:16px;font-weight:600}.cndn small{font-size:12.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cndx{flex:none;width:44px;border-radius:16px;border:1px solid var(--glass-line);background:var(--glass);color:var(--ink2);display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
 .crs .hhead .cnnew{margin-left:8px}.crs .chead .cnnew{margin-left:4px}
+/* ===== «Новый курс», шаги 2–3 (T-018): чтение и план ===== */
+.cnstb{display:flex;flex-direction:column;gap:5px;padding:0;border:none;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;min-height:36px}
+.cnstb .cnsl{text-decoration:underline;text-underline-offset:3px}
+.cnrd{display:flex;flex-direction:column;gap:14px;padding-top:8px}
+.cnrhd{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.cnrhd b{font-size:21px;font-weight:600;letter-spacing:-.2px}.cnrhd span{font-size:13.5px;color:var(--ink2)}
+.cnck{display:flex;flex-direction:column;gap:2px;padding:8px 14px;border-radius:22px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow)}
+.cnrow{display:flex;gap:12px;align-items:flex-start;padding:9px 0}.cnrow.todo{opacity:.55}
+.cndot{flex:none;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--ink3);font-weight:700;font-size:13px}
+.cnrow.done .cndot{background:var(--easy-soft);color:var(--ok-ink)}.cnrow.cur .cndot{background:var(--primary-soft);color:var(--accent-ink)}.cnrow.bad .cndot{background:var(--bad-soft);color:var(--bad-ink)}
+.cnrx{flex:1;min-width:0;display:flex;flex-direction:column}.cnrx b{font-size:14.5px;font-weight:500}.cnrx small{font-size:12.5px;color:var(--ink2)}
+.cnspend{font-size:12.5px;color:var(--ink2);text-align:center}
+.cnerr{text-align:left}
+.cnbtn2{width:100%;min-height:50px;border-radius:25px;border:1px solid var(--line);background:var(--glass);color:var(--ink);font-size:15.5px;font-weight:600}
+.cnbtn2:disabled{opacity:.5;cursor:default}
+.cnbtns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:8px}.cnbtns .cnbtn2{min-height:58px;border-radius:29px;font-size:14.5px}
+.cnmain.on{background:var(--primary);color:var(--primary-ink);cursor:pointer;box-shadow:0 12px 28px rgba(31,27,51,.22)}
+.cnpl0{display:flex;flex-direction:column;gap:12px}
+.cnpsum{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:24px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow)}
+.cnpk{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--accent-ink)}
+.cnph{font-size:21px;font-weight:600;letter-spacing:-.2px;line-height:1.2}.cnpx1{font-size:13px;color:var(--ink2)}
+.cnpbar{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:2px}.cnpbar span{display:block}
+.cnpbar .p1,.cnpleg i.p1{background:var(--bad-ink)}.cnpbar .p2,.cnpleg i.p2{background:var(--learn-ink)}.cnpbar .p3,.cnpleg i.p3{background:var(--easy-ink)}
+.cnpleg{display:flex;gap:14px;font-size:12.5px;color:var(--ink2)}.cnpleg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.cnpp{display:flex;gap:4px}.cnpp em{font-style:normal;font-size:11px;font-weight:700;padding:1px 6px;border-radius:7px}
+.cnpp .p1,.pc.p1{background:var(--bad-soft);color:var(--bad-ink)}.cnpp .p2,.pc.p2{background:var(--hard-soft);color:var(--learn-ink)}.cnpp .p3,.pc.p3{background:var(--easy-soft);color:var(--easy-ink)}
+.cnpt{display:flex;align-items:center;gap:10px;padding:10px 4px 0}.cnpt b{flex:1;min-width:0;font-size:16px;font-weight:600;overflow-wrap:anywhere}.cnpt small{flex:none;font-size:12.5px;color:var(--ink2)}
+.cnpn{flex:none;width:28px;height:28px;border-radius:9px;background:var(--primary-soft);color:var(--accent-ink);display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:700}
+.cnpl{display:flex;flex-direction:column;border-radius:18px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow);overflow:hidden}
+.cnplh{display:flex;align-items:center;gap:10px;min-height:64px;padding:8px 12px 8px 8px;border:none;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.cnpic{flex:none;width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--ink3)}.cnpic.none{background:var(--hard-soft);color:var(--learn-ink);font-size:22px;font-weight:700}
+.cnplm{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.cnplm small{font-size:12px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cnlt{font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-size:16.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cnchev{flex:none;color:var(--ink2);transition:transform .15s}.cnpl.open .cnchev{transform:rotate(180deg)}
+.cnwarn.sm{margin:0 10px 10px;padding:8px 10px;border-radius:12px;font-size:12.5px}
+.cnpx{display:flex;flex-direction:column;gap:2px;padding:4px 12px 12px;border-top:1px solid var(--line)}
+.cnpr{display:flex;align-items:center;gap:8px;padding:5px 0}.cnpr>span{flex:1;min-width:0;display:flex;flex-direction:column}
+.cnpr i{font-family:'Source Serif 4',Georgia,serif;font-size:15px;font-weight:600;overflow-wrap:anywhere}.cnpr small{font-size:11.5px;color:var(--ink2);overflow-wrap:anywhere}
+.pc{flex:none;min-width:44px;box-sizing:border-box;text-align:center;padding:6px 0;border-radius:10px;font-style:normal;font-size:12.5px;font-weight:700}
+.cnphint{margin-top:6px;font-size:12px;color:var(--ink2)}
 </style>
 </body>
 </html>

@@ -8,7 +8,7 @@
      user      — the signed-in person
      sample    — Claude, through the Supabase Edge Function "corpus-ai" (the site owner's API key,
                  a daily allowance per user). Until that function is deployed, AI features stay hidden.
-   Beyond window.claude, window.CORPUS_WEB.courseAI.translate (signed-in people only) asks the same function for the
+   Beyond window.claude, window.CORPUS_WEB.courseAI.translate (and .outline, .plan; signed-in people only) asks the same function for the
    "translate" task: the function builds the prompt itself and pays from the course allowance first (supabase/ai.sql);
    window.CORPUS_WEB.aiCourse = { left, free } tells what is left of it.
    Beyond window.claude, window.CORPUS_WEB.shares passes a deck or folder to another person by a short
@@ -630,11 +630,11 @@
      and counts the request against the course allowance first. Resolves to the JSON object the model answered, like sample.json.
      Errors carry the code of the function's answer (invalid_input, quota_exceeded, rate_limited, ...) or invalid_json (cut short / not JSON). */
   function mkCourseAI() {
-    var translate = async function (src, dst, input, opts) {
+    var call = async function (payload, opts) {
       opts = opts || {};
       if (opts.signal && opts.signal.aborted) throw { code: 'cancelled', message: 'cancelled' };
       var r;
-      try { r = await fnFetch('POST', { task: 'translate', purpose: 'course', src: src, dst: dst, input: input }, opts.signal); }
+      try { r = await fnFetch('POST', payload, opts.signal); }
       catch (e) {
         if (e && e.name === 'AbortError') throw { code: 'cancelled', message: 'cancelled' };
         throw { code: 'unavailable', message: String((e && e.message) || e) };
@@ -647,7 +647,11 @@
       if (j.truncated || !p.ok) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON in the answer', text: j.text };
       return p.v;
     };
-    return Object.freeze({ translate: translate });
+    var translate = function (src, dst, input, opts) { return call({ task: 'translate', purpose: 'course', src: src, dst: dst, input: input }, opts); };
+    /* outline: the topics of one material ({name, pages:[{n,text,em}]}); plan: the parts and lessons of a course (task "plan" of the function) */
+    var outline = function (lang, input, opts) { return call({ task: 'outline', purpose: 'course', lang: lang, input: input }, opts); };
+    var plan = function (lang, input, opts) { return call({ task: 'plan', purpose: 'course', lang: lang, input: input }, opts); };
+    return Object.freeze({ translate: translate, outline: outline, plan: plan });
   }
 
   /* ---------- user ---------- */

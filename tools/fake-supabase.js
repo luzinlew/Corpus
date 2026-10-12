@@ -25,12 +25,14 @@ const courseUsed = new Map();   // uid -> course requests used (public.ai_course
 const courseDay = new Map();    // day -> course requests of the whole site (private.ai_course_global)
 const AI_OFF = new Set();       // uids of people with ai_plans.daily_limit = 0
 const limOf = (uid) => AI_OFF.has(uid) ? 0 : AI_LIMIT;
-let LAST_TR = null;             // the last lesson translation the fake Claude received: {model, max_tokens, system, turns, said}
+let LAST_TR = null;             // the last lesson translation / course outline / course plan the fake Claude received: {model, max_tokens, system, turns, said}
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
 const FN_URL0 = FN_URL;
 let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
-   case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429 */
+   case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429.
+   The same switches work for the course outline and plan requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
+   trunc — cut short with stop_reason max_tokens; fail_after — 429 from the model service */
 let FN_DROP = false, FN_TRUNC = false, FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
 let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
 let FN_TAKEERR = '';       // takeerr=1: corpus_ai_take fails (as with a missing private.ai_global: 42P01) for p_units >= 1; takeerr=all: for p_units = 0 too (the status), also in corpus_ai_take_course
@@ -370,6 +372,8 @@ http.createServer(async (req, res) => {
     /* a lesson translation (the app's prompt starts with «CORPUS-TRANSLATE <from>><to>» and ends with «INPUT:» and the JSON): the same JSON back,
        every string value prefixed with «[<to>] »; a value with ATTACK in it comes back as an <img onerror> tag, to see that the app shows it as text */
     const tm = body.system && /^CORPUS-TRANSLATE (\w+)>(\w+)\n/.exec(said), at = said.indexOf('\nINPUT:\n');
+    /* a course outline / plan (labels «CORPUS-OUTLINE <lang>» / «CORPUS-PLAN <lang>» at the start of the prompt, then «INPUT:» and the JSON) */
+    const om = body.system && /^CORPUS-OUTLINE (\w+)\n/.exec(said), pm = body.system && /^CORPUS-PLAN (\w+)\n/.exec(said);
     let text;
     let stop = 'end_turn';
     if (tm && at > 0) {
@@ -382,6 +386,37 @@ http.createServer(async (req, res) => {
       let inp = null; try { inp = JSON.parse(said.slice(at + 8)); } catch { /* not JSON: answer with nothing useful */ }
       const ans = tr(inp);
       if (FN_DROP && ans && typeof ans === 'object') delete ans.terms;
+      text = JSON.stringify(ans);
+      if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
+    } else if ((om || pm) && at > 0) {
+      FN_TR_N++;
+      LAST_TR = { model: body.model, max_tokens: body.max_tokens, system: body.system, turns: body.messages.length, said, thinking: body.thinking };
+      if (FN_FAIL_AFTER >= 0 && FN_TR_N > FN_FAIL_AFTER) { send(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'rate limit (test)' } }); return; }
+      let inp = null; try { inp = JSON.parse(said.slice(at + 8)); } catch { /* not JSON */ }
+      inp = inp || {};
+      const norm = (v) => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const evil = (v) => String(v).includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : String(v);
+      let ans;
+      if (om) {
+        /* outline: a topic for every page that has bold text (the first bold line is its title); its terms are the Latin pairs «Capital lower» of the page */
+        ans = { topics: (inp.pages || []).filter((pg) => pg.em && pg.em.length).map((pg) => ({ title: pg.em[0], pages: [pg.n], terms: [...new Set(pg.text.match(/\b[A-Z][a-z]+ [a-z]{4,}\b/g) || [])] })) };
+        if (FN_DROP) delete ans.topics;
+      } else {
+        /* plan: a part for every topic, a lesson for every term of it; the picture is the photo with the most labels equal to the terms of the lesson (here one: the term itself),
+           the terms that are in no topic (only on the pictures) go into the last part «Atlas» */
+        const byId = new Map((inp.terms || []).map((t) => [t.id, t]));
+        const pic = (t) => { const k = norm(t.la), ph = (inp.photos || []).find((p) => p.labels.some((l) => norm(l) === k)); return ph ? ph.id : null; };
+        const lesson = (id) => { const t = byId.get(id); return { title: t.la, pic: pic(t), terms: [id] }; };
+        const used = new Set(), parts = [];
+        for (const tp of inp.topics || []) {
+          const ls = tp.terms.filter((id) => byId.has(id) && !used.has(id)).map((id) => { used.add(id); return lesson(id); });
+          if (ls.length) parts.push({ name: evil(tp.title), lessons: ls });
+        }
+        const rest = (inp.terms || []).filter((t) => !used.has(t.id)).map((t) => lesson(t.id));
+        if (rest.length) parts.push({ name: 'Atlas', lessons: rest });
+        ans = { parts };
+        if (FN_DROP) delete ans.parts;
+      }
       text = JSON.stringify(ans);
       if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
     } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length, thinking: think || null })

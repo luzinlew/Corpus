@@ -329,6 +329,9 @@ def course_files(d):
     (d / 'katkine.pdf').write_bytes(b'%PDF-1.4\nthis is not a pdf at all\n')
     (d / 'märkmed.txt').write_text('Lühikesed märkmed.\nTeine rida õlavarre kohta.\n', encoding='utf8')
     pdf_file(d / 'tohutu.pdf', [[(False, 12, 50, 740, 'Leht %d' % (i + 1))] for i in range(401)])
+    pdf_file(d / 'skänn.pdf', [[]])   # no text layer (a scan)
+    pdf_file(d / 'Example slides.pdf', [[(False, 12, 50, 740, 'Example text of the slides.')]])
+    (d / 'lisa.txt').write_text('Lisamaterjal õlavarre kohta.\n', encoding='utf8')
     Image.new('RGB', (200, 150), (200, 220, 240)).save(d / 'atlas.png')
 
 
@@ -2265,6 +2268,8 @@ async def main():
             course_files(tmp / 'cn')
             CN = tmp / 'cn'
             ctx, pg, errs_n = await open_ctx()
+            ctext_gets = []   # the step reads no text from the cloud at all (and never the whole ctext collection)
+            pg.on('request', lambda r: r.method == 'GET' and 'coll=eq.ctext' in r.url and ctext_gets.append(r.url))
             await pg.goto(SITE + '?i=' + INVITE)
             await pg.wait_for_selector('.cw-auth .cw-tabs .on')
             await pg.fill('input[name=email]', 'newcourse@test.ee')
@@ -2296,6 +2301,7 @@ async def main():
             await pg.click('.chead .cnnew')
             await pg.wait_for_selector('.cnw')
             did = await pg.evaluate('view.did')
+            uid = await pg.evaluate('CORPUS_WEB.uid')
             check('new course: the screen opens, no tab bar, «Составить план» is off with «coming soon»', not await pg.query_selector('.tabbar') and await pg.is_disabled('.cnmain') and 'järgmine samm tuleb varsti' in await pg.inner_text('.cnmain'))
             check('new course: an empty draft is not stored yet', not any(r['coll'] == 'cdraft' for r in state()['docs']))
             await pg.fill('#cnName', 'Ülajäse')
@@ -2327,7 +2333,7 @@ async def main():
             qdoc = next(v for k, v in tx.items() if k.endswith('.q'))
             check('new course: exam questions saved as {qs:[…]}', len(qdoc['qs']) == 5 and qdoc['qs'][0].startswith('Kirjelda scapula ehitust') , json.dumps(qdoc, ensure_ascii=False))
             keys = await pg.evaluate("new Promise(r=>{const q=indexedDB.open('corpus-local');q.onsuccess=()=>{const c=q.result.transaction('mats').objectStore('mats').getAllKeys();c.onsuccess=()=>r(c.result)}})")
-            check('new course: originals (3 PDF, 1 photo) are in IndexedDB corpus-local/mats, none on the server', len(keys) == 4 and all(k.startswith(did + '/') for k in keys), json.dumps(keys))
+            check('new course: originals (3 PDF, 1 photo) are in IndexedDB corpus-local/mats, none on the server', len(keys) == 4 and all(k.startswith(uid + '/' + did + '/') for k in keys), json.dumps(keys))
             # roles
             pr = '.cnf:has(.cnfn:text("Praktikumi juhend.pdf"))'
             await pg.click(pr + ' [data-r=pics]')
@@ -2340,7 +2346,7 @@ async def main():
             check('new course: no «Põhi» → warning and the summary asks for one', 'Märgi vähemalt üks fail rolliga „Põhi“' in await pg.inner_text('.cnwarn') and 'Vaja on vähemalt üks fail' in await pg.inner_text('.cnsum'))
             await pg.click(lg + ' [data-r=base]')
             await pg.wait_for_function("!document.querySelector('.cnwarn')")
-            check('new course: back to «Põhi» → the warning is gone', True)
+            check('new course: back to «Põhi» → the warning is gone and the summary is the count again', not await pg.query_selector('.cnwarn') and (await pg.inner_text('.cnsum')).startswith('4 faili'))
             # other files: a broken PDF, a text file
             await pg.set_input_files('#cnFile', [str(CN / 'katkine.pdf'), str(CN / 'märkmed.txt')])
             await cn_ready(6)
@@ -2353,11 +2359,19 @@ async def main():
               const big=new File([new Uint8Array(51*1048576)],'suur.pdf',{type:'application/pdf'});window.cnAddFiles(d,[big],false);const a=d.mats.length;
               return {a:a-n0,toast:[...document.querySelectorAll('.toast')].map(t=>t.textContent).join('|')};})()""")
             check('new course: a PDF over 50 MB is refused with a message', lim['a'] == 0 and '50 MB' in lim['toast'], json.dumps(lim, ensure_ascii=False))
+            keys0 = await pg.evaluate("new Promise(r=>{const q=indexedDB.open('corpus-local');q.onsuccess=()=>{const c=q.result.transaction('mats').objectStore('mats').getAllKeys();c.onsuccess=()=>r(c.result)}})")
+            n_mats0 = await pg.evaluate('CDRAFTS.get(view.did).mats.length')
             await pg.set_input_files('#cnFile', [str(CN / 'tohutu.pdf')])
             await pg.wait_for_function("!CDRAFTS.get(view.did).mats.some(m=>m.name==='tohutu.pdf')&&[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('400'))", timeout=30000)
-            check('new course: a PDF of 401 pages is refused (message), nothing is left of it', True)
+            keys1 = await pg.evaluate("new Promise(r=>{const q=indexedDB.open('corpus-local');q.onsuccess=()=>{const c=q.result.transaction('mats').objectStore('mats').getAllKeys();c.onsuccess=()=>r(c.result)}})")
+            await pg.wait_for_function("![...document.querySelectorAll('.cnfn')].some(e=>e.innerText==='tohutu.pdf')")
+            check('new course: a PDF of 401 pages is refused (message), nothing is left of it: no card, no original, same number of materials',
+                  await pg.evaluate('CDRAFTS.get(view.did).mats.length') == n_mats0 and keys1 == keys0 and not any('tohutu' in json.dumps(r['data']) for r in state()['docs'] if r['coll'] == 'cdraft'), json.dumps([keys0, keys1]))
             lim = await pg.evaluate("""(async()=>{const d=CDRAFTS.get(view.did);const fs=[];for(let i=0;i<70;i++)fs.push(new File([new Uint8Array(8)],'f'+i+'.jpg',{type:'image/jpeg'}));
-              window.cnAddFiles(d,fs,false);await new Promise(r=>setTimeout(r,1500));return d.mats.filter(m=>m.kind==='img').reduce((a,m)=>a+m.photos,0);})()""")
+              window.cnAddFiles(d,fs,false);return true;})()""")
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.filter(m=>m.kind==='img').reduce((a,m)=>a+m.photos,0)>=60", timeout=30000)
+            await pg.wait_for_function("!document.querySelector('#cnList').innerText.includes('salvestan')")
+            lim = await pg.evaluate("CDRAFTS.get(view.did).mats.filter(m=>m.kind==='img').reduce((a,m)=>a+m.photos,0)")
             check('new course: no more than 60 photos in a draft', lim == 60, str(lim))
             qs = await pg.evaluate("cnQuestions(['Kollokvium 2','1. Esimene','jätk','2) Teine','Küsimus 3: Kolmas','2.5 mm paks','lõpp','9. kaugel','Question 5 - Viies'])")
             check('new course: question heuristic (1. / 1) / küsimus 3, runs on, «2.5 mm» and a far number are not starts)',
@@ -2371,7 +2385,7 @@ async def main():
             st = await state_when(lambda s: not any(r['coll'] == 'ctext' and r['id'].startswith(did + '.' + pk + '.') for r in s['docs']))
             keys = await pg.evaluate("new Promise(r=>{const q=indexedDB.open('corpus-local');q.onsuccess=()=>{const c=q.result.transaction('mats').objectStore('mats').getAllKeys();c.onsuccess=()=>r(c.result)}})")
             check('new course: removing a material removes its text documents and its original', sum(r['coll'] == 'ctext' for r in st['docs']) == n_tx - 1
-                  and await pg.evaluate("[...document.querySelectorAll('.cnfn')].every(e=>!e.innerText.startsWith('Prakt'))") and not any(k == did + '/' + pk or k.startswith(did + '/' + pk + '/') for k in keys) and any(k.startswith(did + '/') for k in keys), json.dumps([n_tx, pk, [r['id'] for r in st['docs'] if r['coll'] == 'ctext']]))
+                  and await pg.evaluate("[...document.querySelectorAll('.cnfn')].every(e=>!e.innerText.startsWith('Prakt'))") and not any(k == uid + '/' + did + '/' + pk or k.startswith(uid + '/' + did + '/' + pk + '/') for k in keys) and any(k.startswith(uid + '/' + did + '/') for k in keys), json.dumps([n_tx, pk, [r['id'] for r in st['docs'] if r['coll'] == 'ctext']]))
             # close, reload: the draft comes from cdraft
             await pg.click('[data-cn=close]')
             await pg.wait_for_selector('.crs .cnd')
@@ -2387,8 +2401,107 @@ async def main():
             check('new course: after the reload name, materials and roles are as they were; originals are here (no «teises seadmes»)', again['name'] == 'Ülajäse' and again['n'] >= 5, json.dumps(again, ensure_ascii=False))
             await pg.wait_for_timeout(600)
             check('new course: …originals are on this device (no «originaal» lines)', 'originaal on' not in await pg.inner_text('#cnList') and 'originaal pole' not in await pg.inner_text('#cnList'))
-            await pg.wait_for_function("CTEXT.size>=3", timeout=10000)
-            check('new course: the text of the draft is loaded when the draft opens (ctext)', True)
+            # --- step 1, the review round: duplicates, sizes, scans, names of exams, limits, the toast of a refused quota, an interrupted reading and «Retry» ---
+            n_m = await pg.evaluate('CDRAFTS.get(view.did).mats.length')
+            await pg.set_input_files('#cnFile', [str(CN / 'märkmed.txt')])
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('juba lisatud'))")
+            check('new course: the same file (name + size) is not added twice, a toast says so', await pg.evaluate('CDRAFTS.get(view.did).mats.length') == n_m)
+            en = await pg.evaluate("['Kollokvium küsimused.pdf','Exam 2024.pdf','Eksamiküsimused.pdf','Вопросы к экзамену.pdf','questions.pdf','Example slides.pdf','Examination atlas.pdf','Loeng 4.pdf','Exams.pdf'].map(n=>CN_EXAM_RE.test(n))")
+            check('new course: «exam» by the name is by whole words: Example/Examination are not exams', en == [True, True, False, True, True, False, False, False, True], json.dumps(en))
+            lg = await pg.evaluate("(()=>{const d=cnDraftOk({name:'x',lang:'xx',mats:[{id:'a',name:'b',kind:'pdf',role:'base',status:'ready',lang:'zz',chunks:[1,'c'],qdoc:5}]},'d1');return [d.lang,d.mats[0].lang,d.mats[0].chunks,d.mats[0].qdoc]})()")
+            check('new course: a language from the cloud is only ru|en|et, the lists of ids are checked', lg == ['', None, ['c'], None], json.dumps(lg))
+            tm = await pg.evaluate("(async()=>{CN_LIM.wait=200;let destroyed=false,r;try{await cnTO(new Promise(()=>{}),{destroy(){destroyed=true;}});}catch(e){r=e.code;}CN_LIM.wait=30000;return [r,destroyed];})()")
+            check('new course: a call into pdf.js that hangs ends with «timeout» and destroys the task', tm == ['timeout', True], json.dumps(tm))
+            big = await pg.evaluate("""(()=>{const d=CDRAFTS.get(view.did),n=d.mats.length;
+              window.cnAddFiles(d,[new File([new Uint8Array(4*1048576+1)],'suur.txt',{type:'text/plain'})],false);
+              window.cnAddFiles(d,[new File([new Uint8Array(26*1048576)],'suur.jpg',{type:'image/jpeg'})],false);
+              return [d.mats.length-n,[...document.querySelectorAll('.toast')].map(t=>t.textContent).join('|')];})()""")
+            check('new course: a .txt over 4 MB and a photo over 25 MB are refused with a toast', big[0] == 0 and '4 MB' in big[1] and '25 MB' in big[1], json.dumps(big))
+            # a scan: no text layer
+            await pg.set_input_files('#cnFile', [str(CN / 'skänn.pdf')])
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='skänn.pdf'&&m.status==='empty')")
+            await pg.wait_for_function("document.querySelector('#cnList').innerText.includes('skänn')")
+            sm = await pg.inner_text('.cnsum')
+            check('new course: a PDF without text → its own warning, its pages are not in the summary', 'paistab olevat skänn' in await pg.inner_text('.cnwarn') and ' 4 lk ' in ' ' + sm.split('·')[1] + ' ', sm)
+            sc = '.cnf:has(.cnfn:text("skänn.pdf"))'
+            await pg.click(sc + ' [data-r=base]')
+            lgs = '.cnf:has(.cnfn:text("Loeng 4. Ülajäse.pdf"))'
+            await pg.click(lgs + ' [data-r=extra]')
+            await pg.wait_for_function("document.querySelector('#cnList').innerText.includes('ainult skännid')")
+            check('new course: if the «Core» is only scans the warning says exactly that', 'ainult skännid' in await pg.inner_text('#cnList') and 'Märgi vähemalt' not in await pg.inner_text('#cnList'))
+            await pg.click(lgs + ' [data-r=base]')
+            await pg.click(sc + ' [data-cn=rm]')
+            await pg.wait_for_function("!CDRAFTS.get(view.did).mats.some(m=>m.name==='skänn.pdf')")
+            await pg.set_input_files('#cnFile', [str(CN / 'Example slides.pdf')])
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='Example slides.pdf'&&m.status==='ready')")
+            check('new course: «Example slides.pdf» is not an exam (role Täiendus)', await pg.evaluate("CDRAFTS.get(view.did).mats.find(m=>m.name==='Example slides.pdf').role") == 'extra')
+            await pg.click('.cnf:has(.cnfn:text("Example slides.pdf")) [data-cn=rm]')
+            # the limit of text of a draft (1.5 MB), counted in bytes
+            await pg.evaluate("""(()=>{const d=CDRAFTS.get(view.did);let t='';const line='õlavarreluu tekst tekst tekst tekst tekst tekst tekst\\n';while(t.length<1600000)t+=line;
+              window.cnAddFiles(d,[new File([t],'pikk.txt',{type:'text/plain'})],false);})()""")
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='pikk.txt'&&m.status==='error'&&m.err==='limit')", timeout=60000)
+            await pg.wait_for_function("[...document.querySelectorAll('.cnf')].some(c=>c.innerText.includes('pikk.txt')&&c.innerText.includes('liiga palju teksti'))")
+            check('new course: more than 1.5 MB of text in a draft → an error status and a toast, the text written so far is dropped',
+                  'liiga palju teksti' in (await pg.inner_text('.cnf:has(.cnfn:text("pikk.txt"))')) and await pg.evaluate("[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('1,5 MB'))"),
+                  await pg.inner_text('.cnf:has(.cnfn:text("pikk.txt"))') + '|' + await pg.evaluate("[...document.querySelectorAll('.toast')].map(t=>t.textContent).join('|')"))
+            pkk = await pg.evaluate("CDRAFTS.get(view.did).mats.find(m=>m.name==='pikk.txt').id")
+            st = await state_when(lambda s: not any(r['coll'] == 'ctext' and r['id'].startswith(did + '.' + pkk + '.') for r in s['docs']))
+            check('new course: …and no ctext of it is left in the cloud', not any(r['coll'] == 'ctext' and r['id'].startswith(did + '.' + pkk + '.') for r in st['docs']))
+            await pg.click('.cnf:has(.cnfn:text("pikk.txt")) [data-cn=rm]')
+            # the storage refuses the write (quota): «not saved in the cloud», not «text read»
+            quota_window['on'] = True
+            urllib.request.urlopen(API + '/__quota?docsMb=0.0001')
+            await pg.set_input_files('#cnFile', [str(CN / 'Praktikumi juhend.pdf')])
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='Praktikumi juhend.pdf'&&m.status==='error'&&m.err==='quota')", timeout=60000)
+            await pg.wait_for_function("[...document.querySelectorAll('.cnf')].some(c=>c.innerText.includes('Praktikumi')&&c.innerText.includes('Pilve ei salvestatud'))")
+            qs = await pg.inner_text('.cnf:has(.cnfn:text("Praktikumi juhend.pdf"))')
+            check('new course: a write refused by the quota → «Pilve ei salvestatud – vabasta ruumi», not «tekst loetud», plus a toast',
+                  'Pilve ei salvestatud' in qs and 'tekst loetud' not in qs and await pg.evaluate("[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('vabasta ruumi'))"), qs)
+            urllib.request.urlopen(API + '/__quota?reset=1')
+            quota_window['on'] = False
+            await pg.click('.cnf:has(.cnfn:text("Praktikumi juhend.pdf")) [data-cn=retry]')
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='Praktikumi juhend.pdf'&&m.status==='ready')", timeout=60000)
+            await pg.wait_for_function("[...document.querySelectorAll('.cnf')].some(c=>c.innerText.includes('Praktikumi')&&c.innerText.includes('tekst loetud'))")
+            check('new course: «Proovi uuesti» reads the original again and the material is «tekst loetud»', 'tekst loetud' in await pg.inner_text('.cnf:has(.cnfn:text("Praktikumi juhend.pdf"))'))
+            await pg.click('.cnf:has(.cnfn:text("Praktikumi juhend.pdf")) [data-cn=rm]')
+            # a reading interrupted by a reload: the cloud says «reading», nothing is alive → «lugemine katkes» + «Proovi uuesti»
+            mk = await pg.evaluate("""(async()=>{const d=CDRAFTS.get(view.did),m=d.mats.find(x=>x.name==='märkmed.txt');m.status='reading';await cnSave(d,m);return m.id;})()""")
+            await state_when(lambda s: any(r['coll'] == 'cdraft' and any(m['id'] == mk and m['status'] == 'reading' for m in r['data']['mats']) for r in s['docs']))
+            await pg.reload()
+            await app_ready(pg)
+            await pg.click('.tabbar [data-v=courses]')
+            await pg.wait_for_selector('.crs .cnd')
+            await pg.click('.cnd .cndgo')
+            card = '.cnf:has(.cnfn:text("märkmed.txt"))'
+            await pg.wait_for_selector(card + ' [data-cn=retry]')
+            check('new course: after a reload a «reading» with nothing alive is «lugemine katkes» with a «Proovi uuesti» button (the original is on this device)',
+                  'lugemine katkes' in await pg.inner_text(card) and not await pg.query_selector('.cnf:has(.cnfn:text("Loeng")) [data-cn=retry]'))
+            await pg.click(card + ' [data-cn=retry]')
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.find(m=>m.name==='märkmed.txt').status==='ready'", timeout=30000)
+            await pg.wait_for_function("[...document.querySelectorAll('.cnf')].some(c=>c.innerText.includes('märkmed')&&c.innerText.includes('tekst loetud'))")
+            st = await state_when(lambda s: any(r['coll'] == 'ctext' and r['id'].startswith(did + '.' + mk + '.') for r in s['docs']))
+            check('new course: «Proovi uuesti» rereads the original and writes the documents of that material again', 'tekst loetud' in await pg.inner_text(card) and any(r['coll'] == 'ctext' and r['id'].startswith(did + '.' + mk + '.') for r in st['docs']))
+            # drafts: no more than 5
+            for i in range(4):
+                await pg.evaluate("go({name:'courses'})")
+                await pg.click('.cnnew') if await pg.query_selector('.cnnew') else None
+                await pg.wait_for_selector('.cnw')
+                await pg.fill('#cnName', 'Lisa %d' % i)
+                await pg.press('#cnName', 'Tab')
+                await pg.click('[data-cn=close]')
+                await pg.wait_for_selector('.crs')
+            await state_when(lambda s: sum(r['coll'] == 'cdraft' for r in s['docs']) == 5)
+            await pg.evaluate("go({name:'courses'})")
+            await pg.click('.cnnew')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('kuni 5'))")
+            check('new course: the 6th draft is refused with a toast', await pg.evaluate("view.name")=='courses' and await pg.evaluate("[...CDRAFTS.values()].filter(d=>!d._new).length") == 5)
+            for dd in await pg.evaluate("[...CDRAFTS.values()].filter(d=>d.name.startsWith('Lisa ')).map(d=>d.id)"):
+                await pg.evaluate("id=>cnDeleteDraft(CDRAFTS.get(id))", dd)
+            await state_when(lambda s: sum(r['coll'] == 'cdraft' for r in s['docs']) == 1)
+            await pg.evaluate("go({name:'courses'})")
+            await pg.wait_for_selector('.crs .cnd')
+            await pg.click('.cnd .cndgo')
+            await pg.wait_for_selector('.cnw .cnf')
             # three languages on the screen
             seen = {}
             for lang in ('ru', 'en', 'et'):
@@ -2397,10 +2510,30 @@ async def main():
                 await pg.wait_for_selector('.cnw .cnf')
                 seen[lang] = await pg.evaluate("({t:document.querySelector('.cnti').innerText,r:[...document.querySelectorAll('.cnf')[0].querySelectorAll('.cnr')].map(b=>b.innerText),s:document.querySelector('.cnfs').innerText,note:document.querySelector('.cnnote').innerText,priv:document.querySelector('.cnpriv').innerText,sum:document.querySelector('.cnsum').innerText,btn:document.querySelector('.cnmain').innerText,lab:document.querySelector('.cnnm span').textContent,cl:document.querySelector('.cnx').getAttribute('aria-label')})")
             check('new course: Russian texts', seen['ru']['t'] == 'Новый курс' and seen['ru']['r'] == ['Основа', 'Дополнение', 'Картинки', 'Экзамен'] and seen['ru']['s'] == 'PDF · 3 стр. · текст прочитан' and seen['ru']['note'].startswith('Материалы на эстонском.')
-                  and 'Оригиналы PDF остаются на вашем устройстве' in seen['ru']['priv'] and 'следующий шаг — скоро' in seen['ru']['btn'] and seen['ru']['lab'] == 'Название курса' and 'файл' in seen['ru']['sum'], json.dumps(seen['ru'], ensure_ascii=False))
+                  and seen['ru']['priv'].startswith('В облако уходит только текст страниц. Фото и PDF остаются на этом устройстве') and 'следующий шаг — скоро' in seen['ru']['btn'] and seen['ru']['lab'] == 'Название курса' and 'файл' in seen['ru']['sum'], json.dumps(seen['ru'], ensure_ascii=False))
             check('new course: English texts', seen['en']['t'] == 'New course' and seen['en']['r'] == ['Core', 'Extra', 'Pictures', 'Exam'] and seen['en']['s'] == 'PDF · 3 p. · text read' and seen['en']['note'].startswith('Materials in Estonian.')
-                  and 'stay on your device' in seen['en']['priv'] and 'coming soon' in seen['en']['btn'] and seen['en']['lab'] == 'Course name', json.dumps(seen['en']))
+                  and seen['en']['priv'].startswith('Only the page text goes to the cloud. Photos and PDFs stay on this device') and 'coming soon' in seen['en']['btn'] and seen['en']['lab'] == 'Course name', json.dumps(seen['en']))
             check('new course: Estonian texts', seen['et']['t'] == 'Uus kursus' and seen['et']['r'] == ['Põhi', 'Täiendus', 'Pildid', 'Eksam'] and seen['et']['s'] == 'PDF · 3 lk · tekst loetud' and seen['et']['note'].startswith('Materjalid on eesti keeles.') and seen['et']['lab'] == 'Kursuse nimi', json.dumps(seen['et'], ensure_ascii=False))
+            # the four roles fit on one line (no overlap, no cut text) at 360 and 390 px, in all three languages and both themes
+            lay = []
+            for lang in ('ru', 'en', 'et'):
+                await ui_lang(pg, lang)
+                await pg.evaluate("go({name:'courseNew',did:'" + did + "'})")
+                await pg.wait_for_selector('.cnw .cnf')
+                for w in (360, 390):
+                    for theme in ('light', 'dark'):
+                        await pg.set_viewport_size({'width': w, 'height': 844})
+                        await pg.evaluate("t=>{document.documentElement.dataset.theme=t}", theme)
+                        bad = await pg.evaluate("""()=>{const out=[];document.querySelectorAll('.cnrg').forEach(g=>{const bs=[...g.querySelectorAll('.cnr')],r=bs.map(b=>b.getBoundingClientRect());
+                          bs.forEach((b,i)=>{if(b.scrollWidth>b.clientWidth+0.5)out.push('cut '+b.innerText);for(let j=i+1;j<bs.length;j++){const a=r[i],c=r[j];if(a.left<c.right-0.5&&c.left<a.right-0.5&&a.top<c.bottom-0.5&&c.top<a.bottom-0.5)out.push('overlap '+bs[i].innerText+'/'+bs[j].innerText);}});
+                          const gr=g.getBoundingClientRect();if(r.some(x=>x.right>gr.right+0.5))out.push('outside');});return out;}""")
+                        lay.append([lang, w, theme, bad])
+            await pg.set_viewport_size({'width': 390, 'height': 844})
+            await pg.evaluate("document.documentElement.dataset.theme='light'")
+            check('new course: the 4 role buttons do not overlap or get cut at 360 and 390 px, ru/en/et, light and dark', all(not b[3] for b in lay), json.dumps([b for b in lay if b[3]]))
+            await ui_lang(pg, 'et')
+            await pg.evaluate("go({name:'courseNew',did:'" + did + "'})")
+            await pg.wait_for_selector('.cnw .cnf')
             # a name with markup stays text
             await pg.fill('#cnName', '<img src=x onerror=window.__xss=9>')
             await pg.press('#cnName', 'Tab')
@@ -2415,7 +2548,14 @@ async def main():
             await pg.click('[data-cn=close]')
             await pg.wait_for_selector('.crs .cnd')
             # a second device (a fresh browser context, so a fresh IndexedDB): the draft is there, the originals are not
+            # two tabs / devices: A has the draft open, B adds a file, A changes a role → both materials in the cloud, A's role applied
+            await pg.evaluate("go({name:'courses'})")
+            await pg.wait_for_selector('.crs .cnd')
+            await pg.click('.cnd .cndgo')
+            await pg.wait_for_selector('.cnw .cnf')
+            await pg.wait_for_function("CDRAFTS.get(view.did).mats.length>=6")
             ctx2, pg2, errs_n2 = await open_ctx()
+            pg2.on('request', lambda r: r.method == 'GET' and 'coll=eq.ctext' in r.url and ctext_gets.append('pg2 ' + r.url))
             await pg2.goto(SITE + '?create=1')
             await pg2.wait_for_selector('.cw-auth .cw-tabs .on')
             await pg2.fill('input[name=email]', 'newcourse@test.ee')
@@ -2430,6 +2570,25 @@ async def main():
             o2 = await pg2.evaluate("({n:document.querySelectorAll('.cnf').length,other:(document.querySelector('#cnList').innerText.match(/originaal on teises seadmes/g)||[]).length,name:document.querySelector('#cnName').value,st:document.querySelector('.cnfs').innerText})")
             check('new course: on another device the draft and the read text are there, the originals are «on another device»', o2['name'] == 'Ülajäse' and o2['n'] >= 5 and o2['other'] >= 5 and 'tekst loetud' in o2['st'], json.dumps(o2, ensure_ascii=False))
             check('new course: no script errors on the second device', not errs_n2, '; '.join(errs_n2)[:300])
+            await pg2.set_input_files('#cnFile', [str(CN / 'lisa.txt')])
+            await pg2.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='lisa.txt'&&m.status==='ready')", timeout=30000)
+            await state_when(lambda s: any(r['coll'] == 'cdraft' and any(m['name'] == 'lisa.txt' and m['status'] == 'ready' for m in r['data']['mats']) for r in s['docs']))
+            await pg.click('.cnf:has(.cnfn:text("märkmed.txt")) [data-r=pics]')
+            st = await state_when(lambda s: any(r['coll'] == 'cdraft' and any(m['name'] == 'märkmed.txt' and m['role'] == 'pics' for m in r['data']['mats']) for r in s['docs']))
+            cm = {m['name']: m for r in st['docs'] if r['coll'] == 'cdraft' for m in r['data']['mats']}
+            check('new course: A changed a role while B had added a file → the cloud has both (A\'s role and B\'s file)', cm.get('märkmed.txt', {}).get('role') == 'pics' and cm.get('lisa.txt', {}).get('status') == 'ready', json.dumps(sorted(cm)))
+            await pg.wait_for_function("[...document.querySelectorAll('.cnfn')].some(e=>e.innerText==='lisa.txt')")
+            check('new course: …and A sees B\'s file after the merge', await pg.evaluate("CDRAFTS.get(view.did).mats.some(m=>m.name==='lisa.txt')"))
+            await pg.click('.cnf:has(.cnfn:text("märkmed.txt")) [data-r=extra]')
+            await pg.click('.cnf:has(.cnfn:text("lisa.txt")) [data-cn=rm]')
+            await pg.wait_for_function("!CDRAFTS.get(view.did).mats.some(m=>m.name==='lisa.txt')")
+            st = await state_when(lambda s: any(r['coll'] == 'cdraft' and not any(m['name'] == 'lisa.txt' for m in r['data']['mats']) and r['data'].get('gone') for r in s['docs']))
+            await pg2.evaluate("cnRefresh(CDRAFTS.get(view.did))")
+            await pg2.wait_for_function("!CDRAFTS.get(view.did).mats.some(m=>m.name==='lisa.txt')", timeout=10000)
+            await pg2.click('.cnf:has(.cnfn:text("märkmed.txt")) [data-r=exam]')
+            st = await state_when(lambda s: any(r['coll'] == 'cdraft' and any(m['name'] == 'märkmed.txt' and m['role'] == 'exam' for m in r['data']['mats']) for r in s['docs']))
+            check('new course: a removed material (d.gone) does not come back when the other tab saves', not any(r['coll'] == 'cdraft' and any(m['name'] == 'lisa.txt' for m in r['data']['mats']) for r in st['docs']))
+            await pg.click('[data-cn=close]')
             await ctx2.close()
             # a browser without IndexedDB (a private window): the text is read, «originaal pole selles seadmes salvestatud»
             ctx3, pg3, errs_n3 = await open_ctx()
@@ -2444,7 +2603,7 @@ async def main():
             await pg3.wait_for_selector('.crs .cnd')
             await pg3.click('.cnd .cndgo')
             await pg3.wait_for_selector('.cnw .cnf')
-            await pg3.set_input_files('#cnFile', [str(CN / 'Loeng 4. Ülajäse.pdf')])
+            await pg3.set_input_files('#cnFile', [str(CN / 'Praktikumi juhend.pdf')])
             await pg3.wait_for_function("CDRAFTS.get(view.did).mats.length>=7&&CDRAFTS.get(view.did).mats.every(m=>m.status!=='reading')", timeout=30000)
             await pg3.wait_for_function("[...document.querySelectorAll('.cnf')].pop().innerText.includes('tekst loetud')", timeout=30000)
             lines = await pg3.evaluate("[...document.querySelectorAll('.cnf')].pop().innerText")
@@ -2469,6 +2628,12 @@ async def main():
             await pg.click('.tabbar [data-v=courses]')
             await pg.wait_for_selector('.crs.chome')
             check('new course: ?create=0 removes the flag and the button', await pg.evaluate("localStorage.getItem('corpus.create')") is None and not await pg.query_selector('.cnnew'))
+            check('new course: step 1 read no text from the cloud: no GET of the ctext collection in either browser', not ctext_gets, json.dumps(ctext_gets[:3]))
+            await pg.evaluate("localStorage.setItem('corpus.create','1')")
+            await pg.evaluate("CORPUS_WEB.signOut()")
+            await pg.wait_for_selector('.cw-auth .cw-tabs .on')
+            dbs = await pg.evaluate("indexedDB.databases().then(a=>a.map(x=>x.name))")
+            check('new course: signing out deletes the IndexedDB «corpus-local» of this device', 'corpus-local' not in dbs, json.dumps(dbs))
             check('new course: no script errors or failed requests', not errs_n, '; '.join(errs_n)[:500])
             await ctx.close()
 

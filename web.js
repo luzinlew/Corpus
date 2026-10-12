@@ -25,7 +25,7 @@
   var PUBLIC = configured ? CFG.url.replace(/\/+$/, '') + '/storage/v1/object/public/' + BUCKET + '/' : '';
   var FN = configured ? CFG.url.replace(/\/+$/, '') + '/functions/v1/corpus-ai' : '';
 
-  var W = { blobBase: BASE + '_blob/', email: '', uid: '', admin: false, signOut: signOut, siteStats: siteStats,
+  var W = { base: BASE, blobBase: BASE + '_blob/', email: '', uid: '', admin: false, signOut: signOut, siteStats: siteStats,
     shares: null, shareCode: '', starter: String(CFG.starter || '').trim().toLowerCase(), qrScript: BASE + 'vendor/qrcode.js' };
   window.CORPUS_WEB = W;
 
@@ -147,6 +147,14 @@
   var leaving = false;
   async function signOut() {
     leaving = true;
+    /* the originals of "New course" materials live in IndexedDB on this device: they go with the account's session (the app closes its connection when asked) */
+    try {
+      await new Promise(function (res) {
+        var r = indexedDB.deleteDatabase('corpus-local');
+        r.onsuccess = r.onerror = r.onblocked = function () { res(); };
+        setTimeout(res, 800);
+      });
+    } catch (e) {}
     try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
     try { await caches.delete(CACHE); } catch (e) {}
     location.reload();

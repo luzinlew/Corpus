@@ -1372,7 +1372,7 @@ function normCard(c){
 
 /* ---------- persistence: serialized, coalesced per document ---------- */
 const WQ={keys:[],jobs:new Map(),busy:false,retries:new Map()};
-function getObj(coll,id){if(coll==='decks')return deckById(id);if(coll==='plates')return plateById(id);if(coll==='terms')return cardById(id);if(coll==='stats')return S.stats[id];if(coll==='meta')return META;if(coll==='folders')return folderById(id);if(coll==='exams')return examById(id);if(coll==='cdraft')return CDRAFTS.get(id)||null;if(coll==='ctext')return CTEXT.get(id)||null;return null;}
+function getObj(coll,id){if(coll==='decks')return deckById(id);if(coll==='plates')return plateById(id);if(coll==='terms')return cardById(id);if(coll==='stats')return S.stats[id];if(coll==='meta')return META;if(coll==='folders')return folderById(id);if(coll==='exams')return examById(id);return null;}
 function isLocalPlate(pid){const p=plateById(pid);return !!(p&&p._local);}
 function clean(o){const r={};for(const k in o){if(k==='id'||k==='url'||k[0]==='_')continue;r[k]=o[k];}return JSON.parse(JSON.stringify(r));}
 /* a name or hint typed on one photo of a linked label is the name/hint of the whole group */
@@ -4067,43 +4067,106 @@ SCREENS.courses={
   }
 };
 /* ================= «Новый курс», шаг 1: материалы и роли (T-017) =================
-   Всё за флагом localStorage['corpus.create']='1' (его ставит ?create=1, снимает ?create=0), только на сайте и не в демо: ИИ-лимиты курсов нужны гостю-аккаунту.
-   Облако: cdraft/<id> — черновик (название, материалы, роли), ctext/<черновик>.<материал>.<n> — текст страниц кусками ≤200 КБ, ctext/….q — вопросы экзамена.
-   Оригиналы PDF и фото — только на устройстве, в IndexedDB «corpus-local», хранилище «mats» (ключ <черновик>/<материал>[/<номер фото>]).
-   Эти коллекции bootData не читает: черновики грузятся при открытии вкладки «Курсы», текст — при открытии черновика. */
-const CN_LIM={pdfBytes:50*1048576,pages:400,photos:60,chars:2000000,mats:20,chunk:200000,pageChars:60000};
+   Всё за флагом localStorage['corpus.create']='1' (его ставит ?create=1, снимает ?create=0), только на сайте и не в демо: ИИ-лимиты курсов нужны аккаунту.
+   Облако: cdraft/<id> — черновик (название, материалы, роли; у материала m.chunks — id его кусков текста, m.qdoc — id вопросов, m.lang — язык),
+   ctext/<черновик>.<материал>.<n> — текст страниц кусками ≤200 КБ, ctext/<…>.q — вопросы экзамена {qs:[…]}.
+   Шаг 1 текст из облака не читает вовсе (всё нужное лежит в cdraft); следующие шаги читают его по известным id (doc(id).get()), коллекцию ctext целиком — никогда.
+   Оригиналы PDF и фото — только на устройстве, в IndexedDB «corpus-local», хранилище «mats», ключ <uid>/<черновик>/<материал>[/<номер фото>] (при выходе web.js удаляет базу).
+   Эти коллекции bootData не читает: черновики грузятся при открытии вкладки «Курсы» и экрана черновика. Две вкладки или два устройства: перед записью cdraft
+   документ перечитывается и сливается по материалам (свои изменённые — поверх, удалённые — в d.gone, чтобы не воскресали). */
+const CN_LIM={pdfBytes:50*1048576,txtBytes:4*1048576,photoBytes:25*1048576,pages:400,photos:60,mats:20,drafts:5,draftBytes:1500000,allBytes:6000000,chunk:200000,pageChars:60000,items:50000,wait:30000};
 const CN_ROLES=['base','extra','pics','exam'];
-const CN_EXAM_RE=/k[üu]simus|вопрос|question|kollokvium|eksam|exam/i;
+/* the role «exam» by the name: whole words only (the start is a non-letter, the end too): «Example slides» and «Examination atlas» are not exams */
+const CN_EXAM_RE=/(?<![\p{L}\p{N}])(?:exams?|eksam(?:i|id|it)?|kollokvium(?:i|id)?|k[üu]simus(?:ed|i|t)?|questions?|вопрос(?:ы|ов|а)?|экзамен(?:ы|а|ов)?|коллоквиум(?:ы|а|ов)?)(?![\p{L}\p{N}])/iu;
 try{const q=new URLSearchParams(location.search).get('create');if(q==='1')localStorage.setItem('corpus.create','1');else if(q==='0')localStorage.removeItem('corpus.create');}catch(e){}
 const cnOn=()=>{const W=window.CORPUS_WEB;if(!W||W.guest)return false;try{return localStorage.getItem('corpus.create')==='1';}catch(e){return false;}};
-const CDRAFTS=new Map(),CTEXT=new Map(),CN_T=new Map(),CN_TL=new Map();let CN_LOAD=null,CN_Q=Promise.resolve(),CN_PDF=null,CN_IDB=null,CN_TM=0,CN_SEQ=0;
-/* что не хранится в облаке: ход чтения, «оригинал здесь», «идёт чтение» — по ключу <черновик>/<материал> */
+const CDRAFTS=new Map(),CN_T=new Map();let CN_Q=Promise.resolve(),CN_PDF=null,CN_IDB=null,CN_TM=0,CN_SEQ=0;
+/* what is not kept in the cloud: the progress of reading, «the original is here», «a reading is alive» — by <draft>/<material> */
 function cnT(did,mid){const k=did+'/'+mid;let t=CN_T.get(k);if(!t){t={};CN_T.set(k,t);}return t;}
+const cnLangOk=l=>l==='ru'||l==='en'||l==='et'?l:'';
+const cnStrs=a=>(Array.isArray(a)?a:[]).filter(x=>typeof x==='string'&&x.length<200).slice(0,200);
+/* a draft from the cloud is not trusted */
 function cnDraftOk(o,id){
-  const mats=(Array.isArray(o.mats)?o.mats:[]).filter(m=>m&&typeof m==='object'&&typeof m.id==='string'&&m.id&&typeof m.name==='string').map(m=>{
+  const mats=(Array.isArray(o.mats)?o.mats:[]).filter(m=>m&&typeof m==='object'&&typeof m.id==='string'&&m.id&&m.id.length<40&&typeof m.name==='string').slice(0,CN_LIM.mats).map(m=>{
     m.kind=['pdf','img','text'].indexOf(m.kind)>=0?m.kind:'text';if(CN_ROLES.indexOf(m.role)<0)m.role=m.kind==='img'?'pics':'extra';
-    if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';return m;});
-  return Object.assign({},o,{id:id,name:String(o.name||''),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,mats:mats});
+    if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';
+    m.lang=cnLangOk(m.lang);if(!m.lang)delete m.lang;m.chunks=cnStrs(m.chunks);if(typeof m.qdoc!=='string')delete m.qdoc;
+    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);
+    return m;});
+  return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
 }
+/* the cloud copy merged into the local draft d: materials by id; the ones this tab changed (d._dirty) stay as they are, the rest are the cloud's; the removed (gone) do not come back */
+function cnMerge(d,c){
+  const gone=new Set(d.gone.concat(c.gone)),dirty=d._dirty||new Map(),mine=new Map(d.mats.map(m=>[m.id,m])),out=[];
+  c.mats.forEach(cm=>{
+    if(gone.has(cm.id))return;const lm=mine.get(cm.id),t=cnT(d.id,cm.id);
+    if(!lm){out.push(cm);return;}
+    if(!dirty.has(cm.id)&&!t.run&&!t.busy){Object.keys(lm).forEach(k=>delete lm[k]);Object.assign(lm,cm);}   // the same object: a running job holds it
+    out.push(lm);
+  });
+  d.mats.forEach(m=>{if(!gone.has(m.id)&&!out.includes(m)&&(dirty.has(m.id)||cnT(d.id,m.id).run||cnT(d.id,m.id).busy))out.push(m);});
+  d.mats=out.slice(0,CN_LIM.mats);d.gone=Array.from(gone).slice(-200);
+  if(!d._nameDirty&&c.updatedAt){d.name=c.name;}
+  d.createdAt=c.createdAt||d.createdAt;d.updatedAt=Math.max(d.updatedAt||0,c.updatedAt||0);
+  d.lang=cnLang(d)||c.lang||'';
+}
+/* the drafts of this person (a few small documents): every opening of the tab asks the cloud again */
 function cnLoad(){
   if(!S.db)return Promise.resolve();
-  if(!CN_LOAD)CN_LOAD=S.db.collection('cdraft').get().then(g=>{g.docs.forEach(x=>{if(!CDRAFTS.has(x.id))CDRAFTS.set(x.id,cnDraftOk(x.data()||{},x.id));});},e=>{CN_LOAD=null;throw e;});
-  return CN_LOAD;
+  return S.db.collection('cdraft').get().then(g=>{
+    const seen=new Set();
+    g.docs.forEach(x=>{seen.add(x.id);const c=cnDraftOk(x.data()||{},x.id),d=CDRAFTS.get(x.id);if(d)cnMerge(d,c);else CDRAFTS.set(x.id,c);});
+    CDRAFTS.forEach((d,id)=>{if(!seen.has(id)&&!d._new&&!d._pend&&!(d._dirty&&d._dirty.size)&&!d._nameDirty)CDRAFTS.delete(id);});   // deleted on another device
+  });
 }
-/* the text of one draft (later steps read it; here it is also what «the draft survives a reload» stands on) */
-function cnLoadText(did){
+function cnRefresh(d){
   if(!S.db)return Promise.resolve();
-  if(!CN_TL.has(did))CN_TL.set(did,S.db.collection('ctext').get().then(g=>{g.docs.forEach(x=>{if(x.id.indexOf(did+'.')===0&&!CTEXT.has(x.id))CTEXT.set(x.id,x.data()||{});});},e=>{CN_TL.delete(did);throw e;}));
-  return CN_TL.get(did);
+  return S.db.collection('cdraft').doc(d.id).get().then(g=>{if(g.exists){cnMerge(d,cnDraftOk(g.data()||{},d.id));cnPaint();}});
 }
-function cnSave(d){delete d._new;d.updatedAt=Date.now();if(S.db)enq('cdraft/'+d.id,{coll:'cdraft',id:d.id,op:'set'});}
-const cnSaveText=id=>{if(S.db)enq('ctext/'+id,{coll:'ctext',id:id,op:'set'});};
-const cnDelDoc=(coll,id)=>{if(S.db)enq(coll+'/'+id,{coll:coll,id:id,op:'del'});};
+const cnDirty=(d,m)=>{const q=d._dirty||(d._dirty=new Map());q.set(m.id,(q.get(m.id)||0)+1);};   // id → version: a save that finishes clears only what it sent
+/* save: one write at a time per draft; before it the cloud copy is read and merged */
+function cnSave(d,m){
+  if(m)cnDirty(d,m);
+  delete d._new;d.updatedAt=Date.now();
+  d._pend=(d._pend||0)+1;
+  d._q=(d._q||Promise.resolve()).then(()=>cnPush(d)).catch(()=>{}).then(()=>{d._pend--;});
+  return d._q;
+}
+function cnPayload(d){
+  const o={name:d.name,createdAt:d.createdAt,updatedAt:d.updatedAt,gone:d.gone,mats:d.mats.map(m=>{const r={};for(const k in m)if(k[0]!=='_')r[k]=m[k];return r;})};
+  if(d.lang)o.lang=d.lang;
+  return JSON.parse(JSON.stringify(o));
+}
+async function cnWrite(coll,id,data){
+  for(let n=0;;n++){
+    try{await S.db.collection(coll).doc(id).set(data);return;}
+    catch(e){const c=e&&e.code;if(c==='quota_exceeded')throw {code:'quota'};if(c==='unavailable'&&n<2){await new Promise(r=>setTimeout(r,700+Math.random()*900));continue;}throw {code:c==='unavailable'?'offline':'broken'};}
+  }
+}
+async function cnPush(d){
+  if(!S.db)return;
+  try{const g=await S.db.collection('cdraft').doc(d.id).get();if(g.exists)cnMerge(d,cnDraftOk(g.data()||{},d.id));}catch(e){}
+  const sent=new Map(d._dirty||[]);const nsent=d._nameDirty||0;
+  try{
+    await cnWrite('cdraft',d.id,cnPayload(d));
+    sent.forEach((v,id)=>{if(d._dirty&&d._dirty.get(id)===v)d._dirty.delete(id);cnT(d.id,id).nosave=false;});if((d._nameDirty||0)===nsent)d._nameDirty=0;cnPaint();
+  }catch(e){
+    sent.forEach((v,id)=>{cnT(d.id,id).nosave=e.code;});cnPaint();
+    if(!d._warned){d._warned=true;setTimeout(()=>{d._warned=false;},8000);toast(e.code==='quota'?cnQuotaText():T3('Не удалось сохранить черновик. Проверьте соединение.','Could not save the draft. Check the connection.','Mustandit ei õnnestunud salvestada. Kontrolli ühendust.'),5000);}
+  }
+}
+const cnQuotaText=()=>T3('Не сохранено в облаке — освободите место (удалите ненужные фото или черновики).','Not saved in the cloud: free some space (delete photos or drafts you do not need).','Pilve ei salvestatud – vabasta ruumi (kustuta mittevajalikud fotod või mustandid).');
+const cnDelIds=ids=>{if(S.db)ids.forEach(id=>enq('ctext/'+id,{coll:'ctext',id:id,op:'del'}));};
+const cnMatIds=m=>(m.chunks||[]).concat(m.qdoc?[m.qdoc]:[]);
+const cnBytes=d=>d.mats.reduce((a,m)=>a+(+m.bytes||0),0);
+const cnAllBytes=()=>Array.from(CDRAFTS.values()).reduce((a,d)=>a+cnBytes(d),0);
 /* ---- originals on this device. Any failure (no IndexedDB in a private window, no room) is not an error: the text is in the cloud anyway ---- */
+const cnUid=()=>String((window.CORPUS_WEB&&window.CORPUS_WEB.uid)||'');
+const cnKey=(did,mid,i)=>cnUid()+'/'+did+'/'+mid+(i===undefined?'':'/'+i);
 function cnDb(){
   if(!CN_IDB){
     CN_IDB=new Promise((res,rej)=>{try{const r=indexedDB.open('corpus-local',1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('mats'))r.result.createObjectStore('mats');};
-      r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error||new Error('idb'));r.onblocked=()=>rej(new Error('idb blocked'));}catch(e){rej(e);}});
+      r.onsuccess=()=>{r.result.onversionchange=()=>{try{r.result.close();}catch(e){}CN_IDB=null;};res(r.result);};r.onerror=()=>rej(r.error||new Error('idb'));r.onblocked=()=>rej(new Error('idb blocked'));}catch(e){rej(e);}});
     CN_IDB.catch(()=>{CN_IDB=null;});
   }
   return CN_IDB;
@@ -4113,25 +4176,32 @@ function cnIdb(mode,fn){
 }
 const cnPut=(key,blob)=>cnIdb('readwrite',st=>st.put(blob,key)).then(()=>true,()=>false);
 const cnHas=key=>cnIdb('readonly',st=>st.count(key)).then(n=>n>0,()=>null);   // null — IndexedDB is not available
-const cnKeys=(did,mid)=>IDBKeyRange.bound(did+'/'+mid,did+'/'+mid+'/￿');
-function cnDelBlobs(did,mid){try{return cnIdb('readwrite',st=>st.delete(mid?cnKeys(did,mid):IDBKeyRange.bound(did+'/',did+'/￿'))).catch(()=>{});}catch(e){return Promise.resolve();}}
+const cnGet=key=>cnIdb('readonly',st=>st.get(key)).then(b=>b||null,()=>null);
+const cnRange=(did,mid)=>IDBKeyRange.bound(mid?cnKey(did,mid):cnKey(did)+'/',mid?cnKey(did,mid)+'/￿':cnKey(did)+'/￿');
+function cnDelBlobs(did,mid){try{return cnIdb('readwrite',st=>st.delete(cnRange(did,mid))).catch(()=>{});}catch(e){return Promise.resolve();}}
 /* which originals are on this device (the draft may have been made on another one) */
 function cnCheckLocal(d){
   d.mats.forEach(m=>{const t=cnT(d.id,m.id);if(t.run||t.local!==undefined)return;
-    cnHas(d.id+'/'+m.id+(m.kind==='img'?'/0':'')).then(r=>{t.local=r===true;t.lost=r===true?'':r===null?'nodb':'other';cnPaint();});});
+    cnHas(cnKey(d.id,m.id,m.kind==='img'?0:undefined)).then(r=>{t.local=r===true;t.lost=r===true?'':r===null?'nodb':'other';cnPaint();});});
 }
-/* ---- pdf.js: loaded only when a PDF is added ---- */
+/* ---- pdf.js: loaded only when a PDF is added; from the base of the site (web.js gives it), not from the address of the page ---- */
+function cnUrl(p){const W=window.CORPUS_WEB;return new URL(p,location.origin+((W&&W.base)||'/')).href;}
 function cnPdfLib(){
-  if(!CN_PDF)CN_PDF=import(new URL('vendor/pdfjs/pdf.min.mjs',location.href).href).then(m=>{m.GlobalWorkerOptions.workerSrc=new URL('vendor/pdfjs/pdf.worker.min.mjs',location.href).href;return m;},e=>{CN_PDF=null;throw e;});
+  if(!CN_PDF)CN_PDF=import(cnUrl('vendor/pdfjs/pdf.min.mjs')).then(m=>{m.GlobalWorkerOptions.workerSrc=cnUrl('vendor/pdfjs/pdf.worker.min.mjs');return m;},e=>{CN_PDF=null;throw e;});
   return CN_PDF;
 }
+/* every call into pdf.js has 30 seconds: a file that hangs must not stop the queue */
+function cnTO(p,task){
+  let tm;return Promise.race([Promise.resolve(p),new Promise((_,rej)=>{tm=setTimeout(()=>{if(task)try{task.destroy();}catch(e){}rej({code:'timeout'});},CN_LIM.wait);})]).finally(()=>clearTimeout(tm));
+}
 /* The text of one page. Lines are put together by y (items within half a letter height are one line, left to right; a gap wider than ~0.15 of the height is a space).
-   em — what stands out: a bold font (the name of the font is known only after the operator list is read: commonObjs) or letters taller than 1.3 × the median of the page. Two columns are read as one: this is a heuristic. */
-async function cnPageText(pg){
-  const tc=await pg.getTextContent();
-  const its=tc.items.filter(i=>typeof i.str==='string'&&i.str.trim()&&i.transform);
+   em — what stands out: a bold font (the name of the font is known only after the operator list is read: commonObjs) or letters taller than 1.3 × the median of the page. Two columns are read as one: this is a heuristic.
+   At most 50 000 text items of a page are taken. */
+async function cnPageText(pg,task){
+  const tc=await cnTO(pg.getTextContent(),task);
+  const its=tc.items.filter(i=>typeof i.str==='string'&&i.str.trim()&&i.transform).slice(0,CN_LIM.items);
   if(!its.length)return {text:'',em:[]};
-  try{await pg.getOperatorList();}catch(e){}
+  try{await cnTO(pg.getOperatorList(),task);}catch(e){if(e&&e.code==='timeout')throw e;}
   const bold={},isBold=fn=>{if(fn in bold)return bold[fn];let b=false;try{const f=pg.commonObjs.get(fn);b=/bold|black|heavy|demi/i.test((f&&f.name)||'')||!!(f&&f.bold);}catch(e){}return bold[fn]=b;};
   const hs=its.map(i=>i.height||Math.abs(i.transform[3])||0).filter(h=>h>0).sort((a,b)=>a-b),med=hs.length?hs[hs.length>>1]:0;
   const A=its.map(i=>{const h=i.height||Math.abs(i.transform[3])||med||10;return {s:i.str,x:i.transform[4],y:i.transform[5],w:i.width||0,h:h,em:isBold(i.fontName)||(med>0&&h>med*1.3)};}).sort((a,b)=>b.y-a.y);
@@ -4168,64 +4238,73 @@ function cnQuestions(lines){
   end();
   return out.slice(0,300);
 }
-const cnChars=d=>d.mats.reduce((a,m)=>a+(+m.chars||0),0);
-/* the writer of the text of one material: pages go into chunks of ≤200 KB, each is a document ctext/<draft>.<material>.<n> */
+/* the writer of the text of one material: pages go into chunks of ≤200 KB, each is a document ctext/<draft>.<material>.<n>; a refusal of the storage (quota) stops the reading */
 function cnSink(d,m){
-  const enc=new TextEncoder(),ids=[];let cur=[],bytes=0,ci=0,chars=0,sample='',lines=[];
-  const flush=()=>{if(!cur.length)return;const id=d.id+'.'+m.id+'.'+ci++;ids.push(id);CTEXT.set(id,{pages:cur});cnSaveText(id);cur=[];bytes=0;};
+  const enc=new TextEncoder(),ids=[];let cur=[],bytes=0,ci=0,chars=0,tb=0,sample='',lines=[];
+  const pre=m.gen?'g'+m.gen+'_':'',flush=async()=>{if(!cur.length)return;const id=d.id+'.'+m.id+'.'+pre+(ci++),data={pages:cur};cur=[];bytes=0;if(S.db)await cnWrite('ctext',id,data);ids.push(id);m.chunks=ids.slice();};
   return {
-    add(n,text,em){
+    async add(n,text,em){
       text=String(text).slice(0,CN_LIM.pageChars);const pg={n:n,text:text,em:em||[]},b=enc.encode(JSON.stringify(pg)).length;
-      if(cur.length&&bytes+b>CN_LIM.chunk)flush();
-      cur.push(pg);bytes+=b;chars+=text.length;m.chars=chars;
+      if(cur.length&&bytes+b>CN_LIM.chunk)await flush();
+      cur.push(pg);bytes+=b;chars+=text.length;tb+=enc.encode(text).length;m.bytes=tb;
       if(sample.length<8000)sample+=text+'\n';
       text.split('\n').forEach(l=>lines.push(l));
-      if(cnChars(d)>CN_LIM.chars)throw {code:'limit'};
+      if(cnBytes(d)>CN_LIM.draftBytes||cnAllBytes()>CN_LIM.allBytes)throw {code:'limit'};
     },
-    done(){
-      flush();m.chunks=ci;const qs=cnQuestions(lines);
-      if(qs.length){const id=d.id+'.'+m.id+'.q';ids.push(id);CTEXT.set(id,{qs:qs});cnSaveText(id);m.qn=qs.length;}else delete m.qn;
-      m.lang=chars>=20?crGuessLang(sample.slice(0,8000)):'';
+    async done(){
+      await flush();m.chars=chars;const qs=cnQuestions(lines);
+      if(qs.length){const id=d.id+'.'+m.id+'.'+pre+'q';if(S.db)await cnWrite('ctext',id,{qs:qs});ids.push(id);m.qdoc=id;m.qn=qs.length;}else{delete m.qn;delete m.qdoc;}
+      m.chunks=ids.filter(x=>x!==m.qdoc);
+      const letters=(sample.match(/\p{L}/gu)||[]).length;   // too few letters: the language is not told
+      m.lang=letters>=40&&letters/sample.length>=0.4?cnLangOk(crGuessLang(sample.slice(0,8000))):'';
       if(!m.lang)delete m.lang;
     },
-    drop(){ids.forEach(id=>{CTEXT.delete(id);cnDelDoc('ctext',id);});ids.length=0;cur=[];m.chars=0;delete m.chunks;}
+    drop(){cnDelIds(ids);ids.length=0;cur=[];m.chunks=[];delete m.qdoc;delete m.qn;m.bytes=0;m.chars=0;}
   };
 }
-async function cnRead(d,m,file){
+async function cnRead(d,m,file,retry){
   const t=cnT(d.id,m.id);
-  const fin=(st,err)=>{t.run=false;if(t.dead)return;m.status=st;if(err)m.err=err;else delete m.err;d.lang=cnLang(d)||d.lang||'';if(!d.lang)delete d.lang;cnSave(d);cnPaint();};
+  const fin=(st,err)=>{t.run=false;t.task=null;if(t.dead)return;m.status=st;if(err)m.err=err;else delete m.err;d.lang=cnLang(d)||d.lang||'';if(!d.lang)delete d.lang;cnSave(d,m);cnPaint();
+    if(err==='limit')toast(T3('Слишком много текста: в черновике до 1,5 МБ, во всех черновиках до 6 МБ.','Too much text: up to 1.5 MB in a draft, 6 MB in all drafts.','Liiga palju teksti: mustandis kuni 1,5 MB, kõigis mustandites kuni 6 MB.'),6000);
+    if(err==='quota')toast(cnQuotaText(),6000);};
   if(t.dead)return;
   let sink=null,doc=null;
   try{
-    const ok=await cnPut(d.id+'/'+m.id,file);
-    if(t.dead){cnDelBlobs(d.id,m.id);return;}
-    t.local=ok;t.lost=ok?'':'nodb';
+    if(retry){cnDelIds(cnMatIds(m));m.gen=(m.gen||0)+1;m.chunks=[];delete m.qdoc;delete m.qn;m.bytes=0;m.chars=0;t.local=true;}
+    else{
+      const ok=await cnPut(cnKey(d.id,m.id),file);
+      if(t.dead){cnDelBlobs(d.id,m.id);return;}
+      t.local=ok;t.lost=ok?'':'nodb';
+    }
     sink=cnSink(d,m);
     if(m.kind==='pdf'){
-      let lib;try{lib=await cnPdfLib();}catch(e){throw {code:'lib'};}
-      try{doc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer()),isEvalSupported:false,maxImageSize:1}).promise;}
-      catch(e){throw {code:e&&e.name==='PasswordException'?'encrypted':'broken'};}
-      if(doc.numPages>CN_LIM.pages){d.mats=d.mats.filter(x=>x!==m);cnDropMat(d,m);cnSave(d);t.run=false;cnPaint();toast(T3('В PDF больше 400 страниц — разделите файл.','The PDF has more than 400 pages: split the file.','PDF-is on üle 400 lehekülje – jaga fail osadeks.'),5000);return;}
+      let lib;try{lib=await cnTO(cnPdfLib());}catch(e){throw {code:'lib'};}
+      let buf;try{buf=new Uint8Array(await cnTO(file.arrayBuffer()));}catch(e){throw {code:'broken'};}
+      const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,maxImageSize:1});t.task=task;
+      try{doc=await cnTO(task.promise,task);}
+      catch(e){throw {code:e&&e.code==='timeout'?'timeout':e&&e.name==='PasswordException'?'encrypted':'broken'};}
+      if(t.dead){return;}
+      if(doc.numPages>CN_LIM.pages){d.mats=d.mats.filter(x=>x!==m);d.gone.push(m.id);cnDropMat(d,m);cnSave(d);t.run=false;cnPaint();toast(T3('В PDF больше 400 страниц — разделите файл.','The PDF has more than 400 pages: split the file.','PDF-is on üle 400 lehekülje – jaga fail osadeks.'),5000);return;}
       m.pages=doc.numPages;t.total=doc.numPages;t.prog=0;cnPaint();
       for(let i=1;i<=doc.numPages;i++){
         if(t.dead){sink.drop();return;}
-        let pg;try{pg=await doc.getPage(i);const r=await cnPageText(pg);pg.cleanup();sink.add(i,r.text,r.em);}
+        try{const pg=await cnTO(doc.getPage(i),task),r=await cnPageText(pg,task);pg.cleanup();await sink.add(i,r.text,r.em);}
         catch(e){if(e&&e.code)throw e;throw {code:'broken'};}
         t.prog=i;cnPaint();
       }
     }else{
-      let txt;try{txt=(await file.text()).replace(/^﻿/,'');}catch(e){throw {code:'broken'};}
+      let txt;try{txt=(await cnTO(file.text())).replace(/^﻿/,'');}catch(e){throw {code:'broken'};}
       const parts=[];for(let i=0;i<txt.length;){let j=Math.min(txt.length,i+4000);if(j<txt.length){const k=txt.lastIndexOf('\n',j);if(k>i)j=k+1;}parts.push(txt.slice(i,j));i=j;}
       t.total=parts.length||1;t.prog=0;
-      for(let i=0;i<parts.length;i++){if(t.dead){sink.drop();return;}sink.add(i+1,parts[i],[]);t.prog=i+1;}
+      for(let i=0;i<parts.length;i++){if(t.dead){sink.drop();return;}await sink.add(i+1,parts[i],[]);t.prog=i+1;}
     }
     if(t.dead){sink.drop();return;}
-    sink.done();
+    await sink.done();
     fin((+m.chars)>0?'ready':'empty');
   }catch(e){
     if(sink)sink.drop();
     fin('error',(e&&e.code)||'broken');
-  }finally{if(doc)try{doc.destroy();}catch(e){}}
+  }finally{if(doc)try{doc.destroy();}catch(e){}t.task=null;}
 }
 function cnLang(d){
   const ok=d.mats.filter(m=>m.lang&&m.status==='ready'&&m.role!=='pics');
@@ -4239,69 +4318,86 @@ function cnDefRole(d,name,kind){
 }
 const cnMid=()=>'m'+Date.now().toString(36)+(++CN_SEQ).toString(36).padStart(2,'0');
 const cnPhotos=d=>d.mats.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
+const cnSig=f=>(f.name||'')+'|'+f.size;
+const cnDup=(d,f)=>d.mats.some(m=>m.kind==='img'?(m.sigs||[]).indexOf(cnSig(f))>=0:m.name===String(f.name||'').slice(0,120)&&m.size===f.size);
+const cnToast=(ru,en,et,ms)=>toast(T3(ru,en,et),ms||4500);
 function cnAddFiles(d,files,cam){
   const isImg=f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name||'');
   const isPdf=f=>f.type==='application/pdf'||/\.pdf$/i.test(f.name||''),isTxt=f=>f.type==='text/plain'||/\.txt$/i.test(f.name||'');
   const imgs=files.filter(isImg),docs=files.filter(f=>!isImg(f)&&(isPdf(f)||isTxt(f)));
-  if(files.length>imgs.length+docs.length)toast(T3('Подходят PDF, фото и .txt — остальное пропущено.','PDF, photos and .txt work; the rest was skipped.','Sobivad PDF, fotod ja .txt – ülejäänu jäeti vahele.'),4000);
+  if(files.length>imgs.length+docs.length)cnToast('Подходят PDF, фото и .txt — остальное пропущено.','PDF, photos and .txt work; the rest was skipped.','Sobivad PDF, fotod ja .txt – ülejäänu jäeti vahele.');
   docs.forEach(f=>cnAddDoc(d,f));
   if(imgs.length)cnAddPhotos(d,imgs,!!cam);
 }
 function cnAddDoc(d,file){
-  if(d.mats.length>=CN_LIM.mats){toast(T3('В курсе не больше 20 материалов.','A course takes up to 20 materials.','Kursuses on kuni 20 materjali.'),4000);return;}
+  if(d.mats.length>=CN_LIM.mats){cnToast('В курсе не больше 20 материалов.','A course takes up to 20 materials.','Kursuses on kuni 20 materjali.');return;}
   const pdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
-  if(pdf&&file.size>CN_LIM.pdfBytes){toast(T3('PDF больше 50 МБ — его не прочитать.','The PDF is over 50 MB and cannot be read.','PDF on üle 50 MB ja seda ei saa lugeda.'),5000);return;}
+  if(pdf&&file.size>CN_LIM.pdfBytes){cnToast('PDF больше 50 МБ — его не прочитать.','The PDF is over 50 MB and cannot be read.','PDF on üle 50 MB ja seda ei saa lugeda.',5000);return;}
+  if(!pdf&&file.size>CN_LIM.txtBytes){cnToast('Текстовый файл больше 4 МБ — он не подойдёт.','The text file is over 4 MB and cannot be used.','Tekstifail on üle 4 MB ja see ei sobi.',5000);return;}
+  if(cnDup(d,file)){cnToast('«'+file.name+'» уже добавлен.','“'+file.name+'” is already added.','„'+file.name+'“ on juba lisatud.');return;}
   const kind=pdf?'pdf':'text',name=String(file.name||'').slice(0,120)||(pdf?'PDF':'TXT');
   const m={id:cnMid(),name:name,kind:kind,role:cnDefRole(d,name,kind),size:file.size,status:'reading',createdAt:Date.now()};
-  d.mats.push(m);cnT(d.id,m.id).run=true;cnSave(d);cnPaint();
-  CN_Q=CN_Q.then(()=>cnRead(d,m,file)).catch(()=>{});
+  d.mats.push(m);cnT(d.id,m.id).run=true;cnSave(d,m);cnPaint();
+  CN_Q=CN_Q.then(()=>cnRead(d,m,file,false)).catch(()=>{});
 }
 function cnAddPhotos(d,files,cam){
   let m=cam?d.mats.find(x=>x.kind==='img'&&x.cam):null;
-  if(!m&&d.mats.length>=CN_LIM.mats){toast(T3('В курсе не больше 20 материалов.','A course takes up to 20 materials.','Kursuses on kuni 20 materjali.'),4000);return;}
+  if(!m&&d.mats.length>=CN_LIM.mats){cnToast('В курсе не больше 20 материалов.','A course takes up to 20 materials.','Kursuses on kuni 20 materjali.');return;}
+  const big=files.filter(f=>f.size>CN_LIM.photoBytes);
+  if(big.length){cnToast('Фото больше 25 МБ не берём: '+big.length,'Photos over 25 MB are not taken: '+big.length,'Üle 25 MB fotosid ei võeta: '+big.length,5000);files=files.filter(f=>f.size<=CN_LIM.photoBytes);}
+  const dup=files.filter(f=>cnDup(d,f));
+  if(dup.length){cnToast('«'+dup[0].name+'» уже добавлен'+(dup.length>1?' (и ещё '+(dup.length-1)+')':'')+'.','“'+dup[0].name+'” is already added'+(dup.length>1?' (and '+(dup.length-1)+' more)':'')+'.','„'+dup[0].name+'“ on juba lisatud'+(dup.length>1?' (ja veel '+(dup.length-1)+')':'')+'.');files=files.filter(f=>!cnDup(d,f));}
+  if(!files.length)return;
   const room=CN_LIM.photos-cnPhotos(d);
-  if(room<=0){toast(T3('В курсе не больше 60 фото.','A course takes up to 60 photos.','Kursuses on kuni 60 fotot.'),4000);return;}
-  if(files.length>room){toast(T3('В курсе не больше 60 фото — лишние пропущены.','A course takes up to 60 photos; the rest was skipped.','Kursuses on kuni 60 fotot – ülejäänud jäeti vahele.'),4000);files=files.slice(0,room);}
+  if(room<=0){cnToast('В курсе не больше 60 фото.','A course takes up to 60 photos.','Kursuses on kuni 60 fotot.');return;}
+  if(files.length>room){cnToast('В курсе не больше 60 фото — лишние пропущены.','A course takes up to 60 photos; the rest was skipped.','Kursuses on kuni 60 fotot – ülejäänud jäeti vahele.');files=files.slice(0,room);}
   if(!m){
-    m={id:cnMid(),name:cam?T3('Снимки с камеры','Camera shots','Kaamera pildid'):files.length===1?String(files[0].name||'').slice(0,120)||T3('Фото','Photo','Foto'):T3('Фото','Photos','Fotod'),kind:'img',role:'pics',photos:0,size:0,status:'ready',createdAt:Date.now()};
+    m={id:cnMid(),name:cam?T3('Снимки с камеры','Camera shots','Kaamera pildid'):files.length===1?String(files[0].name||'').slice(0,120)||T3('Фото','Photo','Foto'):T3('Фото','Photos','Fotod'),kind:'img',role:'pics',photos:0,size:0,sigs:[],status:'ready',createdAt:Date.now()};
     if(cam)m.cam=true;d.mats.push(m);
   }
-  const t=cnT(d.id,m.id);t.busy=(t.busy||0)+1;cnSave(d);cnPaint();
+  const t=cnT(d.id,m.id);t.busy=(t.busy||0)+1;cnSave(d,m);cnPaint();
   CN_Q=CN_Q.then(async()=>{
     let lost=0;
     for(const f of files){
       if(t.dead)break;
       const i=m.photos||0;
-      if(await cnPut(d.id+'/'+m.id+'/'+i,f)){if(t.dead){cnDelBlobs(d.id,m.id);break;}m.photos=i+1;m.size+=f.size;t.local=true;t.lost='';}else lost++;
+      if(await cnPut(cnKey(d.id,m.id,i),f)){if(t.dead){cnDelBlobs(d.id,m.id);break;}m.photos=i+1;m.size+=f.size;m.sigs=(m.sigs||[]).concat([cnSig(f)]).slice(-CN_LIM.photos);t.local=true;t.lost='';}else lost++;
     }
     t.busy--;
-    if(lost)toast(T3('Не удалось сохранить '+lost+' фото на устройстве.','Could not save '+lost+' photo(s) on this device.','Seadmesse ei õnnestunud salvestada '+lost+' fotot.'),5000);
-    if(!t.dead){if(!m.photos)d.mats=d.mats.filter(x=>x!==m);cnSave(d);cnPaint();}
+    if(lost)cnToast('Не удалось сохранить '+lost+' фото на устройстве.','Could not save '+lost+' photo(s) on this device.','Seadmesse ei õnnestunud salvestada '+lost+' fotot.',5000);
+    if(!t.dead){if(!m.photos){d.mats=d.mats.filter(x=>x!==m);d.gone.push(m.id);}cnSave(d,m);cnPaint();}
   }).catch(()=>{});
 }
 function cnDropMat(d,m){
-  const t=cnT(d.id,m.id);t.dead=true;
-  cnDelBlobs(d.id,m.id);
-  const ids=new Set();CTEXT.forEach((v,k)=>{if(k.indexOf(d.id+'.'+m.id+'.')===0)ids.add(k);});
-  for(let i=0;i<(m.chunks||0);i++)ids.add(d.id+'.'+m.id+'.'+i);
-  if(m.qn)ids.add(d.id+'.'+m.id+'.q');
-  ids.forEach(id=>{CTEXT.delete(id);cnDelDoc('ctext',id);});
+  const t=cnT(d.id,m.id);t.dead=true;if(t.task)try{t.task.destroy();}catch(e){}
+  cnDelBlobs(d.id,m.id);cnDelIds(cnMatIds(m));
 }
 function cnRemoveMat(d,m){
-  d.mats=d.mats.filter(x=>x!==m);cnDropMat(d,m);cnSave(d);cnPaint();
+  d.mats=d.mats.filter(x=>x!==m);if(d._dirty)d._dirty.delete(m.id);d.gone.push(m.id);d.gone=d.gone.slice(-200);cnDropMat(d,m);cnSave(d);cnPaint();
   toast(T3('«'+m.name+'» убран из курса','“'+m.name+'” removed from the course','„'+m.name+'“ eemaldati kursuselt'),2600);
 }
-function cnDeleteDraft(d){
+/* try again: the original is on this device, the text is read once more and the documents of this material are written anew (the old ones are deleted first) */
+async function cnRetry(d,m){
+  const t=cnT(d.id,m.id);if(t.run||m.kind==='img')return;
+  const f=await cnGet(cnKey(d.id,m.id));
+  if(!f){t.local=false;t.lost='other';cnPaint();return;}
+  m.status='reading';delete m.err;t.run=true;t.total=0;t.prog=0;cnSave(d,m);cnPaint();
+  CN_Q=CN_Q.then(()=>cnRead(d,m,f,true)).catch(()=>{});
+}
+/* deleting a draft: first the cloud copy is read again (another device may have added materials), then its documents, originals and the draft go */
+async function cnDeleteDraft(d){
+  CDRAFTS.delete(d.id);
+  if(S.db)try{const g=await S.db.collection('cdraft').doc(d.id).get();if(g.exists)cnMerge(d,cnDraftOk(g.data()||{},d.id));}catch(e){}
   d.mats.slice().forEach(m=>cnDropMat(d,m));
   cnDelBlobs(d.id);
-  CTEXT.forEach((v,k)=>{if(k.indexOf(d.id+'.')===0){CTEXT.delete(k);cnDelDoc('ctext',k);}});
-  CDRAFTS.delete(d.id);cnDelDoc('cdraft',d.id);
-  /* the text that another device added to this draft after it was loaded here is not in memory: ask the cloud what is left */
-  if(S.db)S.db.collection('ctext').get().then(g=>g.docs.forEach(x=>{if(x.id.indexOf(d.id+'.')===0)cnDelDoc('ctext',x.id);}),()=>{});
+  if(S.db)enq('cdraft/'+d.id,{coll:'cdraft',id:d.id,op:'del'});
 }
 function cnNew(){
-  const d={id:newId('cdraft'),name:'',createdAt:Date.now(),updatedAt:Date.now(),mats:[],_new:true};
-  CDRAFTS.set(d.id,d);go({name:'courseNew',did:d.id});
+  cnLoad().catch(()=>{}).then(()=>{
+    if(Array.from(CDRAFTS.values()).filter(x=>!x._new).length>=CN_LIM.drafts){cnToast('Черновиков может быть не больше 5. Удалите ненужный.','Up to 5 drafts. Delete one you do not need.','Mustandeid võib olla kuni 5. Kustuta mittevajalik.',5000);return;}
+    const d={id:newId('cdraft'),name:'',createdAt:Date.now(),updatedAt:Date.now(),gone:[],mats:[],_new:true};
+    CDRAFTS.set(d.id,d);go({name:'courseNew',did:d.id});
+  });
 }
 /* ---- texts ---- */
 const cnRoleName=r=>({base:T3('Основа','Core','Põhi'),extra:T3('Дополнение','Extra','Täiendus'),pics:T3('Картинки','Pictures','Pildid'),exam:T3('Экзамен','Exam','Eksam')})[r];
@@ -4311,8 +4407,8 @@ const cnRoleHint=r=>({base:T3('Темы курса и главное (P1–P2) �
   exam:T3('Всё, о чём здесь спрашивают, станет P1.','Everything asked here becomes P1.','Kõik, mida siin küsitakse, muutub P1-ks.')})[r];
 function cnErrText(c){
   return ({encrypted:T3('PDF защищён паролем','the PDF is password-protected','PDF on parooliga kaitstud'),broken:T3('не удалось прочитать файл','could not read the file','faili ei õnnestunud lugeda'),
-    limit:T3('слишком много текста (лимит 2 МБ)','too much text (the limit is 2 MB)','liiga palju teksti (piir on 2 MB)'),lib:T3('не загрузилось чтение PDF — проверьте соединение','PDF reader did not load: check the connection','PDF-i lugemine ei laadinud – kontrolli ühendust'),
-    interrupted:T3('чтение прервано — добавьте файл снова','reading was interrupted: add the file again','lugemine katkes – lisa fail uuesti')})[c]||T3('не удалось прочитать файл','could not read the file','faili ei õnnestunud lugeda');
+    limit:T3('слишком много текста (лимит 1,5 МБ)','too much text (the limit is 1.5 MB)','liiga palju teksti (piir on 1,5 MB)'),lib:T3('не загрузилось чтение PDF — проверьте соединение','PDF reader did not load: check the connection','PDF-i lugemine ei laadinud – kontrolli ühendust'),
+    interrupted:T3('чтение прервано','reading was interrupted','lugemine katkes'),timeout:T3('файл читается слишком долго','the file takes too long to read','fail kulub lugemiseks liiga kaua'),quota:cnQuotaText()})[c]||T3('не удалось прочитать файл','could not read the file','faili ei õnnestunud lugeda');
 }
 /* the line under the name: [meta, status, progress 0..100 or null, is-error] */
 function cnStat(d,m){
@@ -4323,6 +4419,7 @@ function cnStat(d,m){
     return [meta,T3('открываю…','opening…','avan…'),0,false];
   }
   if(m.status==='reading')return [meta,cnErrText('interrupted'),null,true];
+  if(t.nosave==='quota'||m.err==='quota')return [meta,cnQuotaText(),null,true];
   if(m.status==='error')return [meta,cnErrText(m.err),null,true];
   if(m.kind==='img')return [meta,t.busy?T3('сохраняю…','saving…','salvestan…'):T3('готово','ready','valmis'),null,false];
   if(m.status==='empty')return [meta,T3('текста нет — это скан?','no text: a scan?','teksti pole – skänn?'),null,false];
@@ -4333,30 +4430,41 @@ function cnStat(d,m){
 const CN_SPARK='<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="flex:none;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linejoin:round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>';
 const CN_LNAME={ru:[['русском','Russian','vene'],'русском'],en:[['английском','English','inglise'],'английском'],et:[['эстонском','Estonian','eesti'],'эстонском']};
 function cnMatHtml(d,m){
-  const st=cnStat(d,m),t=cnT(d.id,m.id),i=m.kind==='img';
+  const st=cnStat(d,m),t=cnT(d.id,m.id),i=m.kind==='img',retry=st[3]&&!i&&t.local===true&&!t.run;
   const lost=t.lost==='nodb'?T3('оригинал не сохранён на устройстве','the original is not saved on this device','originaal pole selles seadmes salvestatud'):t.lost==='other'?T3('оригинал на другом устройстве','the original is on another device','originaal on teises seadmes'):'';
   return '<div class="cnf" data-mid="'+esc(m.id)+'"><div class="cnfr"><span class="cnfi">'+(i?'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>'
       :'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>')+'</span>'+
     '<div class="cnfm"><span class="cnfn" data-noi18n>'+esc(m.name)+'</span><span class="cnfs'+(st[3]?' bad':'')+'">'+esc(st[0])+' · '+esc(st[1])+'</span>'+
     (st[2]!==null?'<span class="cnpb"><i style="width:'+st[2]+'%"></i></span>':'')+(lost?'<span class="cnfs">'+esc(lost)+'</span>':'')+'</div>'+
     '<button class="cnrm" data-cn="rm" data-mid="'+esc(m.id)+'" aria-label="'+esc(T3('Убрать ','Remove ','Eemalda ')+m.name)+'"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'+
-    '<div class="cnrg" role="radiogroup" aria-label="'+esc(T3('Роль файла','File role','Faili roll'))+'">'+CN_ROLES.map(r=>'<button role="radio" class="cnr r-'+r+'" aria-checked="'+(m.role===r)+'" data-cn="role" data-mid="'+esc(m.id)+'" data-r="'+r+'">'+cnRoleName(r)+'</button>').join('')+'</div>'+
+    (retry?'<button class="cnretry" data-cn="retry" data-mid="'+esc(m.id)+'">'+T3('Повторить','Retry','Proovi uuesti')+'</button>':'')+'<div class="cnrg" role="radiogroup" aria-label="'+esc(T3('Роль файла','File role','Faili roll'))+'">'+CN_ROLES.map(r=>'<button role="radio" class="cnr r-'+r+'" aria-checked="'+(m.role===r)+'" data-cn="role" data-mid="'+esc(m.id)+'" data-r="'+r+'">'+cnRoleName(r)+'</button>').join('')+'</div>'+
     '<div class="cnrh">'+cnRoleHint(m.role)+'</div></div>';
 }
-const cnBaseOk=d=>d.mats.some(m=>m.role==='base'&&(m.status==='ready'||m.status==='reading'));
+const cnBaseOk=d=>d.mats.some(m=>m.role==='base'&&(m.status==='ready'||m.status==='reading'&&cnT(d.id,m.id).run));
+/* scans (a PDF without text) are named one by one; without a readable «Core» the warning says which of the two it is */
+function cnWarns(d){
+  const w=x=>'<div class="cnwarn">'+x+'</div>';
+  let h=d.mats.filter(m=>m.status==='empty').map(m=>w(esc(T3('В «'+m.name+'» нет текста — похоже на скан, ИИ его не прочитает. Нужен PDF с текстом.','“'+m.name+'” has no text: it looks like a scan, the AI cannot read it. A PDF with text is needed.','„'+m.name+'“ pole teksti – paistab olevat skänn, TI ei saa seda lugeda. Vaja on tekstiga PDF-i.')))).join('');
+  if(d.mats.length&&!cnBaseOk(d)){
+    const bs=d.mats.filter(m=>m.role==='base');
+    h+=w(bs.length&&bs.every(m=>m.status==='empty')?T3('«Основа» — только сканы: ИИ их не прочитает. Добавьте PDF с текстом.','The “Core” is only scans: the AI cannot read them. Add a PDF with text.','„Põhi“ on ainult skännid: TI ei saa neid lugeda. Lisa tekstiga PDF.')
+      :T3('Отметьте хотя бы один файл как «Основа» — по нему ИИ строит темы курса.','Mark at least one file as “Core”: the AI builds the course topics from it.','Märgi vähemalt üks fail rolliga „Põhi“ – TI koostab selle põhjal kursuse teemad.'));
+  }
+  return h;
+}
 function cnListHtml(d){
   const lang=cnLang(d),L=CN_LNAME[lang];
   return (d.mats.length?'<div class="cnh"><span>'+T3('Материалы · ','Materials · ','Materjalid · ')+d.mats.length+'</span><span>'+T3('роль решает, что главное','the role decides what matters most','roll otsustab, mis on peamine')+'</span></div>'+d.mats.map(m=>cnMatHtml(d,m)).join(''):'')+
-    (d.mats.length&&!cnBaseOk(d)?'<div class="cnwarn">'+T3('Отметьте хотя бы один файл как «Основа» — по нему ИИ строит темы курса.','Mark at least one file as “Core”: the AI builds the course topics from it.','Märgi vähemalt üks fail rolliga „Põhi“ – TI koostab selle põhjal kursuse teemad.')+'</div>':'')+
+    cnWarns(d)+
     (L?'<div class="cnnote"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg><span><b>'+
       T3('Материалы на '+L[0][0]+'.','Materials in '+L[0][1]+'.','Materjalid on '+L[0][2]+' keeles.')+'</b> '+
       T3('Уроки будут на вашем языке — '+CN_LNAME[LANG][1]+', латинские названия остаются латинскими. На других языках курс переведётся при первом открытии.',
         'The lessons will be in your language, '+CN_LNAME[LANG][0][1]+'; Latin names stay Latin. In other languages the course is translated when first opened.',
         'Õppetunnid tulevad sinu keeles – '+CN_LNAME[LANG][0][2]+' keeles, ladinakeelsed nimetused jäävad ladinakeelseks. Teistes keeltes tõlgitakse kursus esmakordsel avamisel.')+'</span></div>':'')+
-    '<p class="cnpriv">'+T3('Оригиналы PDF остаются на вашем устройстве. В облако уходят только текст страниц и рисунки, выбранные для уроков.','The original PDFs stay on your device. Only the page text and the pictures chosen for lessons go to the cloud.','PDF-i originaalid jäävad sinu seadmesse. Pilve lähevad ainult lehekülgede tekst ja õppetundide jaoks valitud pildid.')+'</p>';
+    '<p class="cnpriv">'+T3('В облако уходит только текст страниц. Фото и PDF остаются на этом устройстве; рисунки для уроков загрузятся позже, только выбранные.','Only the page text goes to the cloud. Photos and PDFs stay on this device; the pictures for lessons are uploaded later, only the chosen ones.','Pilve läheb ainult lehekülgede tekst. Fotod ja PDF-id jäävad sellesse seadmesse; õppetundide pildid laaditakse üles hiljem, ainult valitud.')+'</p>';
 }
 function cnBarHtml(d){
-  const ok=d.mats.filter(m=>m.status!=='error'),pages=ok.reduce((a,m)=>a+(m.kind==='pdf'?m.pages||0:0),0),photos=ok.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
+  const ok=d.mats.filter(m=>m.status!=='error'),pages=ok.reduce((a,m)=>a+(m.kind==='pdf'&&m.status==='ready'?m.pages||0:0),0),photos=ok.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
   return '<div class="cnsum">'+(cnBaseOk(d)?plx(ok.length,['файл','файла','файлов'],['file','files'],['fail','faili'])+' · '+T3(pages+' стр.',pages+' p.',pages+' lk')+' · '+T3(photos+' фото',photos+' photos',photos+' fotot'):T3('Нужен хотя бы один файл с ролью «Основа»','At least one file with the role “Core” is needed','Vaja on vähemalt üks fail rolliga „Põhi“'))+'</div>'+
     '<button class="cnmain" disabled>'+CN_SPARK+'<span><b>'+T3('Составить план','Make the plan','Koosta plaan')+'</b><small>'+T3('следующий шаг — скоро','the next step is coming soon','järgmine samm tuleb varsti')+'</small></span></button>';
 }
@@ -4381,7 +4489,7 @@ function cnPaintNow(){
   if(key){const el=Array.from(l.querySelectorAll('[data-cn]')).find(x=>k(x)===key);if(el)el.focus();}
 }
 function cnClose(d){
-  const nm=$('#cnName');if(nm&&nm.value.trim()!==d.name){d.name=nm.value.trim();if(!d._new||d.name)cnSave(d);}
+  const nm=$('#cnName');if(nm&&nm.value.trim()!==d.name){d.name=nm.value.trim();d._nameDirty=(d._nameDirty||0)+1;if(!d._new||d.name)cnSave(d);}
   if(d._new&&!d.name&&!d.mats.length)CDRAFTS.delete(d.id);
   go({name:'courses'});
 }
@@ -4398,16 +4506,17 @@ SCREENS.courseNew={
       if(a==='close')cnClose(d);
       else if(a==='files')$('#cnFile').click();
       else if(a==='cam')$('#cnCam').click();
-      else if(a==='role'&&m&&m.role!==b.dataset.r&&CN_ROLES.indexOf(b.dataset.r)>=0){m.role=b.dataset.r;cnSave(d);cnPaintNow();}
+      else if(a==='role'&&m&&m.role!==b.dataset.r&&CN_ROLES.indexOf(b.dataset.r)>=0){m.role=b.dataset.r;cnSave(d,m);cnPaintNow();}
       else if(a==='rm'&&m)cnRemoveMat(d,m);
+      else if(a==='retry'&&m)cnRetry(d,m);
     };
     const nm=$('#cnName');
     nm.oninput=()=>{const s=$('#cnSub');if(s)s.textContent=nm.value.trim()||T3('Без названия','Untitled','Nimeta');};
-    nm.onchange=()=>{const v=nm.value.trim();if(v!==d.name){d.name=v;cnSave(d);}};
+    nm.onchange=()=>{const v=nm.value.trim();if(v!==d.name){d.name=v;d._nameDirty=(d._nameDirty||0)+1;cnSave(d);}};
     $('#cnFile').onchange=e=>{const f=Array.from(e.target.files||[]);e.target.value='';if(f.length)cnAddFiles(d,f,false);};
     $('#cnCam').onchange=e=>{const f=Array.from(e.target.files||[]);e.target.value='';if(f.length)cnAddFiles(d,f,true);};
     cnCheckLocal(d);
-    cnLoadText(d.id).catch(()=>{});
+    cnRefresh(d).catch(()=>{});
   }
 };
 /* ---- on the «Courses» tab: the button and the cards of drafts ---- */
@@ -7091,7 +7200,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.CTEXT=CTEXT;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
@@ -7435,7 +7544,7 @@ html.vkb .panel{padding-bottom:12px}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-theme="paper"]) .cnw{--accent-ink:#B9AEFF;--learn-ink:#F2A766;--bad-ink:#F2879B;--easy-ink:#8FB4F5;--ok-ink:#6FD0A2;--track:rgba(156,140,255,.2)}}
 :root[data-theme="dark"] .cnw{--accent-ink:#B9AEFF;--learn-ink:#F2A766;--bad-ink:#F2879B;--easy-ink:#8FB4F5;--ok-ink:#6FD0A2;--track:rgba(156,140,255,.2)}
 .cnw svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.cnw button{font:inherit;cursor:pointer}
+.cnw button{font-family:inherit;cursor:pointer}
 .cntop{display:flex;align-items:center;gap:10px;padding:6px 0 0}
 .cnx{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow);color:var(--ink);display:flex;align-items:center;justify-content:center;padding:0}
 .cntt{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -7467,13 +7576,15 @@ html.vkb .panel{padding-bottom:12px}
 .cnpb{display:block;height:4px;margin-top:4px;border-radius:2px;background:var(--track);overflow:hidden}.cnpb i{display:block;height:100%;border-radius:2px;background:var(--accent)}
 .cnrm{flex:none;width:36px;height:36px;margin:-4px -4px 0 0;border-radius:50%;border:none;background:transparent;color:var(--ink2);display:flex;align-items:center;justify-content:center;padding:0}
 .cnrg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding:3px;border-radius:14px;background:var(--surface2)}
-.cnr{min-height:36px;padding:0 2px;border:none;border-radius:11px;font-size:12.5px;font-weight:600;white-space:nowrap;background:transparent;color:var(--ink2)}
+.cnr{min-height:36px;min-width:0;padding:0;border:none;border-radius:11px;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;background:transparent;color:var(--ink2)}
+@media (max-width:420px){.cnr{font-size:12px;letter-spacing:-.1px}}
 .cnr[aria-checked=true]{box-shadow:0 2px 8px rgba(60,40,110,.12)}
 .cnr.r-base[aria-checked=true]{background:var(--primary-soft);color:var(--accent-ink)}
 .cnr.r-extra[aria-checked=true]{background:var(--hard-soft);color:var(--learn-ink)}
 .cnr.r-pics[aria-checked=true]{background:var(--easy-soft);color:var(--easy-ink)}
 .cnr.r-exam[aria-checked=true]{background:var(--bad-soft);color:var(--bad-ink)}
 .cnrh{font-size:12.5px;color:var(--ink2);padding:0 2px}
+.cnretry{align-self:flex-start;min-height:36px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--glass-strong);color:var(--ink);font-size:13px;font-weight:600}
 .cnwarn{padding:12px 14px;border-radius:16px;background:var(--hard-soft);color:var(--learn-ink);font-size:13.5px;font-weight:500}
 .cnnote{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:16px;border:1px solid var(--glass-line);background:var(--glass);font-size:13px;line-height:1.45}
 .cnnote svg{flex:none;margin-top:2px;color:var(--accent-ink)}.cnnote b{font-weight:600}

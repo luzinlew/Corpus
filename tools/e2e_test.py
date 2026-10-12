@@ -427,15 +427,21 @@ async def main():
             check('AI is on: the function is deployed', ai['on'] and ai['img'] and ai['ai'] and ai['ai']['limit'] == AI_LIMIT, json.dumps(ai))
             r = await pg.evaluate("S.sample.json('Reply with JSON')")
             check('AI JSON answer (text model)', r.get('ok') is True and r.get('model') == 'claude-haiku-5-5', json.dumps(r))
+            check('the text model is called with thinking disabled (it would eat max_tokens)', r.get('thinking') == 'disabled', json.dumps(r))
             r = await pg.evaluate("""(async()=>{let seen='';const r=await S.sample([{role:'user',content:'Mis on os frontale?'}],{onText:u=>{seen=u.text;}});return {text:r.text,seen};})()""")
             check('AI chat answer reaches onText', 'os frontale' in r['text'] and r['seen'] == r['text'], r['text'])
             r = await pg.evaluate("""(async()=>{const c=document.createElement('canvas');c.width=40;c.height=30;const b=await new Promise(r=>c.toBlob(r,'image/jpeg'));
-                                   return S.sample.json('Read the labels',{images:[b]});})()""")
+                                   try{return await S.sample.json('Read the labels',{images:[b]});}catch(e){return {err:e.code||String(e),msg:e.message};}})()""")
             check('AI with a photo uses the vision model', r.get('images') == 1 and r.get('model') == 'claude-sonnet-5-5', json.dumps(r))
+            check('the vision model is called with thinking "between_tools" (the only way to switch it off; by default it eats max_tokens and the answer is empty)', r.get('thinking') == 'between_tools', json.dumps(r))
+            # the chat as the app sends it at the first question about a card: the photo comes with the question
+            r = await pg.evaluate("""(async()=>{const c=document.createElement('canvas');c.width=40;c.height=30;const b=await new Promise(r=>c.toBlob(r,'image/jpeg'));
+                                   try{const a=await S.sample([{role:'user',content:'Объясни простыми словами'}],{images:[b]});return {text:a.text,truncated:!!a.truncated};}catch(e){return {err:e.code||String(e),msg:e.message};}})()""")
+            check('AI chat with a photo answers (vision model, 1 image, not an empty answer)', 'claude-sonnet-5-5' in r.get('text', '') and '(1 images)' in r.get('text', '') and not r.get('truncated'), json.dumps(r))
             used = await pg.evaluate('CORPUS_WEB.ai.used')
-            check('each call is counted (photo = 2)', used == 4, str(used))
-            r = await pg.evaluate("""(async()=>{const out=[];for(let i=0;i<4;i++){try{await S.sample('more');out.push('ok');}catch(e){out.push(e.code);}}return out;})()""")
-            check('daily limit stops further calls', r == ['ok', 'ok', 'quota_exceeded', 'quota_exceeded'], json.dumps(r))
+            check('each call is counted (photo = 2)', used == 6, str(used))
+            r = await pg.evaluate("""(async()=>{const out=[];for(let i=0;i<2;i++){try{await S.sample('more');out.push('ok');}catch(e){out.push(e.code);}}return out;})()""")
+            check('daily limit (6 of 6) stops further calls', r == ['quota_exceeded', 'quota_exceeded'], json.dumps(r))
 
             await import_folder(pg)
             st = await state_when(lambda st: {'decks', 'folders', 'packs', 'plates'} <= set(d['coll'] for d in st['docs']))

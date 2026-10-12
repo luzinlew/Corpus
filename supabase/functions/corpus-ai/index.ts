@@ -109,11 +109,14 @@ function translatePrompt(src: string, dst: string, input: any): string {
 }
 
 // One call to the Claude Messages API: the answer, or the Response to send back when the model service refuses.
-// Claude Haiku 5.5 thinks by default, and thinking counts toward max_tokens: a chat answer or a JSON reply sized for
-// Haiku 4.5 would be cut short. Hints, chat and translation need no reasoning, so it is switched off there
-// (accepted on Haiku 5.5 at its default effort; Sonnet 5.5, the photo model, rejects "disabled", so it is left alone).
+// Both Claude 5.5 models think by default (adaptive thinking; effort "medium" on Haiku, "high" on Sonnet), and thinking counts toward max_tokens: a chat
+// answer, a JSON reply or an auto-markup sized for Haiku 4.5 would be eaten by it and come back with no text (empty_completion).
+// Hints, chat and translation need no reasoning, so it is switched off. Haiku 5.5 (text, demo) takes {type:"disabled"};
+// Sonnet 5.5 (the photo model) rejects "disabled", its switch is {type:"between_tools"}, and nothing else may be sent inside
+// "thinking" (fine at the default effort, which is not sent). Any other model rejects "between_tools" with a 400.
 async function callModel(model: string, maxTokens: number, system: string | null, messages: Json[]): Promise<{ answer: string; truncated: boolean } | Response> {
-  const thinking = /^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } } : {};
+  const thinking = /^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } }
+    : /^claude-sonnet-5-5/.test(model) ? { thinking: { type: "between_tools" } } : {};
   const r = await fetch(API_URL + "/v1/messages", {
     method: "POST",
     headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -133,7 +136,10 @@ async function callModel(model: string, maxTokens: number, system: string | null
     return reply(502, { code, message: m });
   }
   const answer = (out?.content ?? []).filter((b: Json) => b?.type === "text").map((b: Json) => b.text).join("");
-  if (!answer.trim()) return reply(502, { code: "empty_completion", message: "empty answer" });
+  if (!answer.trim()) {
+    console.error("anthropic empty answer", model, out?.stop_reason);
+    return reply(502, { code: "empty_completion", message: "empty answer" });
+  }
   return { answer, truncated: out?.stop_reason === "max_tokens" };
 }
 

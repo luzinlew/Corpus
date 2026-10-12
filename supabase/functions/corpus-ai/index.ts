@@ -104,10 +104,13 @@ Deno.serve(async (req) => {
     if (!q?.ok) return reply(429, { code: "quota_exceeded", message: "daily AI limit reached", plan: q?.plan, limit: q?.limit, used: q?.used });
 
     const model = demo ? DEMO_MODEL : images ? VISION_MODEL : TEXT_MODEL;
-    // Claude Haiku 5.5 thinks by default, and thinking counts toward max_tokens: a chat answer or a JSON reply sized for
-    // Haiku 4.5 would be cut short. Hints, chat and translation need no reasoning, so it is switched off there
-    // (accepted on Haiku 5.5 at its default effort; Sonnet 5.5, the photo model, rejects "disabled", so it is left alone).
-    const thinking = /^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } } : {};
+    // Both Claude 5.5 models think by default (adaptive thinking; effort "medium" on Haiku, "high" on Sonnet), and thinking counts toward max_tokens: a chat
+    // answer, a JSON reply or an auto-markup sized for Haiku 4.5 would be eaten by it and come back with no text (empty_completion).
+    // Hints, chat and translation need no reasoning, so it is switched off. Haiku 5.5 (text, demo) takes {type:"disabled"};
+    // Sonnet 5.5 (the photo model) rejects "disabled", its switch is {type:"between_tools"}, and nothing else may be sent inside
+    // "thinking" (fine at the default effort, which is not sent). Any other model rejects "between_tools" with a 400.
+    const thinking = /^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } }
+      : /^claude-sonnet-5-5/.test(model) ? { thinking: { type: "between_tools" } } : {};
     const r = await fetch(API_URL + "/v1/messages", {
       method: "POST",
       headers: { "x-api-key": API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -127,7 +130,10 @@ Deno.serve(async (req) => {
       return reply(502, { code, message: m });
     }
     const answer = (out?.content ?? []).filter((b: Json) => b?.type === "text").map((b: Json) => b.text).join("");
-    if (!answer.trim()) return reply(502, { code: "empty_completion", message: "empty answer" });
+    if (!answer.trim()) {
+      console.error("anthropic empty answer", model, out?.stop_reason);
+      return reply(502, { code: "empty_completion", message: "empty answer" });
+    }
     return reply(200, { text: answer, truncated: out?.stop_reason === "max_tokens", plan: q.plan, limit: q.limit, used: q.used });
   } catch (e) {
     console.error("corpus-ai", e);

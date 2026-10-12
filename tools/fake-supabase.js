@@ -299,11 +299,19 @@ http.createServer(async (req, res) => {
   /* ---------- a stand-in for the Claude Messages API ---------- */
   if (p === '/v1/messages' && req.method === 'POST') {
     if (req.headers['x-api-key'] !== ANTHROPIC_KEY) { send(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }); return; }
-    // the rules of the real API that the function has to follow: Claude Haiku 5.5 thinks by default (the function turns it off,
-    // so the answer is not eaten by thinking); Claude Sonnet 5.5 rejects "disabled"; no current model takes temperature/top_p/top_k
+    // the rules of the real API that the function has to follow: both Claude 5.5 models think by default (adaptive thinking; effort "medium" on Haiku, "high" on Sonnet)
+    // and thinking counts toward max_tokens, so a call that leaves it on gets back only a thinking block and no text. Claude Haiku 5.5 is
+    // turned off with {type:"disabled"}; Claude Sonnet 5.5 rejects "disabled", its switch is {type:"between_tools"} with no other field inside
+    // "thinking"; any other model rejects "between_tools"; no current model takes temperature/top_p/top_k
     const think = body.thinking && body.thinking.type;
-    if (/^claude-haiku-5/.test(body.model) && think !== 'disabled') { send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'test: Haiku 5.5 must be called with thinking disabled here' } }); return; }
-    if (/^claude-sonnet-5-5/.test(body.model) && think === 'disabled') { send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'thinking.type disabled is not supported for this model' } }); return; }
+    const bad = (m) => send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: m } });
+    if (/^claude-haiku-5/.test(body.model) && think !== 'disabled') { bad('test: Haiku 5.5 must be called with thinking disabled here'); return; }
+    if (/^claude-sonnet-5-5/.test(body.model) && think === 'disabled') { bad('thinking.type disabled is not supported for this model'); return; }
+    if (think === 'between_tools' && !/^claude-sonnet-5-5/.test(body.model)) { bad('"thinking.type.between_tools" is not supported for this model.'); return; }
+    if (think === 'between_tools' && Object.keys(body.thinking).some((k) => k !== 'type')) { bad('thinking.between_tools: extra inputs are not permitted'); return; }
+    if (/^claude-sonnet-5-5/.test(body.model) && think !== 'between_tools') {   // thinking on by default: it ate the whole budget, no text
+      send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'thinking', thinking: '', signature: 'fake' }], stop_reason: 'max_tokens', usage: { input_tokens: 10, output_tokens: body.max_tokens } }); return;
+    }
     if (['temperature', 'top_p', 'top_k'].some((k) => body[k] !== undefined)) { send(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'sampling parameters are not supported for this model' } }); return; }
     const last = body.messages[body.messages.length - 1];
     const blocks = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : last.content;
@@ -324,7 +332,7 @@ http.createServer(async (req, res) => {
       if (FN_DROP && ans && typeof ans === 'object') delete ans.terms;
       text = JSON.stringify(ans);
       if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
-    } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length })
+    } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length, thinking: think || null })
       : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
     send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: stop, usage: { input_tokens: 10, output_tokens: 10 } });
     return;

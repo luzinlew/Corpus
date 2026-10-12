@@ -44,6 +44,7 @@
 | T-021 | P2 | Плавный урок «с объяснениями, но быстро»: порции по 3, объяснение при ошибке, «Знаю», две кнопки оценки (макет готов, ждёт одобрения) | planned | — |
 | T-022 | P1 | Содержимое курса на языке пользователя: lang + tr у фото/карточек, перевод урока ИИ при открытии с кэшем, «оригинал», CR_KIND/CR_SRC на трёх языках, экспорт/импорт | ready: e2e 272 PASS ×3; не выложено | claude/T-022-content-language |
 | T-023 | P1 | corpus-ai: текстовая и демо-модель Haiku 5.5 (thinking disabled — иначе рассуждение съедает max_tokens); фейковый Claude проверяет правила API | ready: e2e 272 PASS; ждёт вставки функции Львом | claude/T-023-haiku55 |
+| T-024 | P0 | Срочно: ИИ по фото не отвечает — Sonnet 5.5 думает по умолчанию (effort high), раздумья съедают max_tokens → пустой ответ; функция шлёт thinking between_tools | ready: e2e 275 PASS; ждёт вставки функции Львом | claude/T-024-vision-thinking |
 
 ## Журнал
 
@@ -247,3 +248,13 @@
 - для Льва: код функции целиком (вставить в Supabase → Edge Functions → corpus-ai); если в секретах задан CORPUS_AI_MODEL / CORPUS_AI_DEMO_MODEL со старой моделью — удалить или поставить claude-haiku-5-5; откат — прежний код `git show 574df3d:supabase/functions/corpus-ai/index.ts`
 - проверки: e2e exit=0, 272 PASS, ALL PASSED: «AI JSON answer (text model)» → model claude-haiku-5-5 (фейк отверг бы без thinking disabled), фото → claude-sonnet-5-5, демо 5 запросов на Haiku 5.5; node --check fake-supabase.js
 - сайт не меняется (только функция) — выкладка = Лев вставляет код функции; в main файл попадёт со следующей выкладкой сайта
+
+
+### T-024 Фото-модель без раздумий (срочно)
+- статус: ready — Лев 2026-10-12 прислал скриншоты: чат «Спросить» → «Не получилось получить ответ»; «а где ИИ собственно?»
+- причина: первый вопрос чата по карточке идёт с фото → VISION_MODEL claude-sonnet-5-5 без параметра thinking → adaptive thinking при effort high; thinking считается в max_tokens (чат 1500, «Авто» 3000) → только thinking-блок, stop_reason max_tokens → функция 502 empty_completion. {type:"disabled"} у Sonnet 5.5 → 400; выключатель — {type:"between_tools"} (без других полей, effort ≤ high; другие модели → 400). Фейковый Claude этого не изображал, поэтому e2e был зелёным
+- правка: corpus-ai — для claude-sonnet-5-5 `thinking:{type:"between_tools"}`; console.error причины пустого ответа (модель, stop_reason) для логов Supabase; фейк — Sonnet 5.5 без between_tools отвечает только thinking-блоком с stop_reason max_tokens, between_tools на другой модели / с лишними полями → 400; e2e — тип thinking для текста и фото, чат с фото как в приложении
+- доказательство: без правки функции e2e падает «FAIL AI with a photo uses the vision model [{\"err\": \"empty_completion\"…}]» (тот же код, что на сайте); с правкой — e2e exit=0, 275 PASS, ALL PASSED (implementer и координатор, 2 полных прогона), порты свободны
+- ревью: правка — один параметр запроса и строка лога, без доступа/лимитов/данных; security-reviewer не вызывался (срочно, координатор проверил дифф сам); qa-quick заменён собственным полным прогоном
+- для Льва: код функции целиком → Supabase → Edge Functions → corpus-ai; откат — `git show 3d5a060:supabase/functions/corpus-ai/index.ts`; если в секретах CORPUS_AI_VISION_MODEL задан не claude-sonnet-5-5 — сообщить. Сайт не меняется; в main файл попадёт со следующей выкладкой
+- T-016 переделывает функцию (callModel) — T-024 вливается в ветку T-016 до её исправлений

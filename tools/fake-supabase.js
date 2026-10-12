@@ -402,7 +402,7 @@ http.createServer(async (req, res) => {
         /* lesson: [<lang>] marks the language asked for; the intro names the title, a note for every term, one question of relations when there are 4 terms or more (the first term, the next three are the wrong answers) */
         const ts = Array.isArray(inp.terms) ? inp.terms : [];
         ans = { intro: ['[' + lm[1] + '] ' + evil(inp.title) + ' intro one.', 'Second sentence of ' + evil(inp.title) + '.'], notes: Object.fromEntries(ts.map((t) => [t.id, '[' + lm[1] + '] Note on ' + t.la + ' (p' + (t.p || 3) + ', text ' + String(inp.text || '').length + ', exam ' + (inp.exam || []).length + ').'])),
-          q: ts.length >= 4 ? [{ q: '[' + lm[1] + '] Which structure is ' + ts[0].la + '?', ans: ts[0].id, opts: ts.slice(1, 4).map((t) => t.id) }] : [] };
+          q: ts.length >= 4 ? [{ q: '[' + lm[1] + '] Which structure is described first in the text?', ans: ts[0].id, opts: ts.slice(1, 4).map((t) => t.id) }] : [] };
         if (FN_DROP) delete ans.notes;
       } else if (om) {
         /* outline: a topic for every page that has bold text (the first bold line is its title); its terms are the Latin pairs «Capital lower» of the page */

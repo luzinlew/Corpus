@@ -4078,8 +4078,11 @@ const CN_LIM={pdfBytes:50*1048576,txtBytes:4*1048576,photoBytes:25*1048576,pages
 const CN_ROLES=['base','extra','pics','exam'];
 /* the role «exam» by the name: whole words only (the start is a non-letter, the end too): «Example slides» and «Examination atlas» are not exams */
 const CN_EXAM_RE=/(?<![\p{L}\p{N}])(?:exams?|eksam(?:i|id|it)?|kollokvium(?:i|id)?|k[üu]simus(?:ed|i|t)?|questions?|вопрос(?:ы|ов|а)?|экзамен(?:ы|а|ов)?|коллоквиум(?:ы|а|ов)?)(?![\p{L}\p{N}])/iu;
-try{const q=new URLSearchParams(location.search).get('create');if(q==='1')localStorage.setItem('corpus.create','1');else if(q==='0')localStorage.removeItem('corpus.create');}catch(e){}
-const cnOn=()=>{const W=window.CORPUS_WEB;if(!W||W.guest)return false;try{return localStorage.getItem('corpus.create')==='1';}catch(e){return false;}};
+let CN_QFLAG='';
+try{const q=new URLSearchParams(location.search).get('create');CN_QFLAG=q==='1'||q==='0'?q:'';if(q==='1')localStorage.setItem('corpus.create','1');else if(q==='0')localStorage.removeItem('corpus.create');}catch(e){}
+/* ?create=1 / ?create=0 is kept in the account too (META.create), so that another browser of the same person has the button; applied once META is loaded */
+function cnFlagApply(){if(!CN_QFLAG)return;const on=CN_QFLAG==='1';CN_QFLAG='';if(META.create!==on){META.create=on;persistMeta();}}
+const cnOn=()=>{const W=window.CORPUS_WEB;if(!W||W.guest)return false;if(typeof META!=='undefined'&&META.create===true)return true;try{return localStorage.getItem('corpus.create')==='1';}catch(e){return false;}};
 const CDRAFTS=new Map(),CN_T=new Map();let CN_Q=Promise.resolve(),CN_PDF=null,CN_IDB=null,CN_TM=0,CN_SEQ=0;
 /* what is not kept in the cloud: the progress of reading, «the original is here», «a reading is alive» — by <draft>/<material> */
 function cnT(did,mid){const k=did+'/'+mid;let t=CN_T.get(k);if(!t){t={};CN_T.set(k,t);}return t;}
@@ -4623,32 +4626,36 @@ function cnRunErr(e){
   return {k:'ai'};
 }
 /* (а) подписи на фото — на устройстве */
+/* the captions printed on a picture (an <img> or a canvas with naturalWidth/Height): detectLabels + text recognition → {out:[{t,x,y,w,h}], ok}; hook.stop() — cancelled, hook.step(k,n) — progress */
+async function cnOcrLabels(img,hook){
+  const det=detectLabels(img,img.naturalWidth,img.naturalHeight,{merge:false});
+  let w;try{w=await ocrWorker();}catch(e){throw {code:'ocr'};}
+  const bs=det.boxes.slice().sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,150),got=[],out=[],seen=new Set();let ok=false;
+  hook.step(0,bs.length);
+  for(let k=0;k<bs.length;k++){
+    if(hook.stop())break;
+    hook.step(k+1,bs.length);
+    const b=bs[k];let t='';try{t=await ocrOne(w,img,b,det.lh);ok=true;}catch(e){continue;}
+    if(t)got.push({t:t,x:b.x,y:b.y,w:b.w,h:b.h});
+  }
+  /* two boxes of one line close together (a word is cut off from the next) are one label */
+  const gx=1.6*det.lh/img.naturalWidth*100,rows=[];
+  got.sort((a,b)=>a.x-b.x).forEach(g=>{
+    const p=rows.find(q=>Math.abs((q.y+q.h/2)-(g.y+g.h/2))<=0.5*Math.min(q.h,g.h)&&g.x-(q.x+q.w)<=gx);
+    if(p){const x1=Math.max(p.x+p.w,g.x+g.w),y0=Math.min(p.y,g.y),y1=Math.max(p.y+p.h,g.y+g.h);p.t=p.t+' '+g.t;p.w=x1-p.x;p.y=y0;p.h=y1-y0;}else rows.push(g);
+  });
+  rows.sort((a,b)=>(a.y-b.y)||(a.x-b.x)).forEach(g=>{
+    const t=cnLatin(g.t),k=cnNorm(t);if(!t||seen.has(k)||out.length>=CN_PL.labels)return;seen.add(k);
+    out.push({t:t,x:r2(g.x),y:r2(g.y),w:r2(g.w),h:r2(g.h)});
+  });
+  return {out:out,ok:ok};   // ok: the recognition really worked on at least one frame
+}
 async function cnLabelOne(d,m,i,r){
   const blob=await cnGet(cnKey(d.id,m.id,i));if(!blob)return null;   // оригинала на этом устройстве нет
   const url=URL.createObjectURL(blob);
   try{
-    const img=await loadImage(url);
-    const det=detectLabels(img,img.naturalWidth,img.naturalHeight,{merge:false});
-    let w;try{w=await ocrWorker();}catch(e){throw {code:'ocr'};}
-    const bs=det.boxes.slice().sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,150),got=[],out=[],seen=new Set(),L=r.dt.lab;let ok=false;
-    L.bn=bs.length;L.bk=0;
-    for(const b of bs){
-      if(r.cancel)break;
-      L.bk++;cnRPaint();
-      let t='';try{t=await ocrOne(w,img,b,det.lh);ok=true;}catch(e){continue;}
-      if(t)got.push({t:t,x:b.x,y:b.y,w:b.w,h:b.h});
-    }
-    /* two boxes of one line close together (a word is cut off from the next) are one label */
-    const gx=1.6*det.lh/img.naturalWidth*100,rows=[];
-    got.sort((a,b)=>a.x-b.x).forEach(g=>{
-      const p=rows.find(q=>Math.abs((q.y+q.h/2)-(g.y+g.h/2))<=0.5*Math.min(q.h,g.h)&&g.x-(q.x+q.w)<=gx);
-      if(p){const x1=Math.max(p.x+p.w,g.x+g.w),y0=Math.min(p.y,g.y),y1=Math.max(p.y+p.h,g.y+g.h);p.t=p.t+' '+g.t;p.w=x1-p.x;p.y=y0;p.h=y1-y0;}else rows.push(g);
-    });
-    rows.sort((a,b)=>(a.y-b.y)||(a.x-b.x)).forEach(g=>{
-      const t=cnLatin(g.t),k=cnNorm(t);if(!t||seen.has(k)||out.length>=CN_PL.labels)return;seen.add(k);
-      out.push({t:t,x:r2(g.x),y:r2(g.y),w:r2(g.w),h:r2(g.h)});
-    });
-    return {out:out,ok:ok};   // ok: the recognition really worked on at least one frame
+    const img=await loadImage(url),L=r.dt.lab;
+    return await cnOcrLabels(img,{stop:()=>r.cancel,step:(k,n)=>{L.bn=n;L.bk=k;if(k)cnRPaint();}});
   }finally{URL.revokeObjectURL(url);}
 }
 async function cnStepLabels(d,r){
@@ -5058,7 +5065,7 @@ async function cnPlanSave(d){
   try{
     const dirty=new Set(d._pDirty),doc=d._plan;let c=null;
     try{c=cnPlanDoc(await cnDocData('cplan',d.id));}catch(e){}
-    if(c&&c.at===doc.at)cnPlanMerge(doc,c,dirty);
+    if(c&&c.at===doc.at)cnPlanMerge(doc,c,d._pDirty);   // the live set: an edit made while the cloud copy was being read is not overwritten by it
     doc.ed=Date.now();
     if(JSON.stringify(doc).length>CN_PL.doc)throw {code:'limit'};
     if(CDRAFTS.get(d.id)!==d||!d._plan)return;
@@ -5172,7 +5179,8 @@ function cnAddTerm(d,l,inp){
    Пауза — после текущего урока (запрос ИИ не обрывается: он уже оплачен). Перезагрузка — сборка стоит на паузе, «Продолжить» идёт с первого не собранного урока. */
 const CN_BLD={ptStep:10000,lsStep:100,maxCand:6000,run:8,img:1600,text:18000,exam:15,json:38000};
 const CN_DEV=Array.from(crypto.getRandomValues(new Uint8Array(6)),x=>(x%36).toString(36)).join('');   // not Math.random: it must not shift the app's own random choices
-const cnBldNew=()=>({at:Date.now(),base:Date.now(),parts:Object.create(null),ls:Object.create(null),pa:Object.create(null),run:null});
+const cnBldNew=()=>({at:Date.now(),base:Date.now(),spent:0,parts:Object.create(null),ls:Object.create(null),pa:Object.create(null),run:null});
+const cnSpend=(d,b,n)=>{b.spent+=n;d._plan.bld.spent=b.spent;};
 function cnBldDoc(b){
   if(!b||typeof b!=='object')return null;
   const s=(v,n)=>typeof v==='string'?v.slice(0,n):'',n=v=>Math.max(0,Math.min(999,Math.round(+v||0))),parts=Object.create(null),ls=Object.create(null),pa=Object.create(null);
@@ -5182,7 +5190,7 @@ function cnBldDoc(b){
   Object.keys(lo).slice(0,CN_PL.lessons+40).forEach(k=>{const e=lo[k];if(k==='__proto__'||!e||typeof e!=='object'||(e.st!=='ok'&&e.st!=='err'))return;
     ls[k.slice(0,20)]={st:e.st,pid:s(e.pid,80),err:s(e.err,20),nf:n(e.nf),nt:n(e.nt),np:n(e.np)};});
   const r=b.run&&typeof b.run==='object'&&typeof b.run.dev==='string'?{dev:s(b.run.dev,20),at:+b.run.at||0}:null;   // run: who is building now (another tab or device does not start a second build)
-  return {at:+b.at||0,base:+b.base||0,parts:parts,ls:ls,pa:pa,run:r};
+  return {at:+b.at||0,base:+b.base||0,spent:Math.max(0,Math.min(99999,Math.round(+b.spent||0))),parts:parts,ls:ls,pa:pa,run:r};
 }
 /* the record of the cloud into mine: what is not in mine is added, a ready lesson wins over an error */
 function cnBldMerge(mine,cl){
@@ -5191,6 +5199,7 @@ function cnBldMerge(mine,cl){
   Object.keys(cl.ls).forEach(k=>{if(!Object.hasOwn(mine.ls,k)||(cl.ls[k].st==='ok'&&mine.ls[k].st!=='ok'))mine.ls[k]=cl.ls[k];});
   Object.keys(cl.pa).forEach(k=>{if(!Object.hasOwn(mine.pa,k)&&!(Object.hasOwn(mine.ls,k)&&mine.ls[k].st==='ok'))mine.pa[k]=cl.pa[k];});
   if(!mine.run&&cl.run)mine.run=cl.run;
+  mine.spent=Math.max(mine.spent||0,cl.spent||0);
 }
 const cnBldList=d=>{const out=[];if(!d._plan)return out;d._plan.parts.forEach((p,pi)=>p.lessons.forEach((l,li)=>{if(!l.off&&l.terms.length)out.push({p:p,pi:pi,l:l,li:li});}));return out;};
 const cnBldRec=(d,lid)=>{const b=d._plan&&d._plan.bld;return b&&Object.hasOwn(b.ls,lid)?b.ls[lid]:null;};
@@ -5202,31 +5211,91 @@ function cnBldState(d){
   const b=d._bld;if(b)return b.state;
   return d._plan&&cnBldList(d).every(x=>{const r=cnBldRec(d,x.l.id);return r&&r.st==='ok';})&&cnBldList(d).length?'done':'idle';
 }
+/* the build record of the cloud is read and merged first; a fresh «building» mark of another tab or device refuses; else this tab takes the mark → the record, or null */
+async function cnBldClaim(d){
+  const bl=d._plan.bld||(d._plan.bld=cnBldNew());
+  let c=null;
+  try{c=cnPlanDoc(await cnDocData('cplan',d.id));}catch(e){toast(cnRunErrText('net',null),5000);return null;}
+  if(!d._plan||CDRAFTS.get(d.id)!==d)return null;
+  if(c&&c.at===d._plan.at&&c.bld){
+    cnBldMerge(bl,c.bld);
+    const r=c.bld.run;
+    if(r&&r.dev!==CN_DEV&&Date.now()-r.at<120000){d._bldOther=true;cnBPaint();return null;}
+  }
+  d._bldOther=false;
+  bl.run={dev:CN_DEV,at:Date.now()};
+  cnBldWrite(d).catch(()=>{});   // the mark «building» goes to the cloud at once
+  return bl;
+}
 async function cnBldStart(d,retryLid){
   if(!d._plan||d._bldGo)return;
   const old=d._bld;if(old&&(old.state==='run'||old.state==='pausing'))return;
   d._bldGo=true;
   try{
-    const bl=d._plan.bld||(d._plan.bld=cnBldNew());
-    /* two tabs: the record of the cloud is read first; a fresh «building» mark of another tab or device stops this start */
-    let c=null;
-    try{c=cnPlanDoc(await cnDocData('cplan',d.id));}catch(e){toast(cnRunErrText('net',null),5000);return;}
-    if(!d._plan||CDRAFTS.get(d.id)!==d)return;
-    if(c&&c.at===d._plan.at&&c.bld){
-      cnBldMerge(bl,c.bld);
-      const r=c.bld.run;
-      if(r&&r.dev!==CN_DEV&&Date.now()-r.at<120000){d._bldOther=true;cnBPaint();return;}
-    }
-    d._bldOther=false;
+    const bl=await cnBldClaim(d);if(!bl)return;
     if(retryLid){delete bl.ls[retryLid];}
     else cnBldList(d).forEach(x=>{const r=cnBldRec(d,x.l.id);if(r&&r.st==='err')delete bl.ls[x.l.id];});   // «Продолжить» и «Повторить» берут и ошибочные уроки
-    bl.run={dev:CN_DEV,at:Date.now()};
-    cnBldWrite(d).catch(()=>{});   // the mark «building» goes to the cloud at once
     if(!d.bldAt){d.bldAt=Date.now();cnSave(d);}
-    const keep=old&&old.state!=='done'&&old.state!=='ai'?old.spent:0;
-    const b=d._bld={state:'run',pause:false,cancel:false,ac:new AbortController(),cur:'',i:0,spent:keep,est:keep+cnBldEst(d),dt:{},pdf:new Map(),pages:new Map(),qs:null,err:''};
+    const keep=bl.spent||0;
+    const b=d._bld={state:'run',mode:'build',pause:false,cancel:false,ac:new AbortController(),cur:'',i:0,spent:keep,est:keep+cnBldEst(d),dt:{},pdf:new Map(),pages:new Map(),qs:null,err:''};
     cnBldRun(d,b);cnBPaint();
   }finally{d._bldGo=false;}
+}
+/* «Обновить рисунки и рамки» готового курса: рисунок урока готовится заново (старый asset удаляется), у карточек без рамки (noframe) рамка появляется там, где нашлась подпись;
+   стоящие рамки и тексты не трогаются, ИИ не вызывается. Идёт по одному уроку, как сборка (пауза, «Продолжить» — с того же места, пока открыто приложение). */
+async function cnBldRefreshStart(d,cont){
+  if(!d._plan||d._bldGo)return;
+  const old=d._bld;if(old&&(old.state==='run'||old.state==='pausing'))return;
+  if(!cont){
+    const y=await confirmDialog({title:T3('Обновить рисунки и рамки?','Update the pictures and frames?','Kas uuendada pildid ja raamid?'),text:T3('Рисунки уроков будут нарисованы заново, а у структур без рамки рамка появится там, где найдётся подпись. Стоящие рамки и тексты не меняются, ИИ не используется.','The pictures of the lessons are made again, and a structure without a frame gets one where its caption is found. Frames that stand and the texts stay; the AI is not used.','Õppetundide pildid tehakse uuesti ja raamita struktuurile tekib raam seal, kus silt leitakse. Olemasolevad raamid ja tekstid ei muutu, TI-d ei kasutata.'),ok:T3('Обновить','Update','Uuenda'),danger:false});
+    if(!y)return;
+    d._rfDone=new Set();
+  }
+  d._bldGo=true;
+  try{
+    const bl=await cnBldClaim(d);if(!bl)return;
+    const todo=cnBldList(d).filter(x=>{const r=cnBldRec(d,x.l.id);return x.l.pic&&r&&r.st==='ok'&&r.pid&&plateById(r.pid)&&!(d._rfDone&&d._rfDone.has(x.l.id));});
+    const prev=old&&old.mode==='refresh'&&cont?old.rf:null;
+    const b=d._bld={state:'run',mode:'refresh',pause:false,cancel:false,ac:new AbortController(),cur:'',i:0,spent:bl.spent||0,est:bl.spent||0,dt:{},pdf:new Map(),pages:new Map(),qs:null,err:'',
+      rf:{k:prev?prev.k:0,n:(prev?prev.k:0)+todo.length,fail:prev?prev.fail:0,framed:prev?prev.framed:0,todo:todo}};
+    cnBldRefreshRun(d,b);cnBPaint();
+  }finally{d._bldGo=false;}
+}
+async function cnBldRefreshRun(d,b){
+  const bl=d._plan.bld,hb=setInterval(()=>{if(bl.run&&bl.run.dev===CN_DEV){bl.run.at=Date.now();cnBldWrite(d).catch(()=>{});}},30000);
+  try{
+    for(const it of b.rf.todo){
+      if(b.cancel)return;
+      if(b.pause){b.state='pause';return;}
+      const rec=cnBldRec(d,it.l.id),p=rec&&plateById(rec.pid);
+      b.cur=it.l.id;b.i=0;b.dt={pic:cnPicName(d,it.l.pic)||''};b.rf.k++;cnBPaint();
+      if(!p){b.rf.fail++;continue;}
+      let pic,up;
+      try{pic=await cnBldPic(d,b,it.l.pic,it.l.terms);}catch(e){if(b.cancel)return;b.rf.fail++;continue;}
+      if(!S.assets){b.rf.fail++;continue;}
+      try{up=await akUpload(pic.blob);}catch(e){if(b.cancel)return;b.rf.fail++;continue;}
+      if(b.cancel){S.assets.delete(up.id).catch(()=>{});return;}
+      b.i=1;b.dt.labels=pic.labels.length;
+      const oldA=p.assetId;p.assetId=up.id;p.w=pic.w;p.h=pic.h;persist('plates',p.id);
+      if(oldA)afterWrites(()=>S.assets.delete(oldA).catch(e=>console.warn('asset delete',oldA,e)));
+      const cards=cardsOfPlate(p.id),fr=cnBldMatch(cards.map(c=>({id:c.id,la:c.term})),pic.labels);
+      let framed=0;
+      cards.forEach(c=>{if(c.noframe&&fr.has(c.id)){const rc=fr.get(c.id);c.x=rc.x;c.y=rc.y;c.w=rc.w;c.h=rc.h;delete c.noframe;persist('terms',c.id);framed++;}});
+      b.rf.framed+=framed;b.dt.frames=framed;
+      rec.nf=cards.filter(c=>c.noframe).length;
+      if(!d._rfDone)d._rfDone=new Set();d._rfDone.add(it.l.id);
+      try{await cnBldWrite(d);}catch(e){toast(e&&e.code==='quota'?cnQuotaText():T3('Не удалось сохранить ход сборки. Проверьте соединение.','Could not save the progress. Check the connection.','Koostamise käiku ei õnnestunud salvestada. Kontrolli ühendust.'),6000);b.state='store';b.cur='';return;}
+    }
+    b.cur='';b.state='done';
+    toast(T3('Рисунки обновлены: '+(b.rf.n-b.rf.fail)+' из '+b.rf.n+' · рамок добавлено: '+b.rf.framed+(b.rf.fail?' · не удалось: '+b.rf.fail:''),'Pictures updated: '+(b.rf.n-b.rf.fail)+' of '+b.rf.n+' · frames added: '+b.rf.framed+(b.rf.fail?' · failed: '+b.rf.fail:''),'Pildid uuendatud: '+(b.rf.n-b.rf.fail)+' / '+b.rf.n+' · raame lisatud: '+b.rf.framed+(b.rf.fail?' · ebaõnnestus: '+b.rf.fail:'')),6000);
+  }catch(e){
+    if(b.cancel)return;
+    console.error('refresh',e);b.cur='';b.state='store';
+  }finally{
+    clearInterval(hb);cnBldFree(b);
+    if(bl.run&&bl.run.dev===CN_DEV){bl.run=null;cnBldWrite(d).catch(()=>{});}
+    cnBPaint();
+  }
 }
 /* the draft is deleted: nothing goes on, the pictures uploaded for lessons that were not recorded are removed */
 function cnBldStop(d){
@@ -5275,7 +5344,8 @@ async function cnBldOpenPdf(d,b,m){
   const blob=await cnGet(cnKey(d.id,m.id));if(!blob)throw {code:'orig'};
   let lib;try{lib=await cnTO(cnPdfLib());}catch(e){throw {code:'pic'};}
   let buf;try{buf=new Uint8Array(await cnTO(blob.arrayBuffer()));}catch(e){throw {code:'pic'};}
-  const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false});
+  /* WebKit (iPhone, Safari) draws no raster pictures of a page with OffscreenCanvas / ImageDecoder: both are off for the render. window.__CN_BLANK is the test switch: 1 — the areas of the pictures stay white after the render (as in a broken WebKit), 2 — the same and the check of the blank page is off */
+  const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false});
   let doc;try{doc=await cnTO(task.promise,task);}catch(e){throw {code:'pic'};}
   o={doc:doc,task:task,lib:lib};b.pdf.set(m.id,o);return o;
 }
@@ -5322,7 +5392,7 @@ function cnPageCands(items,vp,imgs){
   return (imgs&&imgs.length)?out.filter(c=>c.img).concat(out.filter(c=>!c.img)):out;
 }
 /* → {blob, w, h, labels:[{t,x,y,w,h}], name, page} */
-async function cnBldPic(d,b,ref){
+async function cnBldPic(d,b,ref,terms){
   const a=String(ref).split(':'),m=d.mats.find(x=>x.id===a[1]);
   if(!m)throw {code:'pic'};
   if(a[0]==='p'){
@@ -5337,14 +5407,37 @@ async function cnBldPic(d,b,ref){
   try{
     const v1=pg.getViewport({scale:1}),sc=Math.min(3,CN_BLD.img/Math.max(v1.width,v1.height,1)),vp=pg.getViewport({scale:sc});
     const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(vp.width));cv.height=Math.max(1,Math.round(vp.height));
-    const cx=cv.getContext('2d');cx.fillStyle='#fff';cx.fillRect(0,0,cv.width,cv.height);
-    try{await cnTO(pg.render({canvasContext:cx,viewport:vp}).promise);}catch(e){throw {code:'pic'};}
+    const cx=cv.getContext('2d',{willReadFrequently:true});
     let labels=[],imgs=[];
     try{const ol=await cnTO(pg.getOperatorList());imgs=cnPageImages(ol,o.lib.OPS,vp);}catch(e){}
+    /* a raster picture that is not drawn leaves its area plain: the page is drawn once more; still plain → the lesson is an error, no white picture goes to the account */
+    for(let k=0;;k++){
+      cx.fillStyle='#fff';cx.fillRect(0,0,cv.width,cv.height);
+      try{await cnTO(pg.render({canvasContext:cx,viewport:vp}).promise);}catch(e){throw {code:'pic'};}
+      if(window.__CN_BLANK){cx.fillStyle='#fff';imgs.forEach(g=>cx.fillRect(g.x0,g.y0,g.x1-g.x0,g.y1-g.y0));}
+      if(window.__CN_BLANK===2||!imgs.length||!cnBlankIn(cx,imgs))break;
+      if(k>=1)throw {code:'blank'};
+    }
     try{const tc=await cnTO(pg.getTextContent());labels=cnPageCands(tc.items,vp,imgs);}catch(e){}
+    /* the captions of an atlas are part of the picture, the text layer of the page does not have them: when the text gave a name to fewer than half of the structures, the drawn page is read like a photo */
+    if(terms&&terms.length&&cnBldMatch(terms,labels).size*2<terms.length){
+      cv.naturalWidth=cv.width;cv.naturalHeight=cv.height;
+      try{const r=await cnOcrLabels(cv,{stop:()=>b.cancel,step:()=>{}});labels=labels.concat(r.out);}catch(e){}
+    }
     const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.86));if(!blob)throw {code:'pic'};
     return {blob:blob,w:cv.width,h:cv.height,labels:labels,name:cnNameOf(m.name)+', '+T3('стр.','p.','lk')+' '+n,page:n};
   }finally{try{pg.cleanup();}catch(e){}}
+}
+/* every area of a picture on the page is (almost) one white colour */
+function cnBlankIn(cx,imgs){
+  const W=cx.canvas.width,H=cx.canvas.height;
+  return imgs.every(g=>{
+    const x0=Math.max(0,Math.floor(g.x0)),y0=Math.max(0,Math.floor(g.y0)),w=Math.min(W,Math.ceil(g.x1))-x0,h=Math.min(H,Math.ceil(g.y1))-y0;
+    if(w<4||h<4)return true;
+    const d=cx.getImageData(x0,y0,w,h).data;let n=0,mn=255,mx=0,sum=0;
+    for(let y=0;y<h;y+=Math.max(1,h>>5))for(let x=0;x<w;x+=Math.max(1,w>>5)){const i=(y*w+x)*4,v=(d[i]*77+d[i+1]*150+d[i+2]*29)>>8;n++;sum+=v;if(v<mn)mn=v;if(v>mx)mx=v;}
+    return n>0&&mx-mn<12&&sum/n>235;
+  });
 }
 /* структуры ↔ подписи: сначала целиком по cnNorm, потом по основам; каждая подпись — одной структуре */
 function cnBldMatch(terms,cands){
@@ -5397,7 +5490,7 @@ function cnLessonClean(raw,l){
 }
 const cnSrcShort=s=>{const a=String(s||'').split('~')[0].split('|');return (a[0]==='b'||a[0]==='q'||a[0]==='t')&&a[1]?a[1].slice(0,12):'';};
 /* ---- один урок ---- */
-function cnBldErrCode(e){const c=e&&e.code;return c==='orig'?'orig':c==='quota_or_state'?'space':c==='offline'?'net':c==='pic'||c==='too_large'||c==='unsupported_type'?'pic':c==='rate_limited'?'rate':'up';}
+function cnBldErrCode(e){const c=e&&e.code;return c==='orig'?'orig':c==='blank'?'blank':c==='quota_or_state'?'space':c==='offline'?'net':c==='pic'||c==='too_large'||c==='unsupported_type'?'pic':c==='rate_limited'?'rate':'up';}
 async function cnBldOne(d,b,it){
   const l=it.l,W=window.CORPUS_WEB,bl=d._plan.bld,key=d.id+'|'+(d._plan.at||0)+'|'+l.id;
   /* an error is recorded; a picture uploaded for the lesson is removed with it */
@@ -5406,7 +5499,7 @@ async function cnBldOne(d,b,it){
   if(!l.pic){b.dt.pic='';return fail('nopic');}
   const name0=cnPicName(d,l.pic);b.dt.pic=name0||'';cnBPaint();
   let pic,up=null;
-  try{pic=await cnBldPic(d,b,l.pic);}catch(e){if(b.cancel)return null;return fail(cnBldErrCode(e));}
+  try{pic=await cnBldPic(d,b,l.pic,l.terms);}catch(e){if(b.cancel)return null;return fail(cnBldErrCode(e));}
   if(b.cancel)return null;
   /* the id of the upload is written down at once: a pause, a refusal of the AI or a reload do not lose it; the same picture is not uploaded twice */
   const pv=bl.pa[l.id];
@@ -5434,13 +5527,13 @@ async function cnBldOne(d,b,it){
     const inp={title:l.title.slice(0,300),terms:l.terms.map(t=>({id:t.id,la:t.la,p:cnEffP(t)}))};
     let text=tx.text;inp.text=text;inp.exam=tx.exam;
     while(JSON.stringify(inp).length>CN_BLD.json&&text.length>500){text=text.slice(0,Math.floor(text.length*0.85));inp.text=text;}
-    try{ai=cnLessonClean(await W.courseAI.lesson(LANG,inp,{signal:b.ac.signal}),l);b.spent+=2;}
+    try{ai=cnLessonClean(await W.courseAI.lesson(LANG,inp,{signal:b.ac.signal}),l);cnSpend(d,b,2);}
     catch(e){
       const c=e&&e.code;
       if(c==='cancelled'||b.cancel)return null;
       if(c==='quota_exceeded'){b.err='quota';return {stop:'quota'};}
-      if(c==='invalid_json'||c==='empty_completion'){b.spent+=2;b.dt.aiErr=c;ai=null;}
-      else{if(c==='rate_limited'||c==='timeout')b.spent+=2;b.err=c||'ai';return {stop:'ai'};}
+      if(c==='invalid_json'||c==='empty_completion'){cnSpend(d,b,2);b.dt.aiErr=c;ai=null;}
+      else{if(c==='rate_limited'||c==='timeout')cnSpend(d,b,2);b.err=c||'ai';return {stop:'ai'};}
     }
   }
   if(b.cancel)return null;
@@ -5499,6 +5592,7 @@ function cnBldCommit(d,b,it,o){
 function cnBldTitle(){return T3('Сборка курса','Building the course','Kursuse koostamine');}
 function cnBldErrText(e,left){
   return ({orig:T3('Соберите на устройстве, где лежат файлы: оригинала рисунка здесь нет.','Build it on the device that holds the files: the original picture is not here.','Koosta seadmes, kus failid asuvad: pildi originaali siin pole.'),
+    blank:T3('Рисунок из PDF не отрисовался на этом устройстве. Соберите курс на компьютере или выберите фото атласа («Сменить» на шаге 2).','The picture from the PDF was not drawn on this device. Build the course on a computer or choose an atlas photo (“Change” on step 2).','PDF-i pilti ei joonistatud selles seadmes. Koosta kursus arvutis või vali atlase foto („Muuda“ 2. sammus).'),
     nopic:T3('Нет рисунка — выберите его на шаге 3 («Сменить»).','No picture: choose one on step 3 (“Change”).','Pilti pole – vali see 3. sammus („Muuda“).'),
     pic:T3('Не удалось подготовить рисунок.','Could not prepare the picture.','Pilti ei õnnestunud ette valmistada.'),
     space:T3('Место для фото закончилось — удалите ненужные фото.','No room left for photos: delete the ones you do not need.','Fotode koht sai otsa – kustuta mittevajalikud fotod.'),
@@ -5515,7 +5609,7 @@ function cnBldRows(d,b,l){
     dt.terms===undefined?'':T3('Структур: '+dt.terms+' · отрывков текста: '+dt.frag,'Structures: '+dt.terms+' · text passages: '+dt.frag,'Struktuure: '+dt.terms+' · tekstilõike: '+dt.frag),
     b.i===3&&!b.pause?T3('запрос ИИ','AI request','TI päring'):dt.aiErr?T3('ИИ не ответил — урок будет без текстов','the AI did not answer: the lesson gets no texts','TI ei vastanud – õppetunnil pole tekste'):'',
     b.i===4?T3('записываю урок','saving the lesson','salvestan õppetundi'):''];
-  return names.map((n,i)=>[n,det[i],i<b.i?'done':i===b.i?(b.state==='run'||b.state==='pausing'?'cur':'todo'):'todo']);
+  return names.slice(0,b.mode==='refresh'?2:5).map((n,i)=>[n,det[i],i<b.i?'done':i===b.i?(b.state==='run'||b.state==='pausing'?'cur':'todo'):'todo']);
 }
 const CN_BTH='<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>';
 const CN_BPG='<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h5"/></svg>';
@@ -5525,17 +5619,20 @@ function cnBldInner(d){
   const running=state==='run'||state==='pausing';
   const note=running?T3('Закроете вкладку — продолжим с этого урока. Готовые уроки уже можно учить.','If you close the tab, the build goes on from this lesson. Ready lessons can be studied already.','Kui sulged vahekaardi, jätkame sellest õppetunnist. Valmis õppetunde saab juba õppida.'):
     state==='done'?T3('Курс собран. Уроки можно учить.','The course is built. You can study the lessons.','Kursus on koostatud. Õppetunde saab õppida.'):T3('Сборка на паузе. Готовые уроки уже можно учить.','The build is paused. Ready lessons can be studied already.','Koostamine on pausil. Valmis õppetunde saab juba õppida.');
-  const spend=b?T3('Израсходовано '+b.spent+' из ≈ '+b.est+' запросов','Used '+b.spent+' of ≈ '+b.est+' requests','Kasutatud '+b.spent+' / ≈ '+b.est+' päringut')+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):''):'';
+  const bl0=d._plan.bld,sp0=b?b.spent:(bl0&&bl0.spent)||0,est0=b?b.est:sp0+cnBldEst(d);
+  const spend=b||sp0>0?T3('Израсходовано '+sp0+' из ≈ '+est0+' запросов','Used '+sp0+' of ≈ '+est0+' requests','Kasutatud '+sp0+' / ≈ '+est0+' päringut')+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):''):'';
   const nOf=T3('из '+total+' '+(total%10===1&&total%100!==11?'урока':'уроков')+' готово','of '+total+' '+(total===1?'lesson':'lessons')+' ready','/ '+total+' õppetundi valmis');
   let h='<div class="cnbsum"><div class="cnbn"><b>'+dn+'</b><span>'+esc(nOf)+'</span></div><span class="cnbbar"><i style="width:'+pct+'%"></i></span><div class="cnbnote">'+esc(note)+'</div>'+(spend?'<div class="cnbnote">'+esc(spend)+'</div>':'')+'</div>';
   if(state==='quota')h+='<div class="cnwarn cnerr" role="alert">'+esc(T3('Лимит ИИ для курсов исчерпан'+(left!=null?' — осталось запросов: '+left:'')+'. Готовые уроки сохранены; продолжите, когда лимит обновится.','The AI limit for courses is used up'+(left!=null?' — requests left: '+left:'')+'. Ready lessons are kept; continue when the limit is renewed.','Kursuste TI limiit on otsas'+(left!=null?' – päringuid jäänud: '+left:'')+'. Valmis õppetunnid on salvestatud; jätka, kui limiit uueneb.'))+'</div>';
+  if(dn&&!running)h+='<button class="cnlost" data-cn="refresh">'+T3('Обновить рисунки и рамки','Update the pictures and frames','Uuenda pildid ja raamid')+'</button>';
+  if(b&&b.mode==='refresh'&&running)h+='<div class="cnbnote" style="padding:0 4px">'+esc(T3('Обновляю рисунки: '+b.rf.k+' из '+b.rf.n,'Updating the pictures: '+b.rf.k+' of '+b.rf.n,'Uuendan pilte: '+b.rf.k+' / '+b.rf.n))+'</div>';
   if(state==='ai')h+='<div class="cnwarn cnerr" role="alert">'+esc(T3('ИИ сейчас недоступен — сборка на паузе. Проверьте соединение и нажмите «Продолжить»: готовые уроки и загруженные рисунки сохранены.','The AI is not available now, so the build is paused. Check the connection and press “Continue”: ready lessons and uploaded pictures are kept.','TI pole praegu saadaval, koostamine on pausil. Kontrolli ühendust ja vajuta „Jätka“: valmis õppetunnid ja üleslaaditud pildid säilivad.'))+'</div>';
   if(d._bldOther)h+='<div class="cnwarn cnerr" role="alert">'+esc(T3('Курс собирается на другом устройстве или вкладке. Подождите минуту или откройте его там.','The course is being built on another device or tab. Wait a minute or open it there.','Kursust koostatakse teises seadmes või vahekaardil. Oota minut või ava see seal.'))+'</div>';
   if(state==='store')h+='<div class="cnwarn cnerr" role="alert">'+esc(T3('Не удалось сохранить в облаке. Проверьте соединение и нажмите «Продолжить» — сделанное не пропадёт.','Could not save to the cloud. Check the connection and press “Continue”: what is done is kept.','Pilve salvestamine ebaõnnestus. Kontrolli ühendust ja vajuta „Jätka“ – tehtu säilib.'))+'</div>';
   const cur=running&&b&&b.cur?list.find(x=>x.l.id===b.cur):null;
   if(cur){
     const pn=b.dt.pic,isP=cur.l.pic&&cur.l.pic[0]==='g';
-    h+='<div class="cnbcur"><div class="cnbch"><span class="cnbth">'+(!cur.l.pic?'!':isP?CN_BPG:CN_BTH)+'</span><span class="cnbcm"><span class="cnbst">'+(state==='pausing'?T3('Заканчиваю урок','Finishing the lesson','Lõpetan õppetunni'):T3('Собираю','Building','Koostan'))+'</span><i class="cnlt" data-noi18n>'+esc(cur.l.title)+'</i><small data-noi18n>'+esc(pn?T3('Рисунок: ','Picture: ','Pilt: ')+pn:T3('Без рисунка','No picture','Pildita'))+'</small></span></div>'+
+    h+='<div class="cnbcur"><div class="cnbch"><span class="cnbth">'+(!cur.l.pic?'!':isP?CN_BPG:CN_BTH)+'</span><span class="cnbcm"><span class="cnbst">'+(state==='pausing'?T3('Заканчиваю урок','Finishing the lesson','Lõpetan õppetunni'):b&&b.mode==='refresh'?T3('Обновляю','Updating','Uuendan'):T3('Собираю','Building','Koostan'))+'</span><i class="cnlt" data-noi18n>'+esc(cur.l.title)+'</i><small data-noi18n>'+esc(pn?T3('Рисунок: ','Picture: ','Pilt: ')+pn:T3('Без рисунка','No picture','Pildita'))+'</small></span></div>'+
       '<div class="cnbrows">'+cnBldRows(d,b,cur.l).map(x=>'<div class="cnrow '+x[2]+'"><span class="cndot">'+(x[2]==='done'?CN_CHK:x[2]==='cur'?CN_SP14:'')+'</span><span class="cnrx"><b>'+esc(x[0])+'</b>'+(x[1]?'<small data-noi18n>'+esc(x[1])+'</small>':'')+'</span></div>').join('')+'</div></div>';
   }
   h+='<div class="cnh"><span>'+T3('Уроки','Lessons','Õppetunnid')+'</span><span></span></div>';
@@ -5591,7 +5688,8 @@ function cnMountBuild(d,root){
     if(a.dataset.cn==='close'){cnPlanFlush(d);go({name:'courses'});}
     else if(a.dataset.cn==='step'){cnPlanFlush(d);go(a.dataset.s==='1'?{name:'courseNew',did:d.id,step:3}:{name:'courseNew',did:d.id});}
     else if(a.dataset.cn==='pause'){const b=d._bld;if(b&&b.state==='run'){b.pause=true;b.pausedAt=Date.now();b.state='pausing';cnBPaint();}}
-    else if(a.dataset.cn==='resume')cnBldStart(d);
+    else if(a.dataset.cn==='refresh')cnBldRefreshStart(d);
+    else if(a.dataset.cn==='resume'){if(d._bld&&d._bld.mode==='refresh'&&d._bld.state==='pause')cnBldRefreshStart(d,true);else cnBldStart(d);}
     else if(a.dataset.cn==='lretry')cnBldStart(d,a.dataset.lid);
     else if(a.dataset.cn==='pload'&&!d._planLoad)cnPlanLoad(d);
     else if(a.dataset.cn==='learn'){const f=d.courseId&&folderById(d.courseId);go(f?{name:'courses',fid:f.id}:{name:'courses'});}
@@ -8243,10 +8341,11 @@ async function bootData(){
   if(S.db){
     try{
       const g=await Promise.all(['decks','plates','terms','stats','folders','packs','exams'].map(n=>S.db.collection(n).get().catch(e=>{if(n==='exams')return {docs:[]};throw e;})));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro','coursePrio','courseLast'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro','coursePrio','courseLast','create'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
         {const lc=META.courseLast;if(lc!==undefined&&!(lc&&typeof lc==='object'&&typeof lc.pid==='string'&&lc.pid.length<=100&&LSKEYS.indexOf(lc.step)>=0))delete META.courseLast;   // saved data is not trusted
         if(META.coursePrio!==undefined&&[1,2,3].indexOf(META.coursePrio)<0)delete META.coursePrio;}
         applyLook();}}catch(e){}
+      cnFlagApply();
       S.decks=g[0].docs.map(x=>Object.assign({},x.data(),{id:x.id,newToday:x.data()&&x.data().newToday?Object.assign({},x.data().newToday):undefined}));
       S.plates=g[1].docs.map(x=>Object.assign({},x.data(),{id:x.id}));
       S.cards=g[2].docs.map(x=>normCard(Object.assign({},x.data(),{id:x.id})));
@@ -8284,7 +8383,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnBldMatch=cnBldMatch;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnBldMatch=cnBldMatch;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;

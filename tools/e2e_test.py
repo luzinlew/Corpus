@@ -3482,6 +3482,127 @@ async def main():
             urllib.request.urlopen(API + '/__fn')
             await ctx_a.close()
 
+            # ---------- T-030: the flag in the account, a page of a PDF with a raster picture, captions inside the picture, the spend after a reload, «Update the pictures and frames» ----------
+            from PIL import Image, ImageDraw, ImageFont
+            im30 = Image.new('RGB', (900, 600), 'white')
+            g30 = ImageDraw.Draw(im30)
+            f30 = None
+            for fp_ in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'):
+                if pathlib.Path(fp_).exists():
+                    f30 = ImageFont.truetype(fp_, 30)
+                    break
+            f30 = f30 or ImageFont.load_default(size=30)
+            g30.ellipse((250, 60, 650, 540), fill=(150, 140, 120), outline=(60, 50, 40), width=4)   # the centre of the picture is dark: a white page is a failure
+            for i_, t_ in enumerate(('Spina scapulae', 'Margo medialis', 'Angulus inferior')):
+                g30.text((10 if i_ != 1 else 670, 90 + 150 * i_), t_, fill='black', font=f30)
+            im30.save(tmp / 'atlas-lk.pdf', 'PDF', resolution=72.0)   # a PDF whose page is one JPEG: the captions are part of the picture, the page has no text layer
+            pdf_b64 = base64.b64encode((tmp / 'atlas-lk.pdf').read_bytes()).decode()
+            urllib.request.urlopen(API + '/__fn')
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            ctx_f, pf, errs_f = await open_ctx()
+            await pf.goto(SITE + '?create=1&i=' + INVITE)
+            await pf.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pf.fill('input[name=email]', 'fix@test.ee')
+            await pf.fill('input[name=password]', 'kolju2026')
+            await pf.click('.cw-go')
+            await app_ready(pf)
+            await ui_lang(pf, 'et')
+            ai_f = watch_ai(pf)
+            uid_f = await pf.evaluate('CORPUS_WEB.uid')
+            minef = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_f]
+            objs_f = lambda: len([o for o in state()['objects'] if o['owner'] == uid_f])
+            st = await state_when(lambda s: any(r['id'] == 'settings' and r['data'].get('create') is True for r in minef(s, 'meta')))
+            check('flag: ?create=1 is written to the account (META.create, saved like the other settings)', any(r['id'] == 'settings' and r['data'].get('create') is True for r in minef(st, 'meta')))
+            ctx_f2, pf2, errs_f2 = await open_ctx()
+            await pf2.goto(SITE)
+            await pf2.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pf2.click('.cw-tabs [data-m=in]')
+            await pf2.fill('input[name=email]', 'fix@test.ee')
+            await pf2.fill('input[name=password]', 'kolju2026')
+            await pf2.click('.cw-go')
+            await app_ready(pf2)
+            await pf2.click('.tabbar [data-v=courses]')
+            await pf2.wait_for_selector('.crs')
+            check('flag: another browser of the same account (no flag in its localStorage) has «Uus kursus»', await pf2.query_selector('.cnnew') is not None and await pf2.evaluate("localStorage.getItem('corpus.create')") is None)
+            await ctx_f2.close()
+            # a draft and a plan made by hand: one PDF page with a picture, two lessons on it
+            did_f, mid_f = 'cdfix1', 'mfix1'
+            await pf.evaluate("""async([b64,did,mid])=>{
+              const bin=atob(b64),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+              await cnPut(cnKey(did,mid),new Blob([u],{type:'application/pdf'}));
+              const d={id:did,name:'Atlas',createdAt:Date.now(),updatedAt:Date.now(),gone:[],planAt:Date.now(),mats:[{id:mid,name:'Atlas lk.pdf',kind:'pdf',role:'extra',status:'ready',pages:1,size:u.length,bytes:0,chunks:[],gen:0,sigs:[]}]};
+              CDRAFTS.set(did,d);cnSave(d);
+              const T=(id,la,p)=>({id:id,la:la,p:p,src:'f'});
+              await cnWrite('cplan',did,{at:Date.now(),lang:'et',parts:[{id:'a1',name:'Atlas',lessons:[
+                {id:'l1',title:'Spina scapulae',pic:'g:'+mid+':1',off:false,terms:[T('t1','Spina scapulae',1),T('t2','Margo medialis',2),T('t3','Angulus inferior',3)]},
+                {id:'l2',title:'Angulus inferior',pic:'g:'+mid+':1',off:false,terms:[T('t4','Margo medialis',2),T('t5','Angulus inferior',3),T('t6','Spina scapulae',1)]}]}]});
+              go({name:'courseNew',did:did,step:3});}""", [pdf_b64, did_f, mid_f])
+            await pf.wait_for_selector('[data-cn=build]:not([disabled])', timeout=30000)
+            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=rej;i.src=u+'?'+Date.now();});
+              const cv=document.createElement('canvas');cv.width=im.naturalWidth;cv.height=im.naturalHeight;const cx=cv.getContext('2d');cx.drawImage(im,0,0);const w=cv.width,h=cv.height,d=cx.getImageData(Math.floor(w*.4),Math.floor(h*.4),Math.floor(w*.2),Math.floor(h*.2)).data;
+              let s=0;for(let i=0;i<d.length;i+=4)s+=d[i]+d[i+1]+d[i+2];return s/(d.length/4*3);}""", pid)
+            pid_t = lambda t_: pf.evaluate("t=>(S.plates.find(p=>p.title===t)||{}).id", t_)
+            frames_t = lambda t_: pf.evaluate("t=>{const p=S.plates.find(x=>x.title===t);return cardsOfPlate(p.id).map(c=>[c.term,c.x,c.y,c.w,c.h,!!c.noframe]).sort()}", t_)
+            # 1) a page whose pictures are not drawn (WebKit): an error of the lesson, nothing uploaded, no request to the AI
+            await pf.evaluate("window.__CN_BLANK=1")
+            await pf.click('[data-cn=build]')
+            await pf.wait_for_function("view.step===4&&CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            await pf.wait_for_timeout(300)
+            rows = await pf.evaluate("[...document.querySelectorAll('.cnbl')].map(r=>r.innerText.replace(/\\n+/g,' | '))")
+            check('blank page: the picture of the PDF is not drawn on this device → both lessons are errors «PDF-i pilti ei joonistatud selles seadmes …»; nothing is uploaded, no request to the AI',
+                  len(rows) == 2 and all('PDF-i pilti ei joonistatud selles seadmes' in r and 'Viga' in r for r in rows) and objs_f() == 0 and len(lessons_of(ai_f)) == 0, json.dumps(rows, ensure_ascii=False))
+            # 2) a white picture is built when the check is off (the test switch 2), for the update below
+            await pf.evaluate("window.__CN_BLANK=2")
+            await pf.click('.cnbl:has(.cnlt:text-is("Angulus inferior")) [data-cn=lretry]')
+            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'&&document.querySelectorAll('.cnbl .cnbp.ok, .cnbl .cnbp.chk').length===1", timeout=90000)
+            pw = await pid_t('Angulus inferior')
+            wb = await bright(pw)
+            wf = await frames_t('Angulus inferior')
+            check('update: a lesson built with a white page has a white picture (brightness of the centre ≥ 250) and three cards waiting for frames', wb >= 250 and len(wf) == 3 and all(f[5] for f in wf), json.dumps([wb, wf]))
+            # 3) the page is drawn; the captions are in the picture (no text layer) → found by the text recognition on the drawn page
+            await pf.evaluate("window.__CN_BLANK=0")
+            await pf.click('[data-cn=resume]')
+            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            await pf.wait_for_timeout(500)
+            p1 = await pid_t('Spina scapulae')
+            b1 = await bright(p1)
+            f1 = await frames_t('Spina scapulae')
+            check('pdf page: the picture is drawn (brightness of the centre < 240), 1131-pixel class size is not needed: it is a real picture; the captions inside it are recognised on the drawn page → 3 cards with frames (none waiting)',
+                  b1 < 240 and len(f1) == 3 and all((not f[5]) and f[3] > 3 and f[4] > 1 for f in f1) and sorted(f[0] for f in f1) == ['Angulus inferior', 'Margo medialis', 'Spina scapulae'], json.dumps([b1, f1]))
+            check('pdf page: …the AI wrote the lesson texts once for each lesson (2 requests), the pictures are in Storage (2)', len(lessons_of(ai_f)) == 2 and objs_f() == 2, json.dumps([len(lessons_of(ai_f)), objs_f()]))
+            # 4) the update: the white picture is replaced, the frames appear, the frames that stand are not touched, no AI, the old picture is deleted
+            before1 = await frames_t('Spina scapulae')
+            note0 = await pf.evaluate("t=>cardsOfPlate(S.plates.find(p=>p.title===t).id).map(c=>c.note).sort()", 'Angulus inferior')
+            intro0 = await pf.evaluate("t=>S.plates.find(p=>p.title===t).intro", 'Angulus inferior')
+            asset0 = await pf.evaluate("t=>S.plates.find(p=>p.title===t).assetId", 'Angulus inferior')
+            n_ai = len(ai_f)
+            await pf.click('[data-cn=refresh]')
+            await pf.wait_for_selector('#layer .dlg')
+            dlg30 = await pf.inner_text('#layer .dlg')
+            await pf.click('#layer [data-s="1"]')
+            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.mode==='refresh'&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            await pf.wait_for_timeout(500)
+            wb2 = await bright(pw)
+            wf2 = await frames_t('Angulus inferior')
+            st = await state_when(lambda s: objs_f() == 2)
+            asset1 = await pf.evaluate("t=>S.plates.find(p=>p.title===t).assetId", 'Angulus inferior')
+            check('update: the dialog says what happens («Kas uuendada pildid ja raamid?», the AI is not used)', 'Kas uuendada pildid ja raamid?' in dlg30 and 'TI-d ei kasutata' in dlg30, dlg30)
+            check('update: the white picture is replaced (centre < 240; another file, the old one is deleted: still 2 in Storage), the cards got frames and lost the mark, the texts are the same, 0 requests to the AI',
+                  wb2 < 240 and asset1 != asset0 and objs_f() == 2 and len(wf2) == 3 and all((not f[5]) and f[3] > 3 for f in wf2) and len(ai_f) == n_ai
+                  and await pf.evaluate("t=>cardsOfPlate(S.plates.find(p=>p.title===t).id).map(c=>c.note).sort()", 'Angulus inferior') == note0 and await pf.evaluate("t=>S.plates.find(p=>p.title===t).intro", 'Angulus inferior') == intro0, json.dumps([wb2, wf2]))
+            check('update: the frames that already stood (the lesson «Spina scapulae») are not touched', await frames_t('Spina scapulae') == before1, json.dumps([before1, await frames_t('Spina scapulae')]))
+            # 5) the spend is kept in the plan: after a reload it is shown
+            await pf.reload()
+            await app_ready(pf)
+            await pf.click('.tabbar [data-v=courses]')
+            await pf.wait_for_selector('.crs .cnd')
+            await pf.click('.cnd .cndgo')
+            await pf.wait_for_selector('.cnbl', timeout=30000)
+            sp30 = await pf.evaluate("[...document.querySelectorAll('.cnbnote')].map(e=>e.innerText).join(' | ')")
+            check('spend: after a reload step 4 shows «Kasutatud 4 / ≈ 4 päringut» (kept in cplan.bld.spent)', 'Kasutatud 4 / ≈ 4 päringut' in sp30 and any(r['data']['bld'].get('spent') == 4 for r in minef(state(), 'cplan')), sp30)
+            check('T-030: no script errors or failed requests in the browser', not errs_f and not errs_f2, '; '.join(errs_f + errs_f2)[:500])
+            await ctx_f.close()
+
             # --- the function directly: forms of the requests, no payment for a refused one, the prompt and the model are the function\'s own ---
             tokp = signup_token('planfn@test.ee')
             urllib.request.urlopen(API + '/__course?free=200&limit=')

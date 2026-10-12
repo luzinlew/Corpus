@@ -14,13 +14,17 @@ const docs = new Map();       // owner|coll|id -> row
 const objects = new Map();    // name -> {owner,type,buf}
 const shares = new Map();     // owner|src -> row (public.shares)
 const aiUsed = new Map();     // uid|day -> units used today (public.ai_usage)
-const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
+const AI_LIMIT0 = +(process.env.FAKE_AI_LIMIT || 5);
+let AI_LIMIT = AI_LIMIT0;     // the daily limit of everybody (?limit=N of /__course changes it for a while, ?limit= puts it back)
 /* the course allowance (public.ai_course, corpus_ai_take_course of supabase/ai.sql): per person, spent before the daily one; the setting ai_course_free (default 4 here, 300 in the SQL),
-   granted is not modelled (raise `free` through /__course instead), the site-wide cap per day is ai_course_global_daily. Both can be changed through /__course */
+   granted is not modelled (raise `free` through /__course instead), the site-wide cap per day is ai_course_global_daily (default 1000 as in the SQL). Both can be changed through /__course.
+   A person with ai_plans.daily_limit = 0 ("AI is off"; /__course?off=<email>) has a daily limit of 0 and the course pool does not pay for them */
 let COURSE_FREE = process.env.FAKE_AI_COURSE_FREE !== undefined && process.env.FAKE_AI_COURSE_FREE !== '' ? +process.env.FAKE_AI_COURSE_FREE : 4;
-let COURSE_GLOBAL = process.env.FAKE_AI_COURSE_GLOBAL !== undefined && process.env.FAKE_AI_COURSE_GLOBAL !== '' ? +process.env.FAKE_AI_COURSE_GLOBAL : 3000;
+let COURSE_GLOBAL = process.env.FAKE_AI_COURSE_GLOBAL !== undefined && process.env.FAKE_AI_COURSE_GLOBAL !== '' ? +process.env.FAKE_AI_COURSE_GLOBAL : 1000;
 const courseUsed = new Map();   // uid -> course requests used (public.ai_course.used)
 const courseDay = new Map();    // day -> course requests of the whole site (private.ai_course_global)
+const AI_OFF = new Set();       // uids of people with ai_plans.daily_limit = 0
+const limOf = (uid) => AI_OFF.has(uid) ? 0 : AI_LIMIT;
 let LAST_TR = null;             // the last lesson translation the fake Claude received: {model, max_tokens, system, turns, said}
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
 const FN_URL0 = FN_URL;
@@ -28,7 +32,7 @@ let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429 */
 let FN_DROP = false, FN_TRUNC = false, FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
-let FN_NOCOURSE = false;   // nocourse=1: the database has no corpus_ai_take_course yet (supabase/ai.sql not run): PostgREST answers PGRST202
+let FN_NOCOURSE = '';   // nocourse=1: the database has no corpus_ai_take_course yet (supabase/ai.sql not run): PostgREST answers PGRST202; nocourse=err: the function fails (500) and has taken nothing
 const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
 const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const activity = new Map();   // uid -> Map(day -> {opens, last})
@@ -139,17 +143,19 @@ http.createServer(async (req, res) => {
     for (const k of Object.keys(Q)) if (u.searchParams.has(k)) Q[k] = +u.searchParams.get(k);
     send(res, 200, Q); return;
   }
-  if (p === '/__course') {   // ?free=N: the course allowance per person; ?global=N: the site-wide course cap per day; answers both and what was used
+  if (p === '/__course') {   // ?free=N: the course allowance per person; ?global=N: the site-wide course cap per day; ?off=<email>: daily_limit 0 for that person (?off= alone: for nobody); ?limit=N: the daily limit of everybody (?limit= alone: back to FAKE_AI_LIMIT); answers all that and what was used
     if (u.searchParams.has('free')) COURSE_FREE = +u.searchParams.get('free');
     if (u.searchParams.has('global')) COURSE_GLOBAL = +u.searchParams.get('global');
-    send(res, 200, { free: COURSE_FREE, global: COURSE_GLOBAL, used: Object.fromEntries(courseUsed), day: Object.fromEntries(courseDay) }); return;
+    if (u.searchParams.has('limit')) AI_LIMIT = u.searchParams.get('limit') === '' ? AI_LIMIT0 : +u.searchParams.get('limit');
+    if (u.searchParams.has('off')) { AI_OFF.clear(); const o = users.get(u.searchParams.get('off').toLowerCase()); if (o) AI_OFF.add(o.id); }
+    send(res, 200, { free: COURSE_FREE, global: COURSE_GLOBAL, limit: AI_LIMIT, off: Array.from(AI_OFF), used: Object.fromEntries(courseUsed), day: Object.fromEntries(courseDay) }); return;
   }
   if (p === '/__lasttr') { send(res, 200, LAST_TR || {}); return; }   // the last translation request that reached the fake Claude
   if (p === '/__fn') {
     FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0;
     FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = u.searchParams.get('trunc') === '1'; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
-    FN_NOCOURSE = u.searchParams.get('nocourse') === '1';
+    FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
     send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE }); return;
   }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen)
 
@@ -271,25 +277,26 @@ http.createServer(async (req, res) => {
     const n = body && body.p_units;
     if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
     const k = uid + '|' + new Date().toISOString().slice(0, 10), used = aiUsed.get(k) || 0;
-    if (used + n > AI_LIMIT) { send(res, 200, { ok: false, plan: 'free', limit: AI_LIMIT, used }); return; }
-    aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: AI_LIMIT, used: used + n }); return;
+    if (used + n > limOf(uid)) { send(res, 200, { ok: false, plan: 'free', limit: limOf(uid), used }); return; }
+    aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: limOf(uid), used: used + n }); return;
   }
 
   /* ---------- rpc: corpus_ai_take_course (course allowance first, then the daily one; as in supabase/ai.sql) ---------- */
   if (p === '/rest/v1/rpc/corpus_ai_take_course' && req.method === 'POST') {
+    if (FN_NOCOURSE === 'err') { send(res, 500, { code: 'XX000', details: null, hint: null, message: 'internal error in corpus_ai_take_course (test)' }); return; }
     if (FN_NOCOURSE) { send(res, 404, { code: 'PGRST202', details: 'Searched for the function public.corpus_ai_take_course with parameter p_units or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.', hint: null, message: 'Could not find the function public.corpus_ai_take_course(p_units) in the schema cache' }); return; }
     const uid = uidOf(req);
     if (!uid) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_ai_take_course' }); return; }
     const n = body && body.p_units;
     if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
     const day = new Date().toISOString().slice(0, 10), k = uid + '|' + day, cu = courseUsed.get(uid) || 0, left = Math.max(COURSE_FREE - cu, 0);
-    const daily = () => ({ plan: 'free', limit: AI_LIMIT, used: aiUsed.get(k) || 0 });
+    const daily = () => ({ plan: 'free', limit: limOf(uid), used: aiUsed.get(k) || 0 });
     if (n === 0) { send(res, 200, { ok: true, ...daily(), pool: null, course_left: left, course_free: COURSE_FREE }); return; }
-    if (left >= n && (courseDay.get(day) || 0) + n <= COURSE_GLOBAL) {
+    if (left >= n && !AI_OFF.has(uid) && (courseDay.get(day) || 0) + n <= COURSE_GLOBAL) {
       courseUsed.set(uid, cu + n); courseDay.set(day, (courseDay.get(day) || 0) + n);
       send(res, 200, { ok: true, ...daily(), pool: 'course', course_left: left - n, course_free: COURSE_FREE }); return;
     }
-    const used = aiUsed.get(k) || 0, fits = used + n <= AI_LIMIT;
+    const used = aiUsed.get(k) || 0, fits = used + n <= limOf(uid);
     if (fits) aiUsed.set(k, used + n);
     send(res, 200, { ok: fits, ...daily(), pool: 'daily', course_left: left, course_free: COURSE_FREE }); return;
   }

@@ -110,17 +110,22 @@ grant execute on function public.corpus_ai_take(integer) to authenticated;
 -- course cap for the day is), the request is taken from the daily allowance above, exactly like any other AI request.
 --
 -- Change the allowance of everyone (default 300 requests):   update private.settings set value = '500' where key = 'ai_course_free';
--- Site-wide cap of course requests per day (all people together, default 3000):
---                                                            update private.settings set value = '1000' where key = 'ai_course_global_daily';
+-- Site-wide cap of course requests per day (all people together, default 1000):
+--                                                            update private.settings set value = '2000' where key = 'ai_course_global_daily';
 -- Give one person more (granted requests come on top of the common allowance; the row is made if the person has none yet):
 --   insert into public.ai_course (user_id, granted) select id, 500 from auth.users where email = 'friend@example.com'
 --   on conflict (user_id) do update set granted = excluded.granted;
 -- Look at it:  select u.email, c.used, c.granted from public.ai_course c join auth.users u on u.id = c.user_id order by c.used desc;
+-- The site as a whole, per day (Tallinn time):  select day, used from private.ai_course_global order by day desc limit 14;
+-- Stop everything at once: set both ai_course_global_daily and ai_global_daily to '0' (the course pool and the daily pool then pay nothing).
+-- Stop one person: public.ai_plans.daily_limit = 0 for them ("AI is off"): the course pool does not pay for them either, and
+-- corpus_ai_take refuses (a bonus balance, if they have one, would still be spent there).
 -- Take it all away again: supabase/ai_course_rollback.sql.
--- A value in private.settings that is not a plain number is ignored and the default is used.
+-- A value in private.settings that is not a plain number is ignored and the default is used. This holds only for these two
+-- new settings (ai_course_free, ai_course_global_daily); ai_free_daily and ai_global_daily are read as before.
 insert into private.settings (key, value) values ('ai_course_free', '300')
 on conflict (key) do nothing;
-insert into private.settings (key, value) values ('ai_course_global_daily', '3000')
+insert into private.settings (key, value) values ('ai_course_global_daily', '1000')
 on conflict (key) do nothing;
 
 -- Per person: course requests used so far, and requests granted on top of the common allowance.
@@ -134,6 +139,8 @@ alter table public.ai_course enable row level security;
 drop policy if exists "read own course allowance" on public.ai_course;
 create policy "read own course allowance" on public.ai_course for select to authenticated
   using (user_id = (select auth.uid()));
+-- Supabase gives anon and authenticated every right on new tables in public by default: take it all away, then give back only reading.
+revoke all on public.ai_course from anon, authenticated;
 grant select on public.ai_course to authenticated;
 
 -- Course requests of the whole site per day (Tallinn time), counted against ai_course_global_daily.
@@ -146,13 +153,16 @@ create table if not exists private.ai_course_global (
 -- Answer: everything corpus_ai_take answers (plan, limit, used, bonus), plus pool ('course' or 'daily'; null for a report),
 -- course_left and course_free. If the course allowance cannot pay (used up, or the site-wide course cap of the day is reached),
 -- the units are taken from the daily allowance by corpus_ai_take (pool 'daily'; ok = false when that is used up too).
--- Like corpus_ai_take, it never gives units back to the caller, so calling it directly can only use up one's own allowance.
+-- It never gives units back to the caller. A signed-in person who calls it directly (corpus_ai_take_course(20)) can burn their own
+-- course allowance and also the site-wide course count of the day; after that the course requests of everybody are paid from the
+-- daily pool. That costs no money: nothing is sent to the model.
+-- A person whose public.ai_plans.daily_limit is 0 ("AI is off") is not paid from the course pool: the request goes to corpus_ai_take, which refuses it.
 create or replace function public.corpus_ai_take_course(p_units integer default 1) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   uid uuid := auth.uid();
   d date := (now() at time zone 'Europe/Tallinn')::date;
-  cu integer; gr integer; base integer; total integer; remain integer; gl integer; gcur integer; r jsonb;
+  cu integer; gr integer; base integer; total integer; remain integer; gl integer; gcur integer; dl integer; r jsonb;
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '28000'; end if;
   if p_units is null or p_units < 0 or p_units > 20 then raise exception 'bad_units' using errcode = '22023'; end if;
@@ -165,16 +175,20 @@ begin
     return public.corpus_ai_take(0) || jsonb_build_object('pool', null, 'course_left', remain, 'course_free', total);
   end if;
   if remain >= p_units then
-    -- the site-wide course cap of the day: if it is reached, the course allowance is not touched and the daily one pays
-    select case when btrim(value) ~ '^[0-9]{1,9}$' then btrim(value)::integer end into gl from private.settings where key = 'ai_course_global_daily';
-    gl := coalesce(gl, 3000);
-    insert into private.ai_course_global (day, used) values (d, 0) on conflict (day) do nothing;
-    update private.ai_course_global set used = used + p_units
-     where day = d and used + p_units <= gl
-    returning used into gcur;
-    if gcur is not null then
-      update public.ai_course set used = cu + p_units where user_id = uid;
-      return public.corpus_ai_take(0) || jsonb_build_object('ok', true, 'pool', 'course', 'course_left', remain - p_units, 'course_free', total);
+    -- "AI is off" for this person (ai_plans.daily_limit = 0): the course pool does not pay either, corpus_ai_take below refuses
+    select daily_limit into dl from public.ai_plans where user_id = uid;
+    if dl is distinct from 0 then
+      -- the site-wide course cap of the day: if it is reached, the course allowance is not touched and the daily one pays
+      select case when btrim(value) ~ '^[0-9]{1,9}$' then btrim(value)::integer end into gl from private.settings where key = 'ai_course_global_daily';
+      gl := coalesce(gl, 1000);
+      insert into private.ai_course_global (day, used) values (d, 0) on conflict (day) do nothing;
+      update private.ai_course_global set used = used + p_units
+       where day = d and used + p_units <= gl
+      returning used into gcur;
+      if gcur is not null then
+        update public.ai_course set used = cu + p_units where user_id = uid;
+        return public.corpus_ai_take(0) || jsonb_build_object('ok', true, 'pool', 'course', 'course_left', remain - p_units, 'course_free', total);
+      end if;
     end if;
   end if;
   r := public.corpus_ai_take(p_units);

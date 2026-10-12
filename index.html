@@ -3969,12 +3969,12 @@ function crTranslate(p,dst,opt){
   CR_TRQ.set(k,pr);return pr;
 }
 /* on the course home: the lesson of «Continue» is translated quietly, so it opens in the reader's language. Only a lesson that goes in one request, not for a guest,
-   not after a failed try, and while the AI has at least three requests left (the course allowance and today's together, when that is known) */
+   not after a failed try, and while the AI has at least three requests left (the course allowance and today's together, when that is known; the course allowance does not count when the last answer says the daily pool paid: it is not paying then) */
 function crTrBackground(p){
   if(!S.sample||crGuest()||!crNeedTr(p)||CR_TRQ.has(p.id+'>'+LANG)||crTrFailed(p))return;
   if(crTrChunks(crTrParts(p)).length!==1)return;
   const W=window.CORPUS_WEB,a=W&&W.ai,c=W&&W.aiCourse;
-  if(a&&Number.isFinite(a.limit)&&(c&&Number.isFinite(c.left)?c.left:0)+a.limit-(a.used||0)<3)return;
+  if(a&&Number.isFinite(a.limit)&&(c&&c.pool!=='daily'&&Number.isFinite(c.left)?c.left:0)+a.limit-(a.used||0)<3)return;
   crTranslate(p,LANG,{auto:true}).catch(()=>{});
 }
 function crFolders(){return S.folders.filter(f=>decksInFolder(f.id).some(d=>platesOf(d.id).some(hasLesson))).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));}

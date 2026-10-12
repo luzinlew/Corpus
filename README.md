@@ -95,7 +95,7 @@ select u.email, count(*) devices from public.docs d join auth.users u on u.id = 
 3. Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-ai`, код из `supabase/functions/corpus-ai/index.ts`.
 4. Supabase → SQL Editor: выполнить `supabase/ai.sql`.
 
-Сайт сам заметит функцию и включит ИИ. Модели можно сменить секретами `CORPUS_AI_MODEL` (текст), `CORPUS_AI_VISION_MODEL` (фото) и `CORPUS_AI_COURSE_MODEL` (перевод курса; по умолчанию как `CORPUS_AI_MODEL`).
+Сайт сам заметит функцию и включит ИИ. Модели можно сменить секретами `CORPUS_AI_MODEL` (текст), `CORPUS_AI_VISION_MODEL` (фото) и `CORPUS_AI_COURSE_MODEL` (перевод курса; по умолчанию как `CORPUS_AI_MODEL`). Для `CORPUS_AI_COURSE_MODEL` годятся только `claude-haiku-5*` (функция выключает раздумья как `disabled`) и `claude-sonnet-5-5` (`between_tools`): у других моделей раздумья не выключаются и могут съесть весь ответ.
 
 ```sql
 -- бесплатный дневной лимит для всех
@@ -113,14 +113,14 @@ select u.email, a.day, a.used from public.ai_usage a join auth.users u on u.id =
 
 ### Курсовой лимит («один курс бесплатно»)
 
-Работы с курсами (пока это перевод урока, дальше сборка курса) идут из отдельного лимита на человека, не на день: по умолчанию 300 запросов (`ai_course_free`). Когда он кончился (или упёрся общий курсовой потолок сайта на день, `ai_course_global_daily`, по умолчанию 3000), запрос списывается из дневного лимита, как любой другой. Если кончились оба, функция отвечает `429 quota_exceeded`, и урок идёт на своём языке с тихой строкой «Перевод недоступен». Курсовой остаток показан в настройках, строкой под дневным: «ИИ для курсов: осталось N из M».
+Работы с курсами (пока это перевод урока, дальше сборка курса) идут из отдельного лимита на человека, не на день: по умолчанию 300 запросов (`ai_course_free`). Когда он кончился (или упёрся общий курсовой потолок сайта на день, `ai_course_global_daily`, по умолчанию 1000), запрос списывается из дневного лимита, как любой другой. Если кончились оба, функция отвечает `429 quota_exceeded`, и урок идёт на своём языке с тихой строкой «Перевод недоступен». Курсовой остаток показан в настройках, строкой под дневным: «ИИ для курсов: осталось N из M».
 
 Цифры не лежат в приложении: форму запроса, промпт и модель курсового запроса задаёт функция, а списание делает `public.corpus_ai_take_course` (security definer, только для вошедших). Человек видит свою строку в `public.ai_course`, но менять её не может.
 
 ```sql
 -- сколько запросов на курсы у каждого и сколько на сайт в день
 update private.settings set value = '500' where key = 'ai_course_free';
-update private.settings set value = '1000' where key = 'ai_course_global_daily';
+update private.settings set value = '2000' where key = 'ai_course_global_daily';
 
 -- дать одному человеку больше (granted прибавляется к общему лимиту; строка создаётся, если её ещё нет)
 insert into public.ai_course (user_id, granted) select id, 500 from auth.users where email = 'friend@example.com'
@@ -128,6 +128,15 @@ on conflict (user_id) do update set granted = excluded.granted;
 
 -- кто сколько потратил на курсы
 select u.email, c.used, c.granted from public.ai_course c join auth.users u on u.id = c.user_id order by c.used desc;
+
+-- сколько курсовых запросов сделал весь сайт по дням
+select day, used from private.ai_course_global order by day desc limit 14;
+
+-- остановить всё сразу: оба общих потолка в ноль
+update private.settings set value = '0' where key in ('ai_course_global_daily', 'ai_global_daily');
+-- остановить одного человека (курсовой лимит ему тоже не платит): daily_limit = 0 в public.ai_plans
+insert into public.ai_plans (user_id, plan, daily_limit) select id, 'off', 0 from auth.users where email = 'friend@example.com'
+on conflict (user_id) do update set daily_limit = 0;
 ```
 
 Порядок выкладки: сначала SQL (`supabase/ai.sql` целиком, безопасно повторять), потом функция `corpus-ai` (код из `supabase/functions/corpus-ai/index.ts`), потом сайт. Каждый шаг совместим с предыдущим состоянием: функция без SQL списывает курсовой запрос из дневного лимита (`corpus_ai_take`), старая функция с новым сайтом отвечает `invalid_input`, и приложение один раз переходит на обычный запрос; старый сайт работает с новой функцией как раньше. Откат SQL: `supabase/ai_course_rollback.sql`.

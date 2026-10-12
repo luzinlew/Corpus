@@ -86,14 +86,22 @@ def state():
     return json.loads(urllib.request.urlopen(API + '/__state').read())
 
 
+def signup_token(email, password='kolju2026'):
+    """Another account made through the API (no browser): its access token."""
+    req = urllib.request.Request(API + '/auth/v1/signup', json.dumps({'email': email, 'password': password, 'data': {'invite': INVITE}}).encode(), {'Content-Type': 'application/json'})
+    return json.loads(urllib.request.urlopen(req).read())['access_token']
+
+
 def fn_call(token, method='POST', body=None, demo=False):
-    """A request straight to the corpus-ai function (not through the page): (status, JSON). token None = no sign-in."""
+    """A request straight to the corpus-ai function (not through the page): (status, JSON). token None = no sign-in.
+    A body that is a str goes out as it is (to send what a JS object cannot hold, such as the key __proto__)."""
     h = {'Content-Type': 'application/json', 'apikey': 'test-publishable-key'}
     if token:
         h['Authorization'] = 'Bearer ' + token
     if demo:
         h['x-corpus-demo'] = '1'
-    req = urllib.request.Request(f'http://localhost:{FN_PORT}', json.dumps(body).encode() if body is not None else None, h, method=method)
+    data = body.encode() if isinstance(body, str) else json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f'http://localhost:{FN_PORT}', data, h, method=method)
     try:
         r = urllib.request.urlopen(req)
         return r.status, json.loads(r.read())
@@ -1776,7 +1784,7 @@ async def main():
             # ---------- the course allowance: a translation is paid from it first, then from the daily one; the function checks the form of the request ----------
             # (a new account with 3 course requests and the daily allowance of 6; the order below spends them one after another)
             urllib.request.urlopen(API + '/__fn')
-            urllib.request.urlopen(API + '/__course?free=3&global=3000')
+            urllib.request.urlopen(API + '/__course?free=3&global=1000')
             ctx, pg, errs = await open_ctx()
             await pg.goto(SITE + '?i=' + INVITE)
             await pg.wait_for_selector('.cw-auth .cw-tabs .on')
@@ -1819,13 +1827,19 @@ async def main():
                 'more than 20 intro lines': with_input(intro=['a'] * 21), 'more than 200 questions': with_input(q=['a'] * 201), 'intro that is no list': with_input(intro='x'),
                 'terms that are a list': with_input(terms=['a']), 'a note that is no string': with_input(notes={'n0': 5}), 'a key over 40 characters': with_input(terms={'k' * 41: 'x'}),
                 'more than 1000 notes': with_input(notes={f'n{i}': 'a' for i in range(1001)}),
+                'purpose null': shape(purpose=None), 'a list inside the list of questions': with_input(q=[['a']]), 'an object instead of a note': with_input(notes={'n0': {'x': 'y'}}),
+                'a list instead of the title': with_input(title=['a']), 'a number instead of a language': shape(dst=5),
+                # the sum of the string lengths is small, but as JSON (every quote is escaped, plus keys and brackets) it is over 9000
+                'JSON over 9000 characters with strings of 6000': with_input(intro=['"' * 2000] * 3),
+                'JSON over 9000 characters because of the quotes and keys of 1000 short notes': with_input(notes={f'n{i:03d}': 'a' for i in range(1000)}),
+                'only empty strings': shape(input={'title': '', 'intro': ['']}),
             }
             lt_before = json.loads(urllib.request.urlopen(API + '/__lasttr').read())
             wrong = {}
             for name, bad_body in bad.items():
                 status, j = fn_call(tok, 'POST', bad_body)
                 if not (status == 400 and j.get('code') == 'invalid_input' and str(j.get('message', '')).startswith('translate:')):
-                    wrong[name] = [code, j]
+                    wrong[name] = [status, j]
             check('wrong forms of a translate request (%d kinds) → 400 invalid_input with «translate: …»' % len(bad), not wrong, json.dumps(wrong, ensure_ascii=False)[:300])
             status, j = fn_call(tok, 'GET')
             check('…none of them was counted or sent to the model: daily 0 of 6, course 3 of 3, the fake Claude saw nothing new',
@@ -1839,7 +1853,96 @@ async def main():
             lt = json.loads(urllib.request.urlopen(API + '/__lasttr').read())
             check('a good request: answered from the course allowance (pool course, 2 left of 3), the daily one untouched; the model, size, system text and prompt are the function\'s own',
                   status == 200 and j['course'] == {'left': 2, 'free': 3, 'pool': 'course'} and j['used'] == 0 and j['limit'] == AI_LIMIT and j['truncated'] is False and json.loads(j['text'])['title'] == '[et] Лобная кость'
-                  and lt['model'] == 'claude-haiku-5-5' and lt['max_tokens'] == 4096 and lt['turns'] == 1 and 'EVIL' not in lt['said'] and lt['system'].startswith('Your reply is read by a program'), json.dumps([code, j], ensure_ascii=False)[:300])
+                  and lt['model'] == 'claude-haiku-5-5' and lt['max_tokens'] == 4096 and lt['turns'] == 1 and 'EVIL' not in lt['said'] and lt['system'].startswith('Your reply is read by a program'), json.dumps([status, j], ensure_ascii=False)[:300])
+
+            # ---- what needs requests of its own is done by a second account (the numbers of the first one are counted precisely below); 20 course requests for it ----
+            tok2 = signup_token('aux@test.ee')
+            urllib.request.urlopen(API + '/__course?free=20')
+            lasttr = lambda: json.loads(urllib.request.urlopen(API + '/__lasttr').read())
+            course_state = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())
+
+            # the prompt of the function is the app's prompt (crTrPrompt) in all six directions
+            off_dirs = {}
+            for a_l in ('ru', 'en', 'et'):
+                for b_l in ('ru', 'en', 'et'):
+                    if a_l == b_l:
+                        continue
+                    status, j = fn_call(tok2, 'POST', shape(src=a_l, dst=b_l))
+                    mine = await pg.evaluate("([a,b,i])=>crTrPrompt(a,b,i)", [a_l, b_l, good])
+                    lt = lasttr()
+                    if not (status == 200 and lt['said'] == mine and lt['said'].startswith(f'CORPUS-TRANSLATE {a_l}>{b_l}\n') and json.loads(j['text'])['title'] == f'[{b_l}] Лобная кость'):
+                        off_dirs[f'{a_l}>{b_l}'] = [status, lt.get('said', '')[:90], mine[:90]]
+            check('the function\'s prompt is the app\'s crTrPrompt, character for character, in all six directions (ru>en, ru>et, en>ru, en>et, et>ru, et>en)', not off_dirs, json.dumps(off_dirs, ensure_ascii=False)[:400])
+
+            # the size limit is the JSON as the model gets it: exactly 9000 characters is fine, one more is not
+            def json_len(o):
+                return len(json.dumps(o, ensure_ascii=False, separators=(',', ':')))
+
+            def intro_of_json_len(n):
+                base = {'intro': ['a' * 4000, 'a' * 4000, '']}
+                k = n - json_len(base)
+                assert 0 < k <= 4000, k
+                return {'intro': ['a' * 4000, 'a' * 4000, 'a' * k]}
+            exact, over = intro_of_json_len(9000), intro_of_json_len(9001)
+            status_a, j_a = fn_call(tok2, 'POST', shape(input=exact))
+            status_b, j_b = fn_call(tok2, 'POST', shape(input=over))
+            check('input of exactly 9000 characters as JSON is translated; 9001 is refused (400 invalid_input) before anything is counted',
+                  json_len(exact) == 9000 and json_len(over) == 9001 and status_a == 200 and status_b == 400 and j_b.get('code') == 'invalid_input' and str(j_b.get('message', '')).startswith('translate:'),
+                  json.dumps([status_a, status_b, j_b])[:300])
+
+            # what the app sends for real fits: chunks of up to CR_TR_MAX characters (with the keys n12, the quotes, new lines and <b> tags) as the page builds them
+            fit_json = await pg.evaluate("""(()=>{
+              const mk=(txt,n)=>{const parts=[];for(let i=0;i<n;i++)parts.push({f:'notes',k:'c'+i,s:txt,t:''});parts.unshift({f:'title',k:0,s:txt.slice(0,60),t:''});
+                for(let i=0;i<30;i++)parts.push({f:'q',k:i,s:txt.slice(0,80),t:''},{f:'terms',k:'term'+i,s:txt.slice(0,30)+i,t:''});return parts;};
+              const out={};
+              for(const [name,txt] of [['Cyrillic text with <b> tags','<b>Лобная кость</b> (os frontale) образует лоб и верхнюю часть глазницы. '.repeat(3)],['every second character a quote','"x'.repeat(100)],
+                                       ['new lines and quotes','"\\n'.repeat(60)],['a long single note','Я'.repeat(3400)]]){
+                const ch=crTrChunks(mk(txt,60));let max=0;ch.forEach(c=>{max=Math.max(max,JSON.stringify(crTrReq(c).req).length);});out[name]=[ch.length,max];}
+              return out;})()""")
+            check('real chunks of the page (CR_TR_MAX characters, notes, questions, terms; quotes and new lines in the worst case) are at most 9000 characters as JSON',
+                  all(v[1] <= 9000 for v in fit_json.values()) and all(v[0] >= 1 for v in fit_json.values()), json.dumps(fit_json, ensure_ascii=False))
+
+            # the key __proto__ inside terms: sent as raw text (a JS object would lose it). The function holds no object it writes keys to: it is an ordinary key
+            raw_proto = '{"task":"translate","purpose":"course","src":"ru","dst":"et","input":{"title":"Лобная кость","terms":{"__proto__":"x"}}}'
+            used_before = course_state()['used']
+            status, j = fn_call(tok2, 'POST', raw_proto)
+            lt = lasttr()
+            if status == 200:
+                tr_terms = json.loads(j['text']).get('terms', {})
+                proto_ok = '"terms":{"__proto__":"x"}' in lt['said'] and list(tr_terms) == ['__proto__'] and tr_terms['__proto__'] == '[et] x'
+            else:
+                proto_ok = status == 400 and course_state()['used'] == used_before
+            check('"__proto__" as a key in terms: 200 (an ordinary key, the model gets it as it is) or 400 without counting — got %d' % status, status in (200, 400) and proto_ok, json.dumps([status, j], ensure_ascii=False)[:300])
+            status, j = fn_call(tok2, 'POST', shape(input={'title': 'x', 'terms': {'t0': 'y'}}))
+            lt = lasttr()
+            check('…the next ordinary request is unaffected (the prompt holds exactly its input, no foreign key)', status == 200 and lt['said'].endswith('INPUT:\n{"title":"x","terms":{"t0":"y"}}') and json.loads(j['text']) == {'title': '[et] x', 'terms': {'t0': '[et] y'}}, json.dumps([status, lt['said'][-60:]], ensure_ascii=False))
+
+            # "AI is off" for one person (ai_plans.daily_limit = 0): the course pool does not pay for them; the daily pool refuses
+            status, j = fn_call(tok2, 'GET')
+            left_before = j['course']['left']
+            urllib.request.urlopen(API + '/__course?off=aux@test.ee')
+            cs0 = course_state(); lt0 = lasttr()
+            status, j = fn_call(tok2, 'POST', shape())
+            cs1 = course_state()
+            status_g, j_g = fn_call(tok2, 'GET')
+            check('AI is off for a person (daily_limit 0) who has course requests left: refused with 429 quota_exceeded, limit 0, the course count and the site count do not move, the model is not asked',
+                  left_before > 0 and status == 429 and j.get('code') == 'quota_exceeded' and j.get('limit') == 0 and j['course']['left'] == left_before and cs1['used'] == cs0['used'] and cs1['day'] == cs0['day'] and lasttr() == lt0
+                  and status_g == 200 and j_g['limit'] == 0 and j_g['course']['left'] == left_before, json.dumps([status, j, cs0['used'] == cs1['used']])[:300])
+            urllib.request.urlopen(API + '/__course?off=')
+            status, j = fn_call(tok2, 'POST', shape())
+            check('…switched on again, the course pool pays (pool course, one less)', status == 200 and j['course'] == {'left': left_before - 1, 'free': 20, 'pool': 'course'}, json.dumps([status, j.get('course')]))
+
+            # the course function in the database fails (not "no such function"): the daily allowance pays, nothing is paid twice, nothing breaks
+            urllib.request.urlopen(API + '/__fn?nocourse=err')
+            cs0 = course_state()
+            status_g, j_g = fn_call(tok2, 'GET')
+            status, j = fn_call(tok2, 'POST', shape())
+            cs1 = course_state()
+            urllib.request.urlopen(API + '/__fn')
+            check('corpus_ai_take_course fails with a database error: GET and translate go on the daily allowance (no "course" in the answers, daily +1), the course counts do not move',
+                  status_g == 200 and 'course' not in j_g and status == 200 and 'course' not in j and j['used'] == j_g['used'] + 1 and cs1['used'] == cs0['used'] and cs1['day'] == cs0['day'],
+                  json.dumps([status_g, j_g, status, {k: v for k, v in j.items() if k != 'text'}])[:300])
+            urllib.request.urlopen(API + '/__course?free=3')
 
             await import_file('corpus-folder-ru.json', 1)
             cp = await pg.evaluate("({pid:S.plates.find(p=>p.title==='Лобная и верхняя челюсть').id,fid:S.folders.find(f=>f.name==='Urok RU').id})")
@@ -1866,7 +1969,7 @@ async def main():
             lt = json.loads(urllib.request.urlopen(API + '/__lasttr').read())
             check('…the page sent only the lesson text (task translate), the function\'s prompt is the app\'s prompt',
                   calls[0]['task'] == 'translate' and 'messages' not in calls[0] and lt['said'] == mine, json.dumps(sorted(calls[0])))
-            urllib.request.urlopen(API + '/__course?global=3000')
+            urllib.request.urlopen(API + '/__course?global=1000')
 
             # the course allowance pays first, down to the last request; then the daily one
             r1 = await tr_again(); a1 = await allowances()
@@ -1886,11 +1989,19 @@ async def main():
             ct = await pg.evaluate('window.__ct'); a5 = await allowances()
             check('old function: the translation still arrives (through the ordinary request: messages + purpose course, daily 4 of 6); courseAI is asked once, then the app remembers',
                   (r4, r5) == ('ok', 'ok') and ct == 1 and len(calls) == n0 + 2 and all('messages' in c and 'task' not in c and c['purpose'] == 'course' for c in calls[n0:]) and a5['used'] == 4, json.dumps([r4, r5, ct, a5, len(calls) - n0]))
+
+            def ordinary_translate(c, src_dst='ru>et'):
+                """Is this POST body an ordinary request carrying the lesson prompt (what the artifact or the old function gets)?"""
+                return (c.get('max_tokens') == 4096 and c.get('json') is True and c.get('purpose') == 'course' and 'task' not in c and len(c.get('messages', [])) == 1
+                        and c['messages'][0]['role'] == 'user' and c['messages'][0]['content'].startswith('CORPUS-TRANSLATE ' + src_dst + '\n'))
+            check('…the ordinary request carries the whole prompt: max_tokens 4096, json true, one user turn that starts with «CORPUS-TRANSLATE ru>et», purpose course',
+                  len(calls) == n0 + 2 and all(ordinary_translate(c) for c in calls[n0:]), json.dumps([{k: (v if k != 'messages' else str(v)[:60]) for k, v in c.items()} for c in calls[n0:]], ensure_ascii=False)[:400])
             # a new function that refuses this lesson's form («translate: …») is not an old one: this lesson goes the ordinary way, the next one is asked again
             await pg.evaluate("CR_TASK_OFF=false;CORPUS_WEB.courseAI={translate:async()=>{window.__ct++;throw {code:'invalid_input',message:'translate: input is too long'};}};0")
             r6 = await tr_again()
             off = await pg.evaluate('CR_TASK_OFF'); a6 = await allowances()
             check('a refusal of the form («translate: …») sends that lesson the ordinary way but is not remembered as «old function» (daily 5 of 6)', r6 == 'ok' and off is False and a6['used'] == 5, json.dumps([r6, off, a6]))
+            check('…that ordinary request has the same fields (max_tokens 4096, json true, «CORPUS-TRANSLATE ru>et», purpose course)', len(calls) == n0 + 3 and ordinary_translate(calls[-1]), json.dumps(calls[-1], ensure_ascii=False)[:300])
             await pg.evaluate("CORPUS_WEB.courseAI=window.__real;0")
 
             # the database has no corpus_ai_take_course yet (ai.sql not run): the daily allowance pays, nothing breaks
@@ -1927,14 +2038,35 @@ async def main():
             check('both used up: the translation is refused (quota_exceeded), nothing changes', r9 == 'quota_exceeded' and a9 == {'used': AI_LIMIT, 'left': 0, 'free': 4, 'pool': None}, json.dumps([r9, a9]))
             check('…and the lesson is not translated', await pg.evaluate(f"!plateById('{c_pid}').tr"))
 
-            # the quiet translation on the course home counts both allowances together (at least three requests left)
+            # the quiet translation on the course home counts both allowances together (at least three requests left) — but the course one only while it pays
+            # (when the last answer says the daily pool paid, the course requests are not counted: pool 'daily')
             bg = await pg.evaluate(f"""(()=>{{const p=plateById('{c_pid}');window.__crTranslate(()=>{{window.__bg=(window.__bg||0)+1;return Promise.resolve();}});
-              const probe=(c,u)=>{{window.__bg=0;CR_TRERR.clear();CORPUS_WEB.ai={{plan:'free',limit:6,used:u}};if(c===undefined)delete CORPUS_WEB.aiCourse;else CORPUS_WEB.aiCourse={{left:c,free:4}};crTrBackground(p);return window.__bg;}};
-              const r=[probe(2,6),probe(3,6),probe(0,3),probe(0,4),probe(1,4),probe(undefined,6)];window.__crTranslate(null);return r;}})()""")
+              const probe=(c,u,pl)=>{{window.__bg=0;CR_TRERR.clear();CORPUS_WEB.ai={{plan:'free',limit:6,used:u}};if(c===undefined)delete CORPUS_WEB.aiCourse;else CORPUS_WEB.aiCourse=pl===undefined?{{left:c,free:4}}:{{left:c,free:4,pool:pl}};crTrBackground(p);return window.__bg;}};
+              const r=[probe(2,6),probe(3,6),probe(0,3),probe(0,4),probe(1,4),probe(undefined,6),
+                       probe(50,5,'daily'),probe(50,4,'daily'),probe(50,3,'daily'),probe(50,6,'course'),probe(50,6,null),probe(1,5,'course')];window.__crTranslate(null);return r;}})()""")
             check('quiet translation: course and daily requests are added up — 2+0 no, 3+0 yes, 0+3 yes, 0+2 no, 1+2 yes; with no course allowance known only the daily one counts (0 left: no)',
-                  bg == [0, 1, 1, 0, 1, 0], json.dumps(bg))
+                  bg[:6] == [0, 1, 1, 0, 1, 0], json.dumps(bg))
+            check('…when the daily pool paid last (pool daily) a big course allowance does not count: 50 course + 1 daily left no, + 2 no, + 3 yes; pool course or none: 50 + 0 yes; 1 + 1 no',
+                  bg[6:] == [0, 0, 1, 1, 1, 0], json.dumps(bg))
+
+            # the claude.ai artifact has no CORPUS_WEB at all: the lesson goes through S.sample.json with the same fields as for the old function
+            # (it is paid from the daily allowance, which is used up here: the fake's limit goes up by one for this request and comes back)
+            urllib.request.urlopen(API + '/__course?limit=' + str(AI_LIMIT + 1))
+            n0 = len(calls)
+            await pg.evaluate("window.__w=window.CORPUS_WEB;window.CORPUS_WEB=undefined;CR_TASK_OFF=false;0")
+            try:
+                r10 = await tr_again()
+                w_gone = await pg.evaluate("window.CORPUS_WEB===undefined")
+            finally:
+                await pg.evaluate("window.CORPUS_WEB=window.__w;0")
+                urllib.request.urlopen(API + '/__course?limit=')
+            back = await pg.evaluate("!!window.CORPUS_WEB&&window.CORPUS_WEB===window.__w")
+            check('without CORPUS_WEB (as in the claude.ai artifact) the lesson is translated through S.sample.json: one ordinary request with the same fields (max_tokens 4096, json true, «CORPUS-TRANSLATE ru>et», purpose course)',
+                  w_gone and r10 == 'ok' and len(calls) == n0 + 1 and ordinary_translate(calls[-1]), json.dumps([w_gone, r10, calls[n0:]], ensure_ascii=False)[:400])
+            status, j = fn_call(tok, 'GET')
+            check('…it was paid from the daily allowance (7 of a limit of 7 at that moment), CORPUS_WEB is back as it was', back and j['used'] == AI_LIMIT + 1, json.dumps([back, j]))
             check('course allowance scenario: no script errors or failed requests of its own', len(errs) == n_err, '; '.join(errs[n_err:])[:300])
-            urllib.request.urlopen(API + '/__course?free=0&global=3000')
+            urllib.request.urlopen(API + '/__course?free=0&global=1000')
             # clean up (the photo with its translation), so the counts in the later scenarios stay as they were
             await pg.evaluate("go({name:'library'})")
             await pg.evaluate("""(()=>{const ds=S.decks.filter(d=>d.name.startsWith('Urok')),ids=new Set(ds.map(d=>d.id));

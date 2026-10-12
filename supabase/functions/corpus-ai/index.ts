@@ -11,10 +11,12 @@
 //        A lesson translation for the course feature, signed-in users only (demo: 403). The client sends only the lesson text:
 //        src / dst: "ru" | "en" | "et", different; input: an object with only the keys title (string), intro (≤ 20 strings),
 //        q (≤ 200 strings) and terms / notes / kinds (string → string, ≤ 400 / 1000 / 200 pairs, keys ≤ 40 characters);
-//        every string ≤ 4000 characters, all together ≤ 9000. Anything else is refused with 400 invalid_input before anything is counted.
+//        every string ≤ 4000 characters, the whole input as JSON (JSON.stringify: keys, quotes and escapes counted) ≤ 9000 characters.
+//        Anything else is refused with 400 invalid_input before anything is counted.
 //        The prompt, the model, the system text and max_tokens are the function's own (the same prompt as crTrPrompt in src/corpus.html).
 //        Paid from the course allowance first (course: { left, free, pool: "course" | "daily" }), then from the daily one;
-//        refused with 429 quota_exceeded when both are used up. If corpus_ai_take_course does not exist yet, the daily allowance pays.
+//        refused with 429 quota_exceeded when both are used up. If corpus_ai_take_course does not exist yet (or fails in any way: the failed
+//        call took nothing, its transaction was rolled back), the daily allowance pays.
 //   POST { messages, purpose: "course" } (the site before the translate task) is an ordinary daily request.
 //
 // Demo mode (header x-corpus-demo: 1, no sign-in): the cheapest model for text and photos, a few requests per
@@ -22,6 +24,8 @@
 //
 // Secrets: ANTHROPIC_API_KEY (required). Optional: CORPUS_AI_MODEL, CORPUS_AI_VISION_MODEL, CORPUS_AI_DEMO_MODEL,
 // CORPUS_AI_COURSE_MODEL (the model of the translate task; default: CORPUS_AI_MODEL).
+// The models of every secret must be claude-haiku-5* (thinking is switched off with "disabled") or claude-sonnet-5-5 ("between_tools"), see callModel:
+// with any other model thinking cannot be switched off and may eat the whole answer.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
@@ -72,8 +76,8 @@ function checkTranslate(body: any): string {
   if (!ok(body.src) || !ok(body.dst) || body.src === body.dst) return "src and dst must be two different languages of ru, en, et";
   const inp = body.input;
   if (!inp || typeof inp !== "object" || Array.isArray(inp)) return "input must be an object";
-  let sum = 0;
-  const str = (v: unknown) => { if (typeof v !== "string" || v.length > TR_STR_MAX) return false; sum += v.length; return true; };
+  let chars = 0;   // characters of the strings: at least one has to be there
+  const str = (v: unknown) => { if (typeof v !== "string" || v.length > TR_STR_MAX) return false; chars += v.length; return true; };
   for (const k of Object.keys(inp)) {
     const v = inp[k];
     if (k === "title") { if (!str(v)) return "title must be a string of at most " + TR_STR_MAX + " characters"; }
@@ -85,13 +89,13 @@ function checkTranslate(body: any): string {
       if (keys.length > TR_TABLES[k]) return k + ": at most " + TR_TABLES[k] + " entries";
       for (const kk of keys) {
         if (kk.length > TR_KEY_MAX) return k + ": keys of at most " + TR_KEY_MAX + " characters";
-        sum += kk.length;
         if (!str(v[kk])) return k + " must hold strings of at most " + TR_STR_MAX + " characters";
       }
     } else return "input: only title, intro, q, terms, notes and kinds";
   }
-  if (sum > TR_SUM_MAX) return "input is too long (at most " + TR_SUM_MAX + " characters in all)";
-  if (sum === 0) return "nothing to translate";
+  if (chars === 0) return "nothing to translate";
+  // the size is what the model gets to read: the JSON as it goes into the prompt (keys, quotes and escapes included), not the sum of the strings
+  if (JSON.stringify(inp).length > TR_SUM_MAX) return "input is too long (at most " + TR_SUM_MAX + " characters as JSON)";
   return "";
 }
 // deno-lint-ignore no-explicit-any
@@ -174,7 +178,11 @@ Deno.serve(async (req) => {
       take = (units) => sb.rpc("corpus_ai_take", { p_units: units });
       takeCourse = async (units) => {
         const r = await sb.rpc("corpus_ai_take_course", { p_units: units });
-        return r.error && isMissingFn(r.error) ? await take(units) : r;
+        if (!r.error) return r;
+        // Any failure of the course function falls back to the daily allowance. Nothing is paid twice: a failed call was rolled back.
+        // "No such function" is the normal state before supabase/ai.sql is run; anything else is worth a line in the log.
+        if (!isMissingFn(r.error)) console.error("corpus_ai_take_course", r.error.code, r.error.message);
+        return await take(units);
       };
     }
     // what is left of the course allowance, when the answer of takeCourse says (not for the plain daily allowance)

@@ -36,7 +36,7 @@
 | T-013 | P1 | Урок по фото из 5 шагов (Ülevaade → Tutvumine → Harjutus → Meenutamine → Seosta) + импорт курса Kolju (46 уроков) | deployed 2026-10-11 | claude/T-013-lesson-player |
 | T-014 | P1 | Вкладка «Курсы» — точная копия прототипа урока (главная курса, P1–P3, экран урока из 5 шагов); заменяет экран урока T-013 | deployed 2026-10-11 (main = gh-pages 0711047) | claude/T-014-courses-tab |
 | T-015 | P1 | Новая главная курса по макету: прогресс, «Продолжить», статусы уроков из FSRS, сворачиваемые части, «О курсе»; coursePrio переживает перезагрузку | deployed 574df3d (2026-10-11); откат 0711047 | claude/T-015-course-home |
-| T-016 | P1 | Отдельный бесплатный лимит ИИ на курсы (SQL + corpus-ai purpose:"course"): хватает на один полный курс (создание + перевод); Haiku 5.5 для текста с effort low; функция ПРОВЕРЯЕТ форму курсовых запросов (security T-022); без подписки | planned | — |
+| T-016 | P1 | Отдельный бесплатный лимит ИИ на курсы («один курс бесплатно»): SQL corpus_ai_take_course + задача translate в corpus-ai (промпт на сервере, проверка формы), запасной путь через дневной лимит | in-progress | claude/T-016-course-quota |
 | T-017 | P1 | «Новый курс»: материалы (PDF через pdf.js, фото, вопросы), роль у файла, тексты страниц в docs, оригиналы PDF не храним; кнопка «Новый курс» видна и при одном готовом курсе (Лев 2026-10-11: «не вижу такой кнопки») | planned | — |
 | T-018 | P1 | План курса от ИИ: части, уроки, термины P1–P3 с источником, рисунок к уроку; экран правки плана; тексты сразу на языке пользователя | planned | — |
 | T-019 | P1 | Сборка уроков по одному (OCR + ИИ рамки, тексты и вопросы по «Основе»), пауза/продолжение, учить готовые | planned | — |
@@ -248,3 +248,14 @@
 - проверки: e2e exit=0, 272 PASS, ALL PASSED: «AI JSON answer (text model)» → model claude-haiku-5-5 (фейк отверг бы без thinking disabled), фото → claude-sonnet-5-5, демо 5 запросов на Haiku 5.5; node --check fake-supabase.js
 - сайт не меняется (только функция) — выкладка = Лев вставляет код функции; в main файл попадёт со следующей выкладкой сайта
 - деплой: «сделал, деплой» от Льва 2026-10-12 — функция в Supabase; сайт: main = gh-pages = 3d5a060 (T-022 + T-023); откат сайта: 574df3d1bd75ebccf5fff9494b9e4759a49092fa; откат функции: код из 574df3d
+
+### T-016 Курсовой лимит ИИ
+- статус: in-progress — Лев 2026-10-12: «да, начинай. минимум моего участия, я на пары»
+- ветка / файлы: claude/T-016-course-quota (от T-023 = main 3d5a060) — supabase/ai.sql (+ setup.sql раздел ИИ, если он дублирует ai.sql), supabase/functions/corpus-ai/index.ts, web.js, src/corpus.html, tools/fake-supabase.js, tools/e2e_test.py, новый tools/ai_quota_test.ts (PGlite, как quota_test.ts), README.md
+- план:
+  - SQL (идемпотентно): private.settings ai_course_free (300 ед. на человека «на один курс», не в день) и ai_course_global_daily (3000 ед. в день на сайт); public.ai_course (user_id pk, used, granted — Лев добавляет вручную), RLS: читать своё; private.ai_course_global(day, used); public.corpus_ai_take_course(p_units 0..20) security definer: если осталось в курсовом и не упёрлись в общий курсовой потолок — списать оттуда (pool 'course'), иначе — corpus_ai_take(p_units) (pool 'daily'); p_units=0 — только отчёт; ответ: ok, pool, course_left, course_free + поля дневного лимита
+  - функция: задача {task:'translate', src, dst, input} — промпт собирается НА СЕРВЕРЕ (тот же текст, что crTrPrompt), проверка формы (src≠dst ∈ ru|en|et, только ключи title/intro/q/terms/notes/kinds, строки, лимиты размеров ~9000 знаков), только авторизованные (демо — нельзя), модель COURSE_MODEL (по умолчанию текстовая, Haiku 5.5 с thinking disabled), max_tokens 4096, JSON; списание corpus_ai_take_course(1), а если RPC ещё нет (SQL не вставлен) — corpus_ai_take(1); старый вид purpose:'course' + messages — как обычный дневной запрос (совместимость со старым сайтом); GET отдаёт course {left, free}
+  - web.js: CORPUS_WEB.courseAI.translate(src,dst,input,{signal}) → JSON; хранит остаток курсового лимита
+  - приложение: crTrAsk через courseAI, если есть (сайт), иначе S.sample.json с промптом (артефакт claude.ai); если функция старая (invalid_input на task) — один раз запасной путь через S.sample.json; фон учитывает остаток курсового + дневного; в настройках строка «ИИ для курсов: осталось N»
+- проверка: tools/ai_quota_test.ts на PGlite (курсовой → дневной, общий потолок, granted, p_units 0, чужой пользователь, anon); e2e: перевод тратит курсовой, не дневной; исчерпан курсовой → дневной; демо не может; неверная форма → 400; RPC нет → дневной; старая функция → запасной путь
+- выкладка: сначала Лев вставляет SQL и функцию (работают и со старым сайтом), потом сайт; откат SQL — фрагмент; откат функции — код из 3d5a060

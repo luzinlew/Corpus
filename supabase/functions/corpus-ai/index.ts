@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET") {
       const { data, error } = await takeCourse(0);
-      if (error) return reply(500, { code: "unavailable", message: error.message });
+      if (error) { console.error("corpus-ai limits", (error as Json).code, error.message); return reply(500, { code: "unavailable", message: error.message }); }
       const c = courseOf(data);
       return reply(200, { ready: !!API_KEY, plan: data?.plan, limit: data?.limit, used: data?.used, ...(c ? { course: { left: c.left, free: c.free } } : {}) });
     }
@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
       if (bad) return reply(400, { code: "invalid_input", message: "translate: " + bad });
       if (!API_KEY) return reply(503, { code: "unavailable", message: "ANTHROPIC_API_KEY is not set" });
       const { data: q, error: qe } = await takeCourse(1);
-      if (qe) return reply(500, { code: "unavailable", message: qe.message });
+      if (qe) { console.error("corpus-ai limits", (qe as Json).code, qe.message); return reply(500, { code: "unavailable", message: qe.message }); }
       const course = courseOf(q);
       if (!q?.ok) return reply(429, { code: "quota_exceeded", message: "AI limit reached", plan: q?.plan, limit: q?.limit, used: q?.used, ...(course ? { course: { left: course.left, free: course.free } } : {}) });
       const res = await callModel(COURSE_MODEL, TR_MAX_TOKENS, JSON_SYSTEM, [{ role: "user", content: translatePrompt(body.src, body.dst, body.input) }]);
@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
 
     const units = 1 + images;
     const { data: q, error: qe } = await take(units);
-    if (qe) return reply(500, { code: "unavailable", message: qe.message });
+    if (qe) { console.error("corpus-ai limits", (qe as Json).code, qe.message); return reply(500, { code: "unavailable", message: qe.message }); }
     if (!q?.ok) return reply(429, { code: "quota_exceeded", message: "daily AI limit reached", plan: q?.plan, limit: q?.limit, used: q?.used });
 
     const model = demo ? DEMO_MODEL : images ? VISION_MODEL : TEXT_MODEL;

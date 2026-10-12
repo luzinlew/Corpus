@@ -22,6 +22,7 @@ Corpus — карточки по анатомии из фото атласа: р
 | `supabase/quota.sql` | Лимиты на аккаунт: размер документа, число и общий объём документов, число и объём фото. Проверяет сама база, значения в `private.settings` |
 | `supabase/functions/corpus-ai/` | Edge Function: единственное место с ключом Claude API; проверяет вход и лимит, зовёт Claude |
 | `supabase/push.sql`, `supabase/functions/corpus-push/` | Push-уведомления: ключи VAPID, расписание каждые 15 минут (pg_cron), рассылка |
+| `.github/workflows/deploy-functions.yml` | Выкладка обеих функций в Supabase из GitHub при push в `main` и вручную, см. «Выкладка функций из GitHub» |
 | `ocr/`, `anki/`, `vendor/` | Tesseract.js, sql.js, fflate, fzstd, supabase-js, qrcode-generator |
 | `tools/` | Тестовый сервер-заглушка Supabase и сквозной тест в браузере |
 
@@ -29,7 +30,7 @@ Corpus — карточки по анатомии из фото атласа: р
 
 ИИ (подсказки, чат, распознавание подписей по фото, сверка с конспектом) на сайте идёт через функцию `corpus-ai` с ключом Claude API владельца. Текст обрабатывает Haiku 4.5, фото — Sonnet 5.5. Каждый запрос списывается с дневного лимита пользователя (фото = 1 + число фото). Пока функция не развёрнута, ИИ-кнопки на сайте скрыты. Распознавание подписей на устройстве (Tesseract) работает всегда.
 
-Демо-режим (кнопка на экране входа): без аккаунта и без сохранений, всё живёт в памяти страницы. ИИ в нём (в том числе по фото) работает через ту же функцию `corpus-ai` с заголовком `x-corpus-demo`: самая дешёвая модель (Haiku, секрет `CORPUS_AI_DEMO_MODEL`), 5 запросов в день на посетителя и общий дневной лимит демо (`supabase/demo.sql`). Для этого у функции `corpus-ai` должен быть выключен «Verify JWT» (она сама проверяет вход). Пока `demo.sql` и новый код функции не вставлены, в демо ИИ просто скрыт.
+Демо-режим (кнопка на экране входа): без аккаунта и без сохранений, всё живёт в памяти страницы. ИИ в нём (в том числе по фото) работает через ту же функцию `corpus-ai` с заголовком `x-corpus-demo`: самая дешёвая модель (Haiku, секрет `CORPUS_AI_DEMO_MODEL`), 5 запросов в день на посетителя и общий дневной лимит демо (`supabase/demo.sql`). Для этого у функции `corpus-ai` должен быть выключен «Verify JWT» (она сама проверяет вход). Пока `demo.sql` и новый код функции не выложены, в демо ИИ просто скрыт.
 
 ## Обмен колодами по QR-коду
 
@@ -62,7 +63,7 @@ Push-уведомления приходят, даже если Corpus закр�
 Как это устроено. Устройство подписывается и кладёт подписку в `docs` (`coll = 'push'`). Приложение держит короткую сводку `meta/notify`: часовой пояс, язык, время напоминания, сколько карточек к повтору на 14 дней вперёд, ближайшие контрольные. Карточек и фото в ней нет. Каждые 15 минут pg_cron вызывает функцию `corpus-push`. Она решает, кому что пора отправить, и записывает отправленное в `meta/notify_sent`, чтобы ничего не повторялось. Ключи VAPID функция создаёт сама при первом запуске и хранит в `private.settings`.
 
 Настройка (один раз):
-1. Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-push`, код из `supabase/functions/corpus-push/index.ts`. В настройках функции выключить «Verify JWT» (вызов по расписанию идёт без токена пользователя; функция проверяет свой ключ сама).
+1. Выложить функцию `corpus-push`: из GitHub (см. «Выкладка функций из GitHub» ниже) или вручную: Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-push`, код из `supabase/functions/corpus-push/index.ts`. «Verify JWT» у неё выключен (вызов по расписанию идёт без токена пользователя; функция проверяет свой ключ сама): выкладка из GitHub делает это сама, при ручной вставке выключить в настройках функции.
 2. Supabase → SQL Editor: выполнить `supabase/push.sql`.
 
 Проверка: в приложении «Календарь → Напоминания → Проверить» присылает тестовое уведомление на все устройства человека.
@@ -92,10 +93,10 @@ select u.email, count(*) devices from public.docs d join auth.users u on u.id = 
 
 1. Ключ: platform.claude.com → пополнить баланс → API Keys → Create key. Там же стоит поставить месячный лимит расходов.
 2. Supabase → Edge Functions → Secrets: `ANTHROPIC_API_KEY` = ключ.
-3. Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-ai`, код из `supabase/functions/corpus-ai/index.ts`.
+3. Выложить функцию `corpus-ai`: из GitHub (см. «Выкладка функций из GitHub» ниже) или вручную: Supabase → Edge Functions → Deploy a new function → Via Editor: имя `corpus-ai`, код из `supabase/functions/corpus-ai/index.ts` целиком, «Verify JWT» выключить.
 4. Supabase → SQL Editor: выполнить `supabase/ai.sql`.
 
-Сайт сам заметит функцию и включит ИИ. Модели можно сменить секретами `CORPUS_AI_MODEL` (текст), `CORPUS_AI_VISION_MODEL` (фото) и `CORPUS_AI_COURSE_MODEL` (перевод курса; по умолчанию как `CORPUS_AI_MODEL`). Для `CORPUS_AI_COURSE_MODEL` годятся только `claude-haiku-5*` (функция выключает раздумья как `disabled`) и `claude-sonnet-5-5` (`between_tools`): у других моделей раздумья не выключаются и могут съесть весь ответ.
+Сайт сам заметит функцию и включит ИИ. Если ответ о состоянии ИИ пришёл позже 2,5 секунды (в демо 3), страница стартует без ИИ и включает его сама, как только ответ придёт, без перезагрузки. Любая ошибка базы при проверке лимита (например, нет нужной таблицы) пишется в лог функции строкой `corpus-ai limits <код> <сообщение>` (Supabase → Edge Functions → corpus-ai → Logs), а запрос получает ответ 500 `unavailable`. Модели можно сменить секретами `CORPUS_AI_MODEL` (текст), `CORPUS_AI_VISION_MODEL` (фото) и `CORPUS_AI_COURSE_MODEL` (перевод курса; по умолчанию как `CORPUS_AI_MODEL`). Для `CORPUS_AI_COURSE_MODEL` годятся только `claude-haiku-5*` (функция выключает раздумья как `disabled`) и `claude-sonnet-5-5` (`between_tools`): у других моделей раздумья не выключаются и могут съесть весь ответ.
 
 ```sql
 -- бесплатный дневной лимит для всех
@@ -139,16 +140,34 @@ insert into public.ai_plans (user_id, plan, daily_limit) select id, 'off', 0 fro
 on conflict (user_id) do update set daily_limit = 0;
 ```
 
-Порядок выкладки: сначала SQL (`supabase/ai.sql` целиком, безопасно повторять), потом функция `corpus-ai` (код из `supabase/functions/corpus-ai/index.ts`), потом сайт. Каждый шаг совместим с предыдущим состоянием: функция без SQL списывает курсовой запрос из дневного лимита (`corpus_ai_take`), старая функция с новым сайтом отвечает `invalid_input`, и приложение один раз переходит на обычный запрос; старый сайт работает с новой функцией как раньше. Откат SQL: `supabase/ai_course_rollback.sql`.
+Порядок выкладки: сначала SQL (`supabase/ai.sql` целиком, безопасно повторять), потом функция `corpus-ai` (`supabase/functions/corpus-ai/index.ts`), потом сайт. Когда функцию выкладывает GitHub, она уходит почти одновременно с сайтом (один push), поэтому SQL выполняют до push. Каждый шаг совместим с предыдущим состоянием: функция без SQL списывает курсовой запрос из дневного лимита (`corpus_ai_take`), старая функция с новым сайтом отвечает `invalid_input`, и приложение один раз переходит на обычный запрос; старый сайт работает с новой функцией как раньше. Откат SQL: `supabase/ai_course_rollback.sql`.
 
 Проверка SQL на настоящем Postgres (PGlite): `npx --yes deno run --allow-read --allow-env --allow-net --allow-sys --allow-ffi tools/ai_quota_test.ts` (курсовой лимит расходуется первым, затем дневной, общий потолок, `granted`, права и RLS, повторный запуск `ai.sql`) → `ALL AI QUOTA TESTS PASSED`.
+
+## Выкладка функций из GitHub
+
+Edge Functions `corpus-ai` и `corpus-push` выкладывает GitHub Actions (`.github/workflows/deploy-functions.yml`), код не нужно копировать в Supabase руками (при ручной вставке однажды потерялось начало файла, и ИИ не работал).
+
+Один раз завести токен:
+1. Supabase → Account (профиль) → Access Tokens → Generate new token. Имя любое, например `github-deploy`; значение показывается один раз, его нужно сразу скопировать.
+2. GitHub → репозиторий → Settings → Secrets and variables → Actions → New repository secret: имя `SUPABASE_ACCESS_TOKEN`, значение — токен.
+
+Когда идёт выкладка:
+- сама, при push в `main`, если менялись файлы в `supabase/functions/**`. Это значит, что она идёт вместе с выкладкой сайта (`git push origin main main:gh-pages`); если функции не менялись, ничего не запускается;
+- вручную: GitHub → Actions → Deploy Supabase functions → Run workflow (ветка `main`). Так можно выложить функции заново или после отката файла.
+
+Что делает прогон: выкладывает `corpus-ai` и `corpus-push` в проект из `config.js` с выключенным «Verify JWT» (обе функции сами проверяют, кто их зовёт), потом посылает каждой запрос OPTIONS и ждёт ответ 200 (до пяти попыток): если функция не загрузилась, прогон красный и GitHub пишет об этом. Без секрета он тоже красный, с подсказкой, что сделать. Прогон идёт только в `luzinlew/Corpus` и только с ветки `main`; права репозитория у него только на чтение.
+
+Чего прогон не трогает: секреты функций (`ANTHROPIC_API_KEY`, `CORPUS_AI_*` и другие) остаются в Supabase → Edge Functions → Secrets. SQL (`supabase/*.sql`) по-прежнему вставляется вручную в Supabase → SQL Editor.
+
+Запасной путь, если токена нет или нужен откат: вставить код функции руками (Supabase → Edge Functions → Deploy a new function → Via Editor, код из `supabase/functions/<имя>/index.ts` целиком, «Verify JWT» выключить). Прежнюю версию файла даёт `git show <sha>:supabase/functions/corpus-ai/index.ts`.
 
 ## Обновить приложение
 
 1. Изменить `src/corpus.html` (и при необходимости `web.js` / `web.css` / `sw.js`).
 2. `python3 build.py`, чтобы пересобрать `index.html` (у скриптов меняется `?v=`, и браузеры сразу берут новую версию).
 3. `python3 tools/e2e_test.py`: сквозной тест на заглушке Supabase (включая импорт сгенерированного `.apkg` и обмен по коду между двумя аккаунтами), функция `corpus-ai` при этом работает по-настоящему в Deno. Нужны `pip install playwright pillow && python3 -m playwright install chromium` и `deno` (или `npx deno`).
-4. Закоммитить и запушить: `git push origin main main:gh-pages`. Сайт публикуется из ветки `gh-pages`, GitHub Pages обновит его за минуту-две.
+4. Закоммитить и запушить: `git push origin main main:gh-pages`. Сайт публикуется из ветки `gh-pages`, GitHub Pages обновит его за минуту-две. Если менялись `supabase/functions/**`, тот же push в `main` запускает выкладку функций (см. «Выкладка функций из GitHub»).
 
 Чтобы обновить и артефакт в claude.ai, опубликуйте туда `src/corpus.html` вместе с `ocr/*` и `anki/*`.
 

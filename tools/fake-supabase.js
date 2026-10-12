@@ -32,7 +32,10 @@ let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429 */
 let FN_DROP = false, FN_TRUNC = false, FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
+let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
+let FN_TAKEERR = '';       // takeerr=1: corpus_ai_take fails (as with a missing private.ai_global: 42P01) for p_units >= 1; takeerr=all: for p_units = 0 too (the status), also in corpus_ai_take_course
 let FN_NOCOURSE = '';   // nocourse=1: the database has no corpus_ai_take_course yet (supabase/ai.sql not run): PostgREST answers PGRST202; nocourse=err: the function fails (500) and has taken nothing
+const TAKE_ERR = { code: '42P01', details: null, hint: null, message: 'relation "private.ai_global" does not exist' };   // what PostgREST answers (404) when corpus_ai_take reads a table that is not there
 const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
 const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const activity = new Map();   // uid -> Map(day -> {opens, last})
@@ -156,8 +159,10 @@ http.createServer(async (req, res) => {
     FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = u.searchParams.get('trunc') === '1'; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
     FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
-    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE }); return;
-  }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen)
+    FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0;
+    FN_TAKEERR = ['1', 'all'].includes(u.searchParams.get('takeerr')) ? u.searchParams.get('takeerr') : '';
+    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR }); return;
+  }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen); statusdelay=ms: the status (p_units=0) comes that much later; takeerr=1|all: the limit RPC fails
 
   /* ---------- auth ---------- */
   if (p === '/auth/v1/signup' && req.method === 'POST') {
@@ -276,6 +281,8 @@ http.createServer(async (req, res) => {
     if (!uid) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_ai_take' }); return; }
     const n = body && body.p_units;
     if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
+    if (n === 0 && FN_STATUS_DELAY) await new Promise((r) => setTimeout(r, FN_STATUS_DELAY));
+    if (FN_TAKEERR && (n >= 1 || FN_TAKEERR === 'all')) { send(res, 404, TAKE_ERR); return; }
     const k = uid + '|' + new Date().toISOString().slice(0, 10), used = aiUsed.get(k) || 0;
     if (used + n > limOf(uid)) { send(res, 200, { ok: false, plan: 'free', limit: limOf(uid), used }); return; }
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: limOf(uid), used: used + n }); return;
@@ -289,6 +296,8 @@ http.createServer(async (req, res) => {
     if (!uid) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_ai_take_course' }); return; }
     const n = body && body.p_units;
     if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
+    if (n === 0 && FN_STATUS_DELAY) await new Promise((r) => setTimeout(r, FN_STATUS_DELAY));
+    if (FN_TAKEERR === 'all') { send(res, 404, TAKE_ERR); return; }
     const day = new Date().toISOString().slice(0, 10), k = uid + '|' + day, cu = courseUsed.get(uid) || 0, left = Math.max(COURSE_FREE - cu, 0);
     const daily = () => ({ plan: 'free', limit: limOf(uid), used: aiUsed.get(k) || 0 });
     if (n === 0) { send(res, 200, { ok: true, ...daily(), pool: null, course_left: left, course_free: COURSE_FREE }); return; }
@@ -306,6 +315,7 @@ http.createServer(async (req, res) => {
     if (!/service-key/.test(req.headers.authorization || '')) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_demo_take' }); return; }
     const n = body && body.p_units, k = 'demo|' + (body && body.p_visitor), used = aiUsed.get(k) || 0, LIM = 5;
     if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
+    if (n === 0 && FN_STATUS_DELAY) await new Promise((r) => setTimeout(r, FN_STATUS_DELAY));
     if (used + n > LIM) { send(res, 200, { ok: false, plan: 'demo', limit: LIM, used }); return; }
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'demo', limit: LIM, used: used + n }); return;
   }

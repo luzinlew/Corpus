@@ -323,8 +323,9 @@ async def main():
             raise SystemExit(1)
 
     try:
+        fn_err = tmp / 'corpus-ai.err'   # what the function writes to the log (console.error): the test reads it, see «the limit RPC fails»
         procs.append(start(deno + ['run', '--allow-net', '--allow-env', '--allow-read', '--allow-sys', str(ROOT / 'supabase' / 'functions' / 'corpus-ai' / 'index.ts')],
-                           env=fn_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                           env=fn_env, stdout=subprocess.DEVNULL, stderr=open(fn_err, 'wb')))
         procs.append(start(['node', str(ROOT / 'tools' / 'fake-supabase.js'), str(API_PORT), INVITE], env=api_env, stdout=subprocess.DEVNULL))
         procs.append(start([sys.executable, '-m', 'http.server', str(SITE_PORT), '--directory', str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         wait_port(API_PORT); wait_port(SITE_PORT); wait_port(FN_PORT, 120)
@@ -2082,6 +2083,96 @@ async def main():
             st = await state_when(lambda st: sum(1 for o in st['objects'] if o['owner'] == me_c) == 0)
             check('course allowance scenario cleaned up: the photos of this account are gone from Storage', sum(1 for o in st['objects'] if o['owner'] == me_c) == 0)
             await ctx.close()
+
+            # ---------- the AI status comes late (T-029): the page starts without AI and switches it on by itself, without a reload ----------
+            # (the function answers the status 6 s late, the site waits 2.5 s for it; the new account 'late@test.ee' has nothing saved, its study card exists only in memory)
+            async def study_text_card(pg):
+                """A study session on a text card made in memory: its header has the chat button only when the app has AI."""
+                await pg.evaluate("""(()=>{const t0=Date.now(),did=newId('decks');S.decks.push({id:did,name:'Hiline',newPerDay:20,mode:'hideAll',createdAt:t0});
+                  S.cards.push(normCard({id:newId('terms'),kind:'text',type:'new',dir:'f',deckId:did,front:'os frontale',back:'otsmikuluu',createdAt:t0}));startStudy(did);})()""")
+                await pg.wait_for_selector('.full.study')
+
+            count_ready = "window.__aiReady=0;window.addEventListener('corpus-ai-ready',()=>{window.__aiReady++;});"   # how many times the page was told that the AI is there
+            state_q = "({sample:!!S.sample,img:S.imgOK===true,ask:!!document.querySelector('.full.study [data-act=askOpen]'),study:view.name==='study'&&!!SS.cur,cur:SS.cur,late:!!CORPUS_WEB.lateSample,cai:!!CORPUS_WEB.courseAI,ready:window.__aiReady,ls:localStorage.getItem('corpus.ai')})"
+            urllib.request.urlopen(API + '/__fn?statusdelay=6000')
+            ctx, pg, errs_l = await open_ctx()
+            await pg.add_init_script("try{localStorage.setItem('corpus.ai','0');}catch(e){}" + count_ready)
+            await pg.goto(SITE + '?i=' + INVITE)
+            await pg.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pg.fill('input[name=email]', 'late@test.ee')
+            await pg.fill('input[name=password]', 'kolju2026')
+            await pg.click('.cw-go')
+            await app_ready(pg)
+            await study_text_card(pg)
+            e0 = await pg.evaluate(state_q)
+            check('late status, signed in: the app starts without AI (no sample, no chat button in the study header, corpus.ai stays 0)',
+                  e0['study'] and not e0['sample'] and not e0['ask'] and not e0['late'] and not e0['cai'] and e0['ready'] == 0 and e0['ls'] == '0', json.dumps(e0))
+            await pg.wait_for_function('!!S.sample', timeout=20000)
+            await pg.wait_for_selector('.full.study [data-act=askOpen]', timeout=5000)
+            e1 = await pg.evaluate(state_q)
+            check('…the status arrives: with no reload S.sample appears, the images are on (S.imgOK), the chat button appears in the study session, which is still the same card, courseAI and corpus.ai=1 are there',
+                  e1['sample'] and e1['img'] and e1['ask'] and e1['study'] and e1['cur'] == e0['cur'] and e1['late'] and e1['cai'] and e1['ls'] == '1', json.dumps(e1))
+            ai_l = await pg.evaluate('({same:S.sample===CORPUS_WEB.lateSample,lim:CORPUS_WEB.ai&&CORPUS_WEB.ai.limit})')
+            r = await pg.evaluate("S.sample('Mis on os frontale?').then(a=>a.text,e=>e.code||String(e))")
+            check('…the sample works (an answer from the function) and the page told the app once', ai_l['same'] and ai_l['lim'] == AI_LIMIT and 'os frontale' in r and e1['ready'] == 1, json.dumps([ai_l, r, e1['ready']]))
+            check('late status, signed in: no script errors or failed requests', not errs_l, '; '.join(errs_l)[:300])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx.close()
+
+            # the same in the demo (it waits 3 s for the status): no courseAI there, the demo allowance (5) is not touched — the next scenario counts it
+            urllib.request.urlopen(API + '/__fn?statusdelay=6000')
+            ctx, pg, errs_gl = await open_ctx()
+            await pg.add_init_script(count_ready)
+            await pg.goto(SITE)
+            await pg.wait_for_selector('.cw-guest-btn')
+            await pg.click('.cw-guest-btn')
+            await app_ready(pg)
+            await study_text_card(pg)
+            g0 = await pg.evaluate(state_q)
+            check('late status, demo: the app starts without AI (no sample, no chat button)', g0['study'] and not g0['sample'] and not g0['ask'] and not g0['late'] and g0['ready'] == 0, json.dumps(g0))
+            await pg.wait_for_function('!!S.sample', timeout=20000)
+            await pg.wait_for_selector('.full.study [data-act=askOpen]', timeout=5000)
+            g1 = await pg.evaluate(state_q)
+            g2 = await pg.evaluate('({lim:CORPUS_WEB.ai&&CORPUS_WEB.ai.limit,noCourse:CORPUS_WEB.courseAI===undefined&&CORPUS_WEB.aiCourse===undefined})')
+            check('…the status arrives: S.sample and the chat button appear with no reload, the same card; the demo has no courseAI and its allowance is 5',
+                  g1['sample'] and g1['img'] and g1['ask'] and g1['study'] and g1['cur'] == g0['cur'] and g1['late'] and not g1['cai'] and g2['noCourse'] and g2['lim'] == 5 and g1['ready'] == 1, json.dumps([g1, g2]))
+            check('late status, demo: no script errors or failed requests', not errs_gl, '; '.join(errs_gl)[:300])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx.close()
+
+            # ---------- the limit RPC fails in the database (private.ai_global was missing): the function says so in its log and answers 500 unavailable ----------
+            def limits_lines():
+                return [l for l in fn_err.read_text(errors='replace').splitlines() if 'corpus-ai limits' in l]
+
+            async def limits_logged(n, t=5):
+                """The lines of the log once there are n of them (the process writes a moment after it has answered)."""
+                end = time.time() + t
+                while len(limits_lines()) < n and time.time() < end:
+                    await asyncio.sleep(0.1)
+                return limits_lines()
+            tok_e = signup_token('limits@test.ee')
+            n_log = len(limits_lines())
+            urllib.request.urlopen(API + '/__fn?takeerr=1')   # corpus_ai_take fails for p_units >= 1; the status (p_units = 0) does not touch the table
+            status_g, j_g = fn_call(tok_e, 'GET')
+            status_p, j_p = fn_call(tok_e, 'POST', {'messages': [{'role': 'user', 'content': 'Mis on os frontale?'}]})
+            lines = await limits_logged(n_log + 1)
+            check('the limit RPC fails: the status still answers (200 ready, the app shows AI buttons), a request answers 500 unavailable with the reason, and the log gets one line «corpus-ai limits 42P01 …»',
+                  status_g == 200 and j_g.get('ready') is True and status_p == 500 and j_p.get('code') == 'unavailable' and 'private.ai_global' in j_p.get('message', '')
+                  and len(lines) == n_log + 1 and '42P01' in lines[-1] and 'private.ai_global' in lines[-1], json.dumps([status_g, j_g, status_p, j_p, lines[n_log:]])[:400])
+            urllib.request.urlopen(API + '/__fn?takeerr=all')   # the status fails as well, and so does the course function (it falls back to corpus_ai_take)
+            status_g, j_g = fn_call(tok_e, 'GET')
+            lines = await limits_logged(n_log + 2)
+            check('…the status fails too: GET answers 500 unavailable and the log gets a line', status_g == 500 and j_g.get('code') == 'unavailable' and len(lines) == n_log + 2 and '42P01' in lines[-1],
+                  json.dumps([status_g, j_g, lines[n_log:]])[:400])
+            status_t, j_t = fn_call(tok_e, 'POST', {'task': 'translate', 'purpose': 'course', 'src': 'ru', 'dst': 'et', 'input': {'title': 'Лобная кость'}})
+            lines = await limits_logged(n_log + 3)
+            check('…a lesson translation fails the same way: 500 unavailable and a line in the log', status_t == 500 and j_t.get('code') == 'unavailable' and len(lines) == n_log + 3 and '42P01' in lines[-1],
+                  json.dumps([status_t, j_t, lines[n_log:]])[:400])
+            urllib.request.urlopen(API + '/__fn')
+            status_g, j_g = fn_call(tok_e, 'GET')
+            status_p, j_p = fn_call(tok_e, 'POST', {'messages': [{'role': 'user', 'content': 'Mis on os frontale?'}]})
+            check('…the table is back: the request is answered (200) and only it was counted (1; the failed ones took nothing), no new line in the log',
+                  status_g == 200 and status_p == 200 and j_p.get('used') == 1 and len(limits_lines()) == n_log + 3, json.dumps([status_g, status_p, j_p])[:300])
 
             # ---------- storage blocked: the code from the link still works ----------
             ctx, pg, errs_d = await open_ctx()

@@ -15,8 +15,8 @@ Corpus — приложение Льва для карточек по анато
 - Порядок колод и фото задаёт `createdAt`. Экспорт и импорт должны его сохранять.
 - В репозиторий никаких секретов: в `config.js` только публичные URL и publishable key Supabase. Репозиторий публичный.
 - Изменения базы: идемпотентный SQL в `supabase/*.sql` (setup, ai, share, stats, reward, demo, push) плюс фрагмент и фрагмент отката для Льва, чтобы он запустил его в Supabase → SQL Editor.
-- Push-уведомления: функция `supabase/functions/corpus-push` (рассылка по расписанию из `supabase/push.sql`), тест `tools/push_test.ts`. Функцию, как и `corpus-ai`, Лев вставляет в Supabase сам.
-- ИИ на сайте: `web.js` даёт приложению `sample` через Edge Function `supabase/functions/corpus-ai` (ключ Claude API только в её секретах, лимиты — `corpus_ai_take`). Задеплоить функцию отсюда нельзя: изменения в ней Лев вставляет в Supabase → Edge Functions сам, дай ему точный код.
+- Push-уведомления: функция `supabase/functions/corpus-push` (рассылка по расписанию из `supabase/push.sql`), тест `tools/push_test.ts`. Функции (и `corpus-push`, и `corpus-ai`) выкладываются так: после «деплой» push в `main` с изменениями в `supabase/functions/**` выкладывает их через `.github/workflows/deploy-functions.yml` (нужен секрет `SUPABASE_ACCESS_TOKEN`); без секрета или для отката — ручная вставка Львом.
+- ИИ на сайте: `web.js` даёт приложению `sample` через Edge Function `supabase/functions/corpus-ai` (ключ Claude API только в её секретах, лимиты — `corpus_ai_take`). Агент функцию не выкладывает и Supabase CLI не запускает: её выкладывает workflow после «деплой» (см. выше); если секрета нет или нужен откат, Лев вставляет код в Supabase → Edge Functions сам, дай ему точный код.
 
 ## Работа агентами
 - Основная сессия — координатор (Opus), цикл — скилл `corpus-cycle`. Код пишет `implementer` (Sonnet), проверяет `qa-quick` (Haiku); `qa-review` и `security-reviewer` (Sonnet) — только по условиям из `corpus-cycle`. Параллельно — только ревьюеры.

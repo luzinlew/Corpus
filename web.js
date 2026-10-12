@@ -104,6 +104,7 @@
     sb.auth.onAuthStateChange(function (ev) { if (ev === 'SIGNED_OUT' && !leaving) setTimeout(function () { location.reload(); }, 0); });
     W.shares = mkShares();
     if (aiOn) W.courseAI = mkCourseAI();
+    else aiP.then(function (st) { if (st) lateAi(true); });   // the status came after the wait: switch AI on without a reload
     return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user), sample: aiOn ? mkSample() : null };
   })();
 
@@ -311,8 +312,10 @@
     W.guest = true; W.uid = 'guest'; W.email = ''; W.starter = ''; W.push = null; W.guestUrls = {};
     guestBanner();
     /* a few AI requests with the cheapest model, counted per visitor by the function (supabase/demo.sql) */
-    var st = await Promise.race([aiStatus(), new Promise(function (r) { setTimeout(function () { r(null); }, 3000); })]);
+    var stP = aiStatus();
+    var st = await Promise.race([stP, new Promise(function (r) { setTimeout(function () { r(null); }, 3000); })]);
     setAi(st);
+    if (!st) stP.then(function (late) { if (late) { setAi(late); lateAi(false); } });   // the status came after the wait: switch AI on without a reload
     return { db: mkGuestDb(), assets: mkGuestAssets(), downloads: mkDownloads(), user: mkUser({ id: 'guest', email: '' }), sample: st ? mkSample() : null };
   }
   function guestBanner() {
@@ -522,6 +525,15 @@
     if (j.course && j.course.left != null) W.aiCourse = { left: j.course.left, free: j.course.free, pool: j.course.pool || null };
   }
   function setAi(st) { if (st) noteAi({ plan: st.plan, limit: st.limit, used: st.used, course: st.course }); }
+  /* the status of the function came after the app had been handed sample = null: make the sample now and tell the app (src/corpus.html, «corpus-ai-ready»).
+     W.lateSample stays for an app that has not yet put its listener on or has just overwritten its sample with null. Called at most once per page. */
+  function lateAi(withCourse) {
+    if (W.lateSample) return;
+    var s = mkSample();
+    if (withCourse) W.courseAI = mkCourseAI();
+    W.lateSample = s;
+    try { window.dispatchEvent(new CustomEvent('corpus-ai-ready', { detail: { sample: s } })); } catch (e) {}
+  }
   /* today's allowance (and the course one, if the function has it), or null while the function is not deployed / has no API key */
   async function aiStatus() {
     try {

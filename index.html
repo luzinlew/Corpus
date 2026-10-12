@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="web.css?v=8a909949eb">
 <script src="config.js?v=d007ae7e35"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=2eddc33ffd"></script>
+<script src="web.js?v=278036af9f"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -6668,14 +6668,25 @@ let rzT=null;
 window.addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{applyStudyLayout();if(view.name==='editor'&&ED){ED.panelH=0;ED.panelLock=0;lockEdPanel();}if(view.name==='crop')layoutCrop();else layoutStage();},80);});
 
 /* ---------- boot ---------- */
+/* a sample that arrived after the start (the site: the AI status was late): AI buttons appear without a reload */
+async function aiLate(s){
+  if(!s||S.sample)return;
+  S.sample=s;
+  if(s.limits){try{const l=await s.limits();S.imgOK=!!(l&&l.images);}catch(e){}}
+  if(S.ready)render();   // before «ready» the first full render is still to come
+}
 async function boot(){
   setLang(detectLang());
   applyLook();
   render();
   const cl=window.claude;
+  /* on the site the status of the AI function can come after the app has started (web.js then sends «corpus-ai-ready» and keeps the sample in CORPUS_WEB.lateSample):
+     the listener is put on BEFORE waiting for cl.use, else an early event would be overwritten by the null below. No CORPUS_WEB (the claude.ai artifact): nothing here */
+  if(window.CORPUS_WEB)window.addEventListener('corpus-ai-ready',e=>aiLate(e&&e.detail&&e.detail.sample));
   if(cl&&cl.use){
     const r=await Promise.all(['db','assets','sample','downloads','user'].map(n=>cl.use(n).catch(()=>null)));
     S.db=r[0];S.assets=r[1];S.sample=r[2];S.downloads=r[3];S.user=r[4];
+    {const lw=window.CORPUS_WEB&&window.CORPUS_WEB.lateSample;if(!S.sample&&lw)S.sample=lw;}   // the event came while we were waiting
     if(S.sample&&S.sample.limits){try{const l=await S.sample.limits();S.imgOK=!!(l&&l.images);}catch(e){}}
     /* someone else's link: this artifact's data belongs to its owner, so a visitor gets a way to make their own copy instead */
     if(S.user){try{const own=await S.user.isOwner();if(own===false&&(await S.user.canEdit())!==true)S.foreign=true;}catch(e){}}

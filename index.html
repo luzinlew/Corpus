@@ -4824,10 +4824,11 @@ async function cnStepPlan(d,r,T){
   let raw=r.cache.plan&&r.cache.plan.k===key?r.cache.plan.res:null;
   if(!raw){raw=await W.courseAI.plan(LANG,T.inp,{signal:r.ac.signal});r.spent+=3;r.cache.plan={k:key,res:raw};}
   if(r.cancel)return;
-  const doc=cnPlanBuild(raw,T);
+  const doc=cnPlanBuild(raw,T);doc.fp=cnFp(d);
   if(JSON.stringify(doc).length>CN_PL.doc)throw {code:'limit'};
   await cnWrite('cplan',d.id,doc);
   if(r.cancel)return;
+  clearTimeout(d._pTm);d._pDirty=new Set();d._open=null;
   d._plan=doc;d._planErr='';d.planAt=doc.at;cnSave(d);
 }
 /* ---- экран шага 2 ---- */
@@ -4893,20 +4894,22 @@ function cnReadHtml(d){
 function cnPlanDoc(o){
   if(!o||typeof o!=='object'||!Array.isArray(o.parts))return null;
   const s=(v,n)=>typeof v==='string'?v.slice(0,n):'';
-  return {at:+o.at||0,lang:cnLangOk(o.lang),parts:o.parts.slice(0,40).map(p=>({id:s(p&&p.id,20),name:s(p&&p.name,80),lessons:(Array.isArray(p&&p.lessons)?p.lessons:[]).slice(0,CN_PL.lessons).map(l=>({
+  return {at:+o.at||0,ed:+o.ed||0,fp:s(o.fp,40),edited:!!o.edited,lang:cnLangOk(o.lang),parts:o.parts.slice(0,40).map(p=>({id:s(p&&p.id,20),name:s(p&&p.name,80),lessons:(Array.isArray(p&&p.lessons)?p.lessons:[]).slice(0,CN_PL.lessons).map(l=>({
     id:s(l&&l.id,20),title:s(l&&l.title,80),pic:l&&typeof l.pic==='string'&&/^[pg]:/.test(l.pic)?l.pic.slice(0,80):null,off:!!(l&&l.off),
-    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>({id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)}))}))}))};
+    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>{const r={id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)};if(t&&(+t.pu===1||+t.pu===2||+t.pu===3))r.pu=+t.pu;return r;})}))}))};
 }
 function cnPlanLoad(d){
   d._planLoad=true;d._planErr='';
   cnDocData('cplan',d.id).then(o=>{const p=cnPlanDoc(o);if(p)d._plan=p;else d._planErr='bad';},()=>{d._planErr='net';}).then(()=>{d._planLoad=false;cnPlanPaint();});
 }
 function cnSrcText(s){
+  if(s==='u')return T3('добавлено вами','added by you','sinu lisatud');
   if(!s||s==='f')return T3('только на рисунке','only on the picture','ainult pildil');
   const pg=T3('стр.','p.','lk');
   return String(s).split('~').map(x=>{const a=x.split('|'),k=a[0],nm=a[1]||'',n=a[2]||'';
     if(k==='b')return nm+', '+pg+' '+n+' · '+T3('жирным','bold','rasvases');
     if(k==='q')return nm+', '+T3('вопрос','question','küsimus')+' '+n;
+    if(k==='u')return T3('добавлено вами','added by you','sinu lisatud');
     if(k==='t')return nm+', '+pg+' '+n;
     return T3('только на рисунке','only on the picture','ainult pildil');}).join('; ');
 }
@@ -4916,32 +4919,51 @@ function cnPicName(d,pic){
   if(a[0]==='p')return cnPhotoName(m,+a[2]||0);
   return cnNameOf(m.name)+', '+T3('стр.','p.','lk')+' '+(+a[2]||0);
 }
-function cnPCount(l){const c=[0,0,0,0];l.terms.forEach(t=>c[t.p]++);return c;}
+/* отпечаток материалов, из которых составлен план: файлы, роли, поколение текста, число фото; сменился — на шаге 3 плашка «материалы изменились» */
+function cnFp(d){
+  const s=d.mats.filter(m=>m.status==='ready').map(m=>m.id+':'+m.role+':'+(m.gen||0)+':'+(m.photos||0)).sort().join(',');
+  let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;
+  return (h>>>0).toString(36)+'.'+d.mats.length;
+}
+const cnStale=d=>!!(d._plan&&d._plan.fp&&d._plan.fp!==cnFp(d));
+const cnEffP=t=>t.pu||t.p;
+function cnPCount(l){const c=[0,0,0,0];l.terms.forEach(t=>c[cnEffP(t)]++);return c;}
+const cnXid=()=>'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+function cnFindL(d,lid){for(const p of d._plan.parts){const l=p.lessons.find(x=>x.id===lid);if(l)return {p:p,l:l};}return null;}
+const CN_CHK1='<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width:3.2"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 function cnPlanInner(d){
   const doc=d._plan;
   if(!doc)return d._planErr?'<div class="cnwarn" role="alert">'+esc(d._planErr==='net'?T3('Не удалось загрузить план. Проверьте соединение.','Could not load the plan. Check the connection.','Plaani ei õnnestunud laadida. Kontrolli ühendust.'):T3('План не читается — составьте его заново.','The plan cannot be read: make it again.','Plaani ei saa lugeda – koosta see uuesti.'))+'</div>'+
     (d._planErr==='net'?'<button class="cnretry" data-cn="pload">'+T3('Повторить','Retry','Proovi uuesti')+'</button>':''):'<p class="cnpriv">'+T3('Загружаю план…','Loading the plan…','Laen plaani…')+'</p>';
-  const tot=[0,0,0,0];let nl=0;doc.parts.forEach(p=>p.lessons.forEach(l=>{nl++;cnPCount(l).forEach((n,i)=>{tot[i]+=n;});}));
-  const sum=Math.max(1,tot[1]+tot[2]+tot[3]),open=d._open||(d._open=new Set());
-  const pp=(c)=>'<span class="cnpp"><em class="p1">P1 '+c[1]+'</em><em class="p2">P2 '+c[2]+'</em><em class="p3">P3 '+c[3]+'</em></span>';
-  let h='<div class="cnpsum"><div class="cnpk">'+CN_SP14+T3('ИИ предлагает','The AI suggests','TI soovitab')+'</div><div class="cnph" id="cnPH">'+
-    plx(doc.parts.length,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(nl)+'</div>'+
+  const tot=[0,0,0,0],open=d._open||(d._open=new Set());let nl=0,np=0;
+  doc.parts.forEach(p=>{let on=0;p.lessons.forEach(l=>{if(l.off)return;on++;nl++;cnPCount(l).forEach((n,i)=>{tot[i]+=n;});});if(on)np++;});
+  const sum=Math.max(1,tot[1]+tot[2]+tot[3]);
+  const pp=c=>'<span class="cnpp"><em class="p1">P1 '+c[1]+'</em><em class="p2">P2 '+c[2]+'</em><em class="p3">P3 '+c[3]+'</em></span>';
+  let h=(cnStale(d)?'<div class="cnwarn cnstale" role="status"><span>'+T3('Материалы изменились — пересоставить план?','The materials have changed. Make the plan again?','Materjalid on muutunud. Kas koostada plaan uuesti?')+'</span><button class="cnretry" data-cn="replan">'+T3('Пересоставить','Make again','Koosta uuesti')+'</button></div>':'')+
+    '<div class="cnpsum"><div class="cnpk">'+CN_SP14+T3('ИИ предлагает','The AI suggests','TI soovitab')+'</div><div class="cnph" id="cnPH">'+
+    plx(np,['часть','части','частей'],['part','parts'],['osa','osa'])+' · '+crNL(nl)+'</div>'+
     '<div class="cnpx1">'+crNS(tot[1]+tot[2]+tot[3])+'</div>'+
     '<div class="cnpbar"><span class="p1" style="width:'+(tot[1]/sum*100)+'%"></span><span class="p2" style="width:'+(tot[2]/sum*100)+'%"></span><span class="p3" style="width:'+(tot[3]/sum*100)+'%"></span></div>'+
     '<div class="cnpleg"><span><i class="p1"></i>P1 · '+tot[1]+'</span><span><i class="p2"></i>P2 · '+tot[2]+'</span><span><i class="p3"></i>P3 · '+tot[3]+'</span></div></div>'+
-    '<p class="cnpriv">'+T3('Нажмите на урок — увидите его структуры и откуда взята важность.','Tap a lesson to see its structures and where the importance comes from.','Puuduta õppetundi – näed selle struktuure ja kust olulisus pärineb.')+'</p>';
+    '<p class="cnpriv">'+T3('Снимите галочку, чтобы урок не собирался. Нажмите на урок — увидите его структуры и откуда взята важность.','Untick a lesson to leave it out of the build. Tap a lesson to see its structures and where the importance comes from.','Eemalda linnuke, et õppetundi ei koostataks. Puuduta õppetundi – näed selle struktuure ja kust olulisus pärineb.')+'</p>';
   doc.parts.forEach((p,pi)=>{
-    h+='<div class="cnpt"><span class="cnpn">'+(pi+1)+'</span><b data-noi18n>'+esc(p.name)+'</b><small>'+crNL(p.lessons.length)+'</small></div>';
+    h+='<div class="cnpt"><span class="cnpn">'+(pi+1)+'</span><button class="cnptb" data-cn="pren" data-pid="'+esc(p.id)+'" aria-label="'+esc(T3('Переименовать часть','Rename the part','Nimeta osa ümber'))+'"><b data-noi18n>'+esc(p.name)+'</b><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button><small>'+crNL(p.lessons.length)+'</small></div>';
     p.lessons.forEach(l=>{
       const c=cnPCount(l),pn=cnPicName(d,l.pic),isOpen=open.has(l.id),isP=l.pic&&l.pic[0]==='g';
-      h+='<div class="cnpl'+(isOpen?' open':'')+'" data-lid="'+esc(l.id)+'"><button class="cnplh" data-cn="lopen" data-lid="'+esc(l.id)+'" aria-expanded="'+isOpen+'"><span class="cnpic'+(pn?'':' none')+'">'+
+      h+='<div class="cnpl'+(isOpen?' open':'')+(l.off?' off':'')+'" data-lid="'+esc(l.id)+'"><div class="cnplr"><button class="cnck1" data-cn="loff" data-lid="'+esc(l.id)+'" aria-pressed="'+!l.off+'" aria-label="'+esc(T3('Собрать урок','Build the lesson','Koosta õppetund')+' '+l.title)+'"><span class="cnbx">'+(l.off?'':CN_CHK1)+'</span></button>'+
+        '<button class="cnplh" data-cn="lopen" data-lid="'+esc(l.id)+'" aria-expanded="'+isOpen+'"><span class="cnpic'+(pn?'':' none')+'">'+
         (!pn?'!':isP?'<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h5"/></svg>':'<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>')+'</span>'+
         '<span class="cnplm"><i class="cnlt" data-noi18n>'+esc(l.title)+'</i><small data-noi18n>'+(pn?esc(T3('рисунок: ','picture: ','pilt: ')+pn):esc(T3('рисунка нет','no picture','pilti pole')))+'</small>'+pp(c)+'</span>'+
-        '<svg class="cnchev" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>'+
+        '<svg class="cnchev" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>'+
         (pn?'':'<div class="cnwarn sm">'+T3('Подходящего рисунка нет — урок будет только с вопросами','No suitable picture: the lesson will have questions only','Sobivat pilti pole – õppetunnis on ainult küsimused')+'</div>')+
-        (isOpen?'<div class="cnpx">'+l.terms.map(t=>'<div class="cnpr"><span><i data-noi18n>'+esc(t.la)+'</i><small data-noi18n>'+esc(cnSrcText(t.src))+'</small></span><em class="pc p'+t.p+'">P'+t.p+'</em></div>').join('')+
-          '<div class="cnphint">'+T3('P1 — жирным в «Основе» или спрашивают на экзамене. P2 — упомянуто в «Основе» или «Дополнении». P3 — только на рисунке.','P1: bold in the Core or asked in the exam. P2: mentioned in the Core or Extra. P3: only on the picture.','P1 – rasvases „Põhis“ või eksamil küsitakse. P2 – mainitud „Põhis“ või „Täiendus“. P3 – ainult pildil.')+'</div></div>':'')+'</div>';
+        (isOpen?'<div class="cnpx"><div class="cnppic"><span data-noi18n>'+(pn?esc(T3('Рисунок: ','Picture: ','Pilt: ')+pn):esc(T3('Без рисунка','No picture','Pildita')))+'</span><button class="cnsm" data-cn="pic" data-lid="'+esc(l.id)+'">'+T3('Сменить','Change','Muuda')+'</button></div>'+
+          l.terms.map(t=>{const e=cnEffP(t);return '<div class="cnpr"><span><i data-noi18n>'+esc(t.la)+'</i><small data-noi18n>'+esc(cnSrcText(t.src))+(t.pu&&t.pu!==t.p?' · '+esc(T3('изменено вами','changed by you','sinu muudetud')):'')+'</small></span>'+
+            '<button class="pc p'+e+'" data-cn="pcyc" data-lid="'+esc(l.id)+'" data-tid="'+esc(t.id)+'" aria-label="'+esc(T3('Важность: P','Importance: P','Olulisus: P')+e)+'">P'+e+'</button>'+
+            '<button class="cntx" data-cn="tdel" data-lid="'+esc(l.id)+'" data-tid="'+esc(t.id)+'" aria-label="'+esc(T3('Убрать структуру ','Remove the structure ','Eemalda struktuur ')+t.la)+'"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';}).join('')+
+          '<div class="cnpadd"><input class="cntin" data-lid="'+esc(l.id)+'" maxlength="60" autocomplete="off" placeholder="'+esc(T3('Латинское название','Latin name','Ladinakeelne nimi'))+'"><button class="cnsm" data-cn="tadd" data-lid="'+esc(l.id)+'">'+T3('Добавить структуру','Add a structure','Lisa struktuur')+'</button></div>'+
+          '<div class="cnphint">'+T3('P1 — жирным в «Основе» или спрашивают на экзамене. P2 — упомянуто в «Основе» или «Дополнении». P3 — только на рисунке. Нажмите на P, чтобы поменять.','P1: bold in the Core or asked in the exam. P2: mentioned in the Core or Extra. P3: only on the picture. Tap a P to change it.','P1 – rasvases „Põhis“ või eksamil küsitakse. P2 – mainitud „Põhis“ või „Täiendus“. P3 – ainult pildil. P muutmiseks puuduta seda.')+'</div></div>':'')+'</div>';
     });
+    h+='<button class="cnadd" data-cn="ladd" data-pid="'+esc(p.id)+'"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>'+T3('Добавить урок','Add a lesson','Lisa õppetund')+'</button>';
   });
   return h;
 }
@@ -4958,21 +4980,114 @@ function cnPlanPaint(){
   const d=view.name==='courseNew'&&view.step===3&&CDRAFTS.get(view.did),el=$('#cnPl');if(!d||!el)return;
   const sy=window.scrollY;el.innerHTML=cnPlanInner(d);const b=$('#cnBar');if(b)b.innerHTML=cnPlanBar(d);window.scrollTo(0,sy);
 }
+/* ---- правки плана: пишутся в cplan/<черновик> через секунду; перед записью документ перечитывается, чужие правки того же плана (по урокам) сохраняются ---- */
+function cnPlanEdit(d,key){
+  (d._pDirty||(d._pDirty=new Set())).add(key);d._plan.edited=true;
+  clearTimeout(d._pTm);d._pTm=setTimeout(()=>cnPlanSave(d),1000);cnPlanPaint();
+}
+function cnPlanMerge(doc,c,dirty){
+  const mine=new Map();doc.parts.forEach(p=>p.lessons.forEach(l=>mine.set(l.id,l)));
+  c.parts.forEach(cp=>{
+    const lp=doc.parts.find(p=>p.id===cp.id);
+    if(!lp){doc.parts.push(cp);return;}
+    if(!dirty.has(cp.id))lp.name=cp.name;
+    cp.lessons.forEach(cl=>{const ml=mine.get(cl.id);if(!ml)lp.lessons.push(cl);else if(!dirty.has(cl.id))Object.assign(ml,cl);});
+  });
+  if(c.edited)doc.edited=true;
+}
+async function cnPlanSave(d){
+  clearTimeout(d._pTm);d._pTm=0;
+  if(!d._plan||!d._pDirty||!d._pDirty.size)return;
+  if(d._pBusy){d._pAgain=true;return;}
+  d._pBusy=true;
+  try{
+    const dirty=new Set(d._pDirty),doc=d._plan;let c=null;
+    try{c=cnPlanDoc(await cnDocData('cplan',d.id));}catch(e){}
+    if(c&&c.at===doc.at)cnPlanMerge(doc,c,dirty);
+    doc.ed=Date.now();
+    if(JSON.stringify(doc).length>CN_PL.doc)throw {code:'limit'};
+    await cnWrite('cplan',d.id,doc);
+    dirty.forEach(k=>d._pDirty.delete(k));
+  }catch(e){toast(e&&e.code==='quota'?cnQuotaText():T3('Не удалось сохранить план. Проверьте соединение.','Could not save the plan. Check the connection.','Plaani ei õnnestunud salvestada. Kontrolli ühendust.'),5000);}
+  d._pBusy=false;
+  if(d._pAgain){d._pAgain=false;cnPlanSave(d);}else cnPlanPaint();
+}
+const cnPlanFlush=d=>d&&d._pDirty&&d._pDirty.size?cnPlanSave(d):Promise.resolve();
+/* лист выбора рисунка: фото «Картинки» (миниатюра, если оригинал на этом устройстве) с числом подписей, совпавших со структурами урока, и лучшие страницы PDF */
+async function cnPicSheet(d,l){
+  const keys=new Set(l.terms.map(t=>cnNorm(t.la)).filter(Boolean)),urls=[],items=[];
+  const pr=showOverlay('<div class="stitle">'+T3('Рисунок для урока','Picture for the lesson','Õppetunni pilt')+'</div><p class="cnpriv" style="padding:8px 16px">'+T3('Загружаю…','Loading…','Laen…')+'</p>');
+  try{
+    for(const m of d.mats.filter(x=>x.kind==='img'&&x.role==='pics'&&x.status==='ready')){
+      for(let i=0;i<(m.photos||0);i++){
+        let score=0;const lid=(m.lab||[])[i];
+        if(lid&&lid!=='-'){try{const o=await cnDocData('ctext',lid);score=(o&&Array.isArray(o.labels)?o.labels:[]).filter(x=>x&&keys.has(cnNorm(x.t))).length;}catch(e){}}
+        const blob=await cnGet(cnKey(d.id,m.id,i));let th='';if(blob){th=URL.createObjectURL(blob);urls.push(th);}
+        items.push({ref:'p:'+m.id+':'+i,name:cnPhotoName(m,i),score:score,th:th,photo:true});
+      }
+    }
+    const pg=[];
+    for(const m of cnTextMats(d).filter(x=>x.kind==='pdf')){
+      let pages=[];try{pages=await cnPagesOf(m);}catch(e){}
+      pages.forEach(p=>{const hay=' '+cnNorm(p.text)+' ';let sc=0;keys.forEach(k=>{if(hay.indexOf(' '+k+' ')>=0)sc++;});if(sc)pg.push({ref:'g:'+m.id+':'+p.n,name:cnNameOf(m.name)+', '+T3('стр.','p.','lk')+' '+p.n+((p.em[0]||'')?' · '+p.em[0].slice(0,40):''),score:sc,th:'',photo:false});});
+    }
+    items.sort((a,b)=>b.score-a.score);pg.sort((a,b)=>b.score-a.score);
+    const all=items.slice(0,24).concat(pg.slice(0,5));
+    const sheet=layer.querySelector('.sheet');
+    if(!sheet){urls.forEach(u=>URL.revokeObjectURL(u));return;}
+    sheet.innerHTML='<div class="stitle">'+T3('Рисунок для урока','Picture for the lesson','Õppetunni pilt')+'</div>'+
+      all.map(x=>'<button class="sitem cnpick'+(l.pic===x.ref?' on':'')+'" data-s="'+esc(x.ref)+'"><span class="cnth">'+(x.th?'<img alt="" src="'+x.th+'">':x.photo?'<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>':'<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h5"/></svg>')+'</span><span data-noi18n>'+esc(x.name)+'<small>'+esc(T3('совпало подписей: '+x.score,'matching labels: '+x.score,'sobivaid silte: '+x.score))+'</small></span></button>').join('')+
+      '<button class="sitem cnpick'+(l.pic?'':' on')+'" data-s="none"><span class="cnth">∅</span><span>'+T3('Без рисунка','No picture','Pildita')+'</span></button>';
+    sheet.querySelectorAll('[data-s]').forEach(b=>{b.onclick=()=>dismissOverlay(b.dataset.s);});
+  }catch(e){dismissOverlay(null);}
+  const v=await pr;urls.forEach(u=>URL.revokeObjectURL(u));
+  if(!v||!d._plan||!cnFindL(d,l.id))return;
+  l.pic=v==='none'?null:v;cnPlanEdit(d,l.id);
+}
 /* шаги 2 и 3: нажатия */
+async function cnReplan(d){
+  await cnPlanFlush(d);
+  const y=await confirmDialog({title:T3('Пересоставить план?','Make the plan again?','Kas koostada plaan uuesti?'),text:T3('Ваши правки плана пропадут, ИИ составит план заново (≈ '+cnEst(d)+' запросов).','Your edits of the plan will be lost; the AI makes the plan again (≈ '+cnEst(d)+' requests).','Sinu plaani muudatused kaovad, TI koostab plaani uuesti (≈ '+cnEst(d)+' päringut).'),ok:T3('Пересоставить','Make again','Koosta uuesti'),danger:true});
+  if(!y||!cnPlanOk0(d)||view.name!=='courseNew'||view.did!==d.id)return;
+  cnRunStart(d);go({name:'courseNew',did:d.id,step:2});
+}
 function cnMountStep(d,root){
-  const act=(a,b)=>{
-    if(a==='close'){cnRunStop(d);cnClose(d);}
-    else if(a==='step'){cnRunStop(d);go({name:'courseNew',did:d.id});}
+  const act=async(a,b)=>{
+    const f=b&&b.dataset.lid?cnFindL(d,b.dataset.lid):null;
+    if(a==='close'){cnRunStop(d);cnPlanFlush(d);cnClose(d);}
+    else if(a==='step'){cnRunStop(d);cnPlanFlush(d);go({name:'courseNew',did:d.id});}
     else if(a==='rcancel'){cnRunStop(d);go({name:'courseNew',did:d.id});toast(T3('Остановлено. Черновик цел.','Stopped. The draft is kept.','Peatatud. Mustand on alles.'),3500);}
     else if(a==='rback')go({name:'courseNew',did:d.id});
     else if(a==='rretry'){cnRunStart(d);cnRPaint();}
     else if(a==='lopen'){const id=b.dataset.lid,o=d._open||(d._open=new Set());if(o.has(id))o.delete(id);else o.add(id);cnPlanPaint();}
     else if(a==='pload'&&!d._planLoad)cnPlanLoad(d);
-    else if(a==='replan'&&cnPlanOk0(d)){cnRunStart(d);go({name:'courseNew',did:d.id,step:2});}
+    else if(a==='replan'&&cnPlanOk0(d))cnReplan(d);
+    else if(a==='loff'&&f){f.l.off=!f.l.off;cnPlanEdit(d,f.l.id);}
+    else if(a==='pcyc'&&f){const t=f.l.terms.find(x=>x.id===b.dataset.tid);if(t){const n=cnEffP(t)%3+1;if(n===t.p)delete t.pu;else t.pu=n;cnPlanEdit(d,f.l.id);}}
+    else if(a==='tdel'&&f){f.l.terms=f.l.terms.filter(x=>x.id!==b.dataset.tid);cnPlanEdit(d,f.l.id);}
+    else if(a==='tadd'&&f)cnAddTerm(d,f.l);
+    else if(a==='pic'&&f)cnPicSheet(d,f.l);
+    else if(a==='pren'){const p=d._plan.parts.find(x=>x.id===b.dataset.pid);if(!p)return;
+      const v=await promptDialog({title:T3('Название части','Part name','Osa nimi'),value:p.name});
+      if(v&&v.slice(0,80)!==p.name&&d._plan.parts.includes(p)){p.name=v.slice(0,80);cnPlanEdit(d,p.id);}}
+    else if(a==='ladd'){const p=d._plan.parts.find(x=>x.id===b.dataset.pid);if(!p)return;
+      const v=await promptDialog({title:T3('Название урока','Lesson name','Õppetunni nimi'),placeholder:T3('Латинское название','Latin name','Ladinakeelne nimi')});
+      if(v==null||!d._plan.parts.includes(p))return;
+      const t=cnLatin(v);if(!t){toast(T3('Введите латинское название (буквы A–Z).','Enter a Latin name (letters A–Z).','Sisesta ladinakeelne nimi (tähed A–Z).'),3500);return;}
+      const l={id:cnXid(),title:t,pic:null,off:false,terms:[]};p.lessons.push(l);(d._open||(d._open=new Set())).add(l.id);d._pDirty=d._pDirty||new Set();d._pDirty.add(p.id);cnPlanEdit(d,l.id);}
   };
   const h=e=>{const b=e.target.closest('[data-cn]');if(b)act(b.dataset.cn,b);};
   root.onclick=h;const bar=$('#cnBar');if(bar)bar.onclick=h;
+  root.onkeydown=e=>{if(e.key==='Enter'&&e.target.classList&&e.target.classList.contains('cntin')){e.preventDefault();const f=cnFindL(d,e.target.dataset.lid);if(f)cnAddTerm(d,f.l,e.target);}};
   if(view.step===3&&!d._plan&&!d._planLoad&&!d._planErr)cnPlanLoad(d);
+}
+function cnAddTerm(d,l,inp){
+  inp=inp||document.querySelector('.cntin[data-lid="'+l.id+'"]');const t=cnLatin(inp?inp.value:'');
+  if(!t){toast(T3('Введите латинское название (буквы A–Z).','Enter a Latin name (letters A–Z).','Sisesta ladinakeelne nimi (tähed A–Z).'),3500);return;}
+  const k=cnNorm(t);
+  if(d._plan.parts.some(p=>p.lessons.some(x=>x.terms.some(y=>cnNorm(y.la)===k)))){toast(T3('Такая структура уже есть в плане.','This structure is already in the plan.','Selline struktuur on plaanis juba olemas.'),3500);return;}
+  if(l.terms.length>=CN_PL.perLesson){toast(T3('В уроке не больше 40 структур.','A lesson takes up to 40 structures.','Õppetunnis on kuni 40 struktuuri.'),3500);return;}
+  l.terms.push({id:cnXid(),la:t,p:2,src:'u'});cnPlanEdit(d,l.id);
 }
 /* ---- on the «Courses» tab: the button and the cards of drafts ---- */
 const cnNewBtn=big=>cnOn()?'<button class="cnnew'+(big?' big':'')+'" data-cn="new"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>'+T3('Новый курс','New course','Uus kursus')+'</button>':'';
@@ -7655,7 +7770,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
@@ -8076,7 +8191,7 @@ html.vkb .panel{padding-bottom:12px}
 .cnbtn2:disabled{opacity:.5;cursor:default}
 .cnbtns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:8px}.cnbtns .cnbtn2{min-height:58px;border-radius:29px;font-size:14.5px}
 .cnmain.on{background:var(--primary);color:var(--primary-ink);cursor:pointer;box-shadow:0 12px 28px rgba(31,27,51,.22)}
-.cnpl0{display:flex;flex-direction:column;gap:12px}
+.cnpl0{display:flex;flex-direction:column;gap:12px}.cnw>*,.cnpl0>*,.cnpl>*{min-width:0;max-width:100%}.cnplh,.cnptb{box-sizing:border-box}
 .cnpsum{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:24px;border:1px solid var(--glass-line);background:var(--glass);box-shadow:var(--glass-shadow)}
 .cnpk{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--accent-ink)}
 .cnph{font-size:21px;font-weight:600;letter-spacing:-.2px;line-height:1.2}.cnpx1{font-size:13px;color:var(--ink2)}
@@ -8099,6 +8214,22 @@ html.vkb .panel{padding-bottom:12px}
 .cnpr i{font-family:'Source Serif 4',Georgia,serif;font-size:15px;font-weight:600;overflow-wrap:anywhere}.cnpr small{font-size:11.5px;color:var(--ink2);overflow-wrap:anywhere}
 .pc{flex:none;min-width:44px;box-sizing:border-box;text-align:center;padding:6px 0;border-radius:10px;font-style:normal;font-size:12.5px;font-weight:700}
 .cnphint{margin-top:6px;font-size:12px;color:var(--ink2)}
+/* шаг 3: правки плана (T-018, заход B) */
+.cnplr{display:flex;align-items:center;gap:4px;padding-left:4px}.cnplr .cnplh{flex:1;min-width:0;padding-left:0}
+.cnck1{flex:none;width:40px;height:44px;border:none;background:transparent;display:flex;align-items:center;justify-content:center;padding:0}
+.cnbx{width:22px;height:22px;box-sizing:border-box;border-radius:7px;border:2px solid var(--mask-edge);display:flex;align-items:center;justify-content:center;color:var(--primary-ink)}
+.cnck1[aria-pressed=true] .cnbx{background:var(--primary);border-color:var(--primary)}
+.cnpl.off .cnplh,.cnpl.off .cnpx,.cnpl.off .cnwarn{opacity:.5}
+.cnptb{flex:1;min-width:0;display:flex;align-items:center;gap:6px;border:none;background:none;color:inherit;padding:0;text-align:left}.cnptb b{font-size:16px;font-weight:600;overflow-wrap:anywhere}.cnptb svg{flex:none;color:var(--ink3)}
+.cnadd{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:16px;border:1.5px dashed var(--mask-edge);background:transparent;color:var(--ink);font-size:14px;font-weight:600}
+.cnsm{flex:none;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--glass-strong);color:var(--ink);font-size:12.5px;font-weight:600}
+.cnppic{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0 6px;font-size:12.5px;color:var(--ink2)}.cnppic span{min-width:0;overflow-wrap:anywhere}
+.cnpadd{display:flex;align-items:center;gap:8px;padding-top:8px}.cntin{flex:1;min-width:0;box-sizing:border-box;min-height:40px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:14px}
+.cntx{flex:none;width:32px;height:32px;padding:0;border:none;background:transparent;color:var(--ink3);display:flex;align-items:center;justify-content:center}
+.cnstale{display:flex;align-items:center;justify-content:space-between;gap:10px}.cnstale .cnretry{flex:none}
+.cnpick{display:flex;align-items:center;gap:12px;text-align:left}.cnth{flex:none;width:40px;height:40px;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--ink3)}.cnth img{width:100%;height:100%;object-fit:cover}
+.cnpick span{min-width:0}.cnpick small{display:block;font-size:12px;color:var(--ink2)}
+.cnth svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 </style>
 </body>
 </html>

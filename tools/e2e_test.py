@@ -2682,6 +2682,12 @@ async def main():
             lastai = lambda: json.loads(urllib.request.urlopen(API + '/__lasttr').read())
             tasks_of = lambda a: [c.get('task') for c in a]
 
+            async def replan_go():
+                """«Make the plan again» on step 3: it asks first (the edits are lost), then goes."""
+                await pg.click('.cnbtns [data-cn=replan]')
+                await pg.wait_for_selector('#layer .dlg')
+                await pg.click('#layer [data-s="1"]')
+
             async def pl_ready(n):
                 await pg.wait_for_function(f"(()=>{{const d=CDRAFTS.get(view.did);return d&&d.mats.length>={n}&&d.mats.every(m=>m.status!=='reading')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')}})()", timeout=60000)
             await pg.evaluate("go({name:'courses'})")
@@ -2812,7 +2818,7 @@ async def main():
             urllib.request.urlopen(API + '/__fn?fail_after=1')
             refusal_window['on'] = True
             n2 = len(ai_p)
-            await pg.click('[data-cn=replan]')
+            await replan_go()
             await pg.wait_for_selector('.cnerr', timeout=120000)
             et = await pg.evaluate("({t:document.querySelector('.cnerr').innerText,retry:document.querySelector('[data-cn=rretry]')?document.querySelector('[data-cn=rretry]').innerText:null})")
             refusal_window['on'] = False
@@ -2824,7 +2830,7 @@ async def main():
             check('plan: «Proovi uuesti» goes on from where it stopped: the first outline answer is not asked again (outline, plan), then step 3', tasks_of(ai_p[n3:]) == ['outline', 'plan'], json.dumps(tasks_of(ai_p[n3:])))
             for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short')):
                 urllib.request.urlopen(API + '/__fn?' + mode)
-                await pg.click('[data-cn=replan]')
+                await replan_go()
                 await pg.wait_for_selector('.cnerr', timeout=120000)
                 et = await pg.evaluate("({t:document.querySelector('.cnerr').innerText,retry:!!document.querySelector('[data-cn=rretry]')})")
                 check(f'plan: an answer that is {word} → «TI vastas ootamatus vormingus» and «Proovi uuesti»', 'TI vastas ootamatus vormingus' in et['t'] and et['retry'], json.dumps(et, ensure_ascii=False))
@@ -2833,12 +2839,185 @@ async def main():
                 await pg.wait_for_selector('.cnph', timeout=120000)
             check('plan: …and after it the plan is there again', await pg.inner_text('.cnph') == '5 osa · 10 õppetundi')
 
+            # --- edits of the plan (T-018, B): P, off, picture, a lesson and a structure added, a part renamed; all saved in cplan; stale materials; «Make again» asks first ---
+            urllib.request.urlopen(API + '/__course?free=500&limit=')
+            cpd = lambda: next((r['data'] for r in state()['docs'] if r['coll'] == 'cplan'), None)
+            lesson_of = lambda doc, title: next((l for p in doc['parts'] for l in p['lessons'] if l['title'] == title), None)
+            term_of = lambda doc, la: next((t for p in doc['parts'] for l in p['lessons'] for t in l['terms'] if t['la'] == la), None)
+            leg = lambda: pg.evaluate("document.querySelector('.cnpleg').innerText.replace(/\\s+/g,' ')")
+            L = lambda title: f'.cnpl:has(.cnlt:text-is("{title}"))'
+            await state_when(lambda s: any(r['coll'] == 'cplan' for r in s['docs']))
+            check('plan edits: a fresh plan has no «changed» marks; no «materials changed» bar', not cpd().get('edited') and not await pg.query_selector('.cnstale'))
+            # P by tap: P2 → P3 → P1 → P2 (the last one is the machine\'s own P again: the mark goes away)
+            await pg.click(L('Processus coracoideus') + ' .cnplh')
+            await pg.click(L('Processus coracoideus') + ' .pc')
+            check('plan edits: a tap on P changes it P2 → P3: the legend and the counters are recounted, the mark «sinu muudetud» shows', await leg() == 'P1 · 3 P2 · 4 P3 · 3' and await pg.inner_text(L('Processus coracoideus') + ' .pc') == 'P3'
+                  and 'sinu muudetud' in await pg.inner_text(L('Processus coracoideus') + ' .cnpr') and (await pg.inner_text(L('Processus coracoideus') + ' .cnpp')).replace('\n', ' ') == 'P1 0 P2 0 P3 1', await leg())
+            st = await state_when(lambda s: (term_of(next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {'parts': []}), 'Processus coracoideus') or {}).get('pu') == 3)
+            t = term_of(cpd(), 'Processus coracoideus')
+            check('plan edits: …saved in cplan after a moment: pu 3, the machine\'s p 2 and the source are kept, the plan is marked edited', t['pu'] == 3 and t['p'] == 2 and t['src'].startswith('t|') and cpd()['edited'] is True, json.dumps(t))
+            await pg.click(L('Acromion scapulae') + ' .cnplh')
+            for _ in range(3):
+                await pg.click(L('Acromion scapulae') + ' .pc')
+            await pg.wait_for_timeout(1500)
+            check('plan edits: three taps go round P2 → P3 → P1 → P2 and the manual mark is gone (no pu)', 'pu' not in term_of(cpd(), 'Acromion scapulae') and await pg.inner_text(L('Acromion scapulae') + ' .pc') == 'P2' and 'sinu muudetud' not in await pg.inner_text(L('Acromion scapulae') + ' .cnpr'))
+            # a lesson off
+            await pg.click(L('Spina scapulae') + ' [data-cn=loff]')
+            check('plan edits: a ticked-off lesson is dimmed and does not count: «5 osa · 9 õppetundi», P1 · 2', await pg.get_attribute(L('Spina scapulae') + ' [data-cn=loff]', 'aria-pressed') == 'false' and await pg.query_selector('.cnpl.off') is not None
+                  and await pg.inner_text('.cnph') == '5 osa · 9 õppetundi' and await leg() == 'P1 · 2 P2 · 4 P3 · 3', await leg())
+            await state_when(lambda s: (lesson_of(next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {'parts': []}), 'Spina scapulae') or {}).get('off') is True)
+            check('plan edits: …off: true in cplan', lesson_of(cpd(), 'Spina scapulae')['off'] is True and lesson_of(cpd(), 'Margo medialis')['off'] is False)
+            # the picture
+            await pg.click(L('Margo medialis') + ' .cnplh')
+            await pg.click(L('Margo medialis') + ' [data-cn=pic]')
+            await pg.wait_for_selector('#layer .cnpick')
+            await pg.wait_for_function("document.querySelectorAll('#layer .cnpick').length>=2&&!document.querySelector('#layer .cnpriv')")
+            sh = await pg.evaluate("[...document.querySelectorAll('#layer .cnpick')].map(b=>({s:b.dataset.s,t:b.innerText.replace(/\\n/g,' / '),img:!!b.querySelector('img'),on:b.classList.contains('on')}))")
+            check('plan edits: «Muuda» opens a sheet: the photo with a thumbnail from this device and the number of matching labels (the current one marked), pages of the PDF, «Pildita»',
+                  sh[0]['s'].startswith('p:') and sh[0]['img'] and sh[0]['on'] and 'atlas-sildid.png' in sh[0]['t'] and 'sobivaid silte: 1' in sh[0]['t'] and sh[-1]['s'] == 'none' and sh[-1]['t'].endswith('Pildita') and not sh[-1]['on'], json.dumps(sh, ensure_ascii=False))
+            await pg.click('#layer .cnpick[data-s=none]')
+            await pg.wait_for_function("!document.querySelector('#layer .cnpick')")
+            check('plan edits: «Pildita» → the lesson has no picture and shows the warning', 'pilti pole' in await pg.inner_text(L('Margo medialis') + ' .cnplm small') and await pg.query_selector(L('Margo medialis') + ' .cnwarn') is not None)
+            await state_when(lambda s: (lesson_of(next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {'parts': []}), 'Margo medialis') or {}).get('pic') is None and next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {}).get('edited'))
+            await pg.click(L('Fossa supraspinata') + ' .cnplh')
+            await pg.click(L('Fossa supraspinata') + ' [data-cn=pic]')
+            await pg.wait_for_function("document.querySelectorAll('#layer .cnpick').length>=2&&!document.querySelector('#layer .cnpriv')")
+            sh = await pg.evaluate("[...document.querySelectorAll('#layer .cnpick')].map(b=>({s:b.dataset.s,t:b.innerText.replace(/\\n/g,' / ')}))")
+            pgs = [x for x in sh if x['s'].startswith('g:')]
+            check('plan edits: pages of the PDF are offered by the terms found on them («Anatoomia loeng, lk 1 · Abaluu», 1 matching)', pgs and 'Anatoomia loeng, lk 1 · Abaluu' in pgs[0]['t'] and 'sobivaid silte: 1' in pgs[0]['t'], json.dumps(sh, ensure_ascii=False))
+            await pg.click(f"#layer .cnpick[data-s='{pgs[0]['s']}']")
+            await pg.wait_for_function("!document.querySelector('#layer .cnpick')")
+            check('plan edits: a page chosen as the picture: «pilt: Anatoomia loeng, lk 1»', await pg.inner_text(L('Fossa supraspinata') + ' .cnplm small') == 'pilt: Anatoomia loeng, lk 1' and await pg.query_selector(L('Fossa supraspinata') + ' .cnwarn') is None)
+            # a lesson and a structure added
+            await pg.click('[data-cn=ladd] >> nth=0')
+            await pg.wait_for_selector('#dlgIn')
+            await pg.fill('#dlgIn', '123')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('ladinakeelne'))")
+            n_l = await pg.evaluate("document.querySelectorAll('.cnpl').length")
+            check('plan edits: a lesson name that is not Latin is refused with a toast', n_l == 10, str(n_l))
+            await pg.click('[data-cn=ladd] >> nth=0')
+            await pg.wait_for_selector('#dlgIn')
+            await pg.fill('#dlgIn', 'Sutura coronalis')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_selector(L('Sutura coronalis'))
+            await pg.fill(L('Sutura coronalis') + ' .cntin', 'Tuber parietale')
+            await pg.press(L('Sutura coronalis') + ' .cntin', 'Enter')
+            await pg.fill(L('Sutura coronalis') + ' .cntin', 'Os frontale')
+            await pg.click(L('Sutura coronalis') + ' [data-cn=tadd]')
+            await pg.fill(L('Sutura coronalis') + ' .cntin', 'spina SCAPULAE')
+            await pg.click(L('Sutura coronalis') + ' [data-cn=tadd]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent.includes('juba olemas'))")
+            rows = await pg.evaluate("[...document.querySelectorAll('.cnpl')].find(l=>l.querySelector('.cnlt').innerText==='Sutura coronalis').querySelectorAll('.cnpr').length")
+            check('plan edits: a lesson (Latin name) added at the end of the part, a structure added by Enter and by the button (P2, «sinu lisatud»); a structure already in the plan is refused', rows == 2
+                  and 'sinu lisatud' in await pg.inner_text(L('Sutura coronalis') + ' .cnpr') and await pg.inner_text(L('Sutura coronalis') + ' .pc >> nth=0') == 'P2', str(rows))
+            await pg.click(L('Sutura coronalis') + ' .cnpr:has(i:text-is("Os frontale")) [data-cn=tdel]')
+            await pg.wait_for_function("[...document.querySelectorAll('.cnpl')].find(l=>l.querySelector('.cnlt').innerText==='Sutura coronalis').querySelectorAll('.cnpr').length===1")
+            # a part renamed
+            await pg.click('.cnptb >> nth=2')
+            await pg.wait_for_selector('#dlgIn')
+            await pg.fill('#dlgIn', 'Liigesed')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function("document.querySelectorAll('.cnptb b')[2].innerText==='Liigesed'")
+            st = await state_when(lambda s: next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {'parts': []})['parts'][2]['name'] == 'Liigesed' and not any(True for _ in []))
+            await pg.wait_for_timeout(1500)
+            doc = cpd()
+            sut = lesson_of(doc, 'Sutura coronalis')
+            check('plan edits: every edit is in cplan: the new lesson (one structure, src u, p 2) is at the end of the first part, the part is renamed, the picture of «Fossa supraspinata» is a page',
+                  sut and [t['la'] for t in sut['terms']] == ['Tuber parietale'] and sut['terms'][0]['src'] == 'u' and sut['terms'][0]['p'] == 2 and doc['parts'][0]['lessons'][-1]['title'] == 'Sutura coronalis' and doc['parts'][2]['name'] == 'Liigesed'
+                  and lesson_of(doc, 'Fossa supraspinata')['pic'].startswith('g:') and len(doc['parts']) == 5, json.dumps(doc, ensure_ascii=False)[:300])
+            check('plan edits: the counters after all edits: «5 osa · 10 õppetundi», P1 · 2 P2 · 5 P3 · 3', await pg.inner_text('.cnph') == '5 osa · 10 õppetundi' and await leg() == 'P1 · 2 P2 · 5 P3 · 3', await leg())
+            # a reload: everything is where it was
+            await pg.reload()
+            await app_ready(pg)
+            await pg.click('.tabbar [data-v=courses]')
+            await pg.wait_for_selector('.crs .cnd')
+            await pg.click('.cnd .cndgo')
+            await pg.wait_for_selector('.cnph', timeout=30000)
+            back = await pg.evaluate("({h:document.querySelector('.cnph').innerText,leg:document.querySelector('.cnpleg').innerText.replace(/\\s+/g,' '),off:document.querySelectorAll('.cnpl.off').length,names:[...document.querySelectorAll('.cnptb b')].map(e=>e.innerText),titles:[...document.querySelectorAll('.cnlt')].map(e=>e.innerText)})")
+            check('plan edits: after a reload the edits are there (counts, the lesson off, the new lesson, the new name of the part)', back['h'] == '5 osa · 10 õppetundi' and back['leg'] == 'P1 · 2 P2 · 5 P3 · 3' and back['off'] == 1 and back['names'][2] == 'Liigesed' and 'Sutura coronalis' in back['titles'], json.dumps(back, ensure_ascii=False))
+            # two tabs: another tab turned a lesson off and added a lesson in the cloud; this tab changes a P of another lesson; both survive
+            did_e = await pg.evaluate("view.did")
+            await pg.evaluate("""async(did)=>{const g=await S.db.collection('cplan').doc(did).get(),o=g.data();
+              o.parts[1].lessons[0].off=true;o.parts[1].lessons.push({id:'xother',title:'Os parietale',pic:null,off:false,terms:[{id:'xo1',la:'Os parietale',p:2,src:'u'}]});await S.db.collection('cplan').doc(did).set(o);}""", did_e)
+            await pg.click(L('Collum chirurgicum') + ' .cnplh')
+            await pg.click(L('Collum chirurgicum') + ' .pc')
+            await state_when(lambda s: (term_of(next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {'parts': []}), 'Collum chirurgicum') or {}).get('pu') == 3)
+            doc = cpd()
+            check('plan edits: another tab\'s edits to other lessons survive a save here (lesson turned off, lesson added) and ours is saved too', term_of(doc, 'Collum chirurgicum')['pu'] == 3 and lesson_of(doc, 'Os parietale') is not None and doc['parts'][1]['lessons'][0]['off'] is True
+                  and lesson_of(doc, 'Sutura coronalis') is not None, json.dumps([p['lessons'] and [l['title'] for l in p['lessons']] for p in doc['parts']], ensure_ascii=False))
+            # materials changed: the bar; the same fingerprint again: no bar
+            await pg.click('.cnstb[data-s="0"]')
+            await pg.wait_for_selector('.cnf')
+            ly = 'Lisa lugemine.pdf'
+            await pg.click(f'.cnf:has(.cnfn:text("{ly}")) [data-r=pics]')
+            await pg.click('[data-cn=close]')
+            await pg.wait_for_selector('.crs .cnd')
+            await pg.click('.cnd .cndgo')
+            await pg.wait_for_selector('.cnph')
+            check('plan edits: a role changed after the plan → the bar «Materjalid on muutunud. Kas koostada plaan uuesti?» with a button', 'Materjalid on muutunud. Kas koostada plaan uuesti?' in await pg.inner_text('.cnstale') and await pg.query_selector('.cnstale [data-cn=replan]') is not None)
+            # layout: everything open, the bar visible; 360 / 390 px, both themes, three languages: no overlaps, nothing cut or outside
+            lay = []
+            for lang in ('ru', 'en', 'et'):
+                await ui_lang(pg, lang)
+                await pg.evaluate("go({name:'courseNew',did:'" + did_e + "',step:3})")
+                await pg.wait_for_selector('.cnph')
+                await pg.evaluate("(()=>{const d=CDRAFTS.get('" + did_e + "');d._open=new Set(d._plan.parts.flatMap(p=>p.lessons.map(l=>l.id)));cnPlanPaint();})()")
+                await pg.wait_for_timeout(800)   # the screen slides in
+                for w in (360, 390):
+                    for theme in ('light', 'dark'):
+                        await pg.set_viewport_size({'width': w, 'height': 844})
+                        await pg.evaluate("t=>{document.documentElement.dataset.theme=t}", theme)
+                        bad = await pg.evaluate("""()=>{const out=[];
+                          const kids=c=>[...c.children].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0});
+                          document.querySelectorAll('.cnplr,.cnpt,.cnpr,.cnppic,.cnpadd,.cnstale,.cnbtns,.cnpleg,.cnpp,.cnplh').forEach(c=>{const cr=c.getBoundingClientRect(),ks=kids(c),r=ks.map(k=>k.getBoundingClientRect());
+                            ks.forEach((k,i)=>{if(r[i].right>cr.right+0.5||r[i].left<cr.left-0.5)out.push('outside '+c.className+' > '+k.className);for(let j=i+1;j<ks.length;j++){const a=r[i],b=r[j];if(a.left<b.right-0.5&&b.left<a.right-0.5&&a.top<b.bottom-0.5&&b.top<a.bottom-0.5)out.push('overlap '+c.className+': '+k.className+'/'+ks[j].className);}});});
+                          document.querySelectorAll('.cnsm,.pc,.cnbtn2,.cnmain,.cnretry,.cnadd').forEach(b=>{if(b.scrollWidth>b.clientWidth+0.5)out.push('cut '+b.className+' '+b.innerText.slice(0,20));});
+                          if(document.documentElement.scrollWidth>document.documentElement.clientWidth+0.5){out.push('page scrolls sideways');document.querySelectorAll('.cnw *,.cnbarw *').forEach(e=>{const r=e.getBoundingClientRect();if(r.right>document.documentElement.clientWidth+0.5&&out.length<6)out.push((e.className&&e.className.baseVal===undefined?e.className:e.tagName)+' '+Math.round(r.right));});}return out.slice(0,6);}""")
+                        lay.append([lang, w, theme, bad])
+            await pg.set_viewport_size({'width': 390, 'height': 844})
+            await pg.evaluate("document.documentElement.dataset.theme='light'")
+            check('plan edits: step 3 (all lessons open, the «changed» bar on) at 360 and 390 px, ru/en/et, light and dark: no overlaps, nothing cut or outside the box', all(not b[3] for b in lay), json.dumps([b for b in lay if b[3]], ensure_ascii=False))
+            await ui_lang(pg, 'et')
+            await pg.evaluate("go({name:'courseNew',did:'" + did_e + "',step:3})")
+            await pg.wait_for_selector('.cnph')
+            # «Make again» asks first
+            n_ai = len(ai_p)
+            await pg.click('.cnbtns [data-cn=replan]')
+            await pg.wait_for_selector('#layer .dlg')
+            dt = await pg.inner_text('#layer .dlg')
+            await pg.click('#layer [data-s="0"]')
+            await pg.wait_for_timeout(500)
+            check('plan edits: «Koosta plaan uuesti» asks first: your edits will be lost; «Tühista» changes nothing and sends nothing', 'Sinu plaani muudatused kaovad' in dt and len(ai_p) == n_ai and await pg.query_selector('.cnph') is not None and lesson_of(cpd(), 'Sutura coronalis') is not None, dt)
+            await pg.click('.cnstale [data-cn=replan]')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_selector('.cnrd')
+            await pg.wait_for_selector('.cnph', timeout=120000)
+            await state_when(lambda s: next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {}).get('edited') is not True and lesson_of(next((r['data'] for r in s['docs'] if r['coll'] == 'cplan'), {'parts': []}), 'Sutura coronalis') is None)
+            check('plan edits: after the confirmation the plan is made again (outline of the Core + plan; the edits are gone, no «changed» bar, not marked edited)', tasks_of(ai_p[n_ai:]) == ['outline', 'plan'] and not await pg.query_selector('.cnstale') and lesson_of(cpd(), 'Sutura coronalis') is None and not cpd().get('edited'), json.dumps(tasks_of(ai_p[n_ai:])))
+            # put the role back and make the plan once more (the later scenarios expect the plan of the first two materials)
+            await pg.click('.cnstb[data-s="0"]')
+            await pg.wait_for_selector('.cnf')
+            await pg.click(f'.cnf:has(.cnfn:text("{ly}")) [data-r=extra]')
+            await pg.click('[data-cn=close]')
+            await pg.wait_for_selector('.crs .cnd')
+            await pg.click('.cnd .cndgo')
+            await pg.wait_for_selector('.cnstale')
+            await pg.click('.cnstale [data-cn=replan]')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_selector('.cnph', timeout=120000)
+            await pg.wait_for_selector('.cnph')
+            check('plan edits: …and with the role back the plan has 5 parts and 10 lessons again', await pg.inner_text('.cnph') == '5 osa · 10 õppetundi' and not await pg.query_selector('.cnstale'), await pg.inner_text('.cnph'))
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+
             # --- a photo whose original is not on this device is skipped with a note; the plan is made without its labels ---
             await pg.evaluate("""(async()=>{const d=CDRAFTS.get(view.did),m=d.mats.find(x=>x.kind==='img');
               await new Promise((res,rej)=>{const q=indexedDB.open('corpus-local');q.onsuccess=()=>{const tx=q.result.transaction('mats','readwrite');tx.objectStore('mats').delete(CORPUS_WEB.uid+'/'+d.id+'/'+m.id+'/0');tx.oncomplete=res;tx.onerror=rej;};});
               m.lab=[''];})()""")
             urllib.request.urlopen(API + '/__fn?delay=2000')
-            await pg.click('[data-cn=replan]')
+            await replan_go()
             await pg.wait_for_function("(()=>{const r=document.querySelectorAll('.cnrow')[1];return r&&r.classList.contains('cur')})()", timeout=120000)
             row0 = await pg.inner_text('.cnrow')
             check('plan: a photo without an original on this device is skipped with a note in the first row', 'vahele jäetud 1: originaali pole selles seadmes' in row0, row0)

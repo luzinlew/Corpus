@@ -5171,7 +5171,7 @@ function cnAddTerm(d,l,inp){
    Папка курса — cdraft.courseId (повторная сборка того же черновика пишет в ту же папку). У фото-урока plate.cb = '<черновик>|<время плана>|<урок>': недостроенный урок после обрыва находится по нему и пересоздаётся.
    Пауза — после текущего урока (запрос ИИ не обрывается: он уже оплачен). Перезагрузка — сборка стоит на паузе, «Продолжить» идёт с первого не собранного урока. */
 const CN_BLD={ptStep:10000,lsStep:100,maxCand:6000,run:8,img:1600,text:18000,exam:15,json:38000};
-const CN_DEV=Math.random().toString(36).slice(2,10);
+const CN_DEV=Array.from(crypto.getRandomValues(new Uint8Array(6)),x=>(x%36).toString(36)).join('');   // not Math.random: it must not shift the app's own random choices
 const cnBldNew=()=>({at:Date.now(),base:Date.now(),parts:Object.create(null),ls:Object.create(null),pa:Object.create(null),run:null});
 function cnBldDoc(b){
   if(!b||typeof b!=='object')return null;

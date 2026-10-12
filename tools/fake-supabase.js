@@ -15,12 +15,20 @@ const objects = new Map();    // name -> {owner,type,buf}
 const shares = new Map();     // owner|src -> row (public.shares)
 const aiUsed = new Map();     // uid|day -> units used today (public.ai_usage)
 const AI_LIMIT = +(process.env.FAKE_AI_LIMIT || 5);
+/* the course allowance (public.ai_course, corpus_ai_take_course of supabase/ai.sql): per person, spent before the daily one; the setting ai_course_free (default 4 here, 300 in the SQL),
+   granted is not modelled (raise `free` through /__course instead), the site-wide cap per day is ai_course_global_daily. Both can be changed through /__course */
+let COURSE_FREE = process.env.FAKE_AI_COURSE_FREE !== undefined && process.env.FAKE_AI_COURSE_FREE !== '' ? +process.env.FAKE_AI_COURSE_FREE : 4;
+let COURSE_GLOBAL = process.env.FAKE_AI_COURSE_GLOBAL !== undefined && process.env.FAKE_AI_COURSE_GLOBAL !== '' ? +process.env.FAKE_AI_COURSE_GLOBAL : 3000;
+const courseUsed = new Map();   // uid -> course requests used (public.ai_course.used)
+const courseDay = new Map();    // day -> course requests of the whole site (private.ai_course_global)
+let LAST_TR = null;             // the last lesson translation the fake Claude received: {model, max_tokens, system, turns, said}
 let FN_URL = process.env.FAKE_FN_URL || '';                 // where the corpus-ai function runs (deno), if at all
 const FN_URL0 = FN_URL;
 let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429 */
 let FN_DROP = false, FN_TRUNC = false, FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
+let FN_NOCOURSE = false;   // nocourse=1: the database has no corpus_ai_take_course yet (supabase/ai.sql not run): PostgREST answers PGRST202
 const ANTHROPIC_KEY = 'test-anthropic-key';                  // the fake Claude API below accepts only this key
 const ADMINS = (process.env.FAKE_ADMINS || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const activity = new Map();   // uid -> Map(day -> {opens, last})
@@ -131,11 +139,18 @@ http.createServer(async (req, res) => {
     for (const k of Object.keys(Q)) if (u.searchParams.has(k)) Q[k] = +u.searchParams.get(k);
     send(res, 200, Q); return;
   }
+  if (p === '/__course') {   // ?free=N: the course allowance per person; ?global=N: the site-wide course cap per day; answers both and what was used
+    if (u.searchParams.has('free')) COURSE_FREE = +u.searchParams.get('free');
+    if (u.searchParams.has('global')) COURSE_GLOBAL = +u.searchParams.get('global');
+    send(res, 200, { free: COURSE_FREE, global: COURSE_GLOBAL, used: Object.fromEntries(courseUsed), day: Object.fromEntries(courseDay) }); return;
+  }
+  if (p === '/__lasttr') { send(res, 200, LAST_TR || {}); return; }   // the last translation request that reached the fake Claude
   if (p === '/__fn') {
     FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0;
     FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = u.searchParams.get('trunc') === '1'; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
-    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER }); return;
+    FN_NOCOURSE = u.searchParams.get('nocourse') === '1';
+    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE }); return;
   }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen)
 
   /* ---------- auth ---------- */
@@ -260,6 +275,25 @@ http.createServer(async (req, res) => {
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'free', limit: AI_LIMIT, used: used + n }); return;
   }
 
+  /* ---------- rpc: corpus_ai_take_course (course allowance first, then the daily one; as in supabase/ai.sql) ---------- */
+  if (p === '/rest/v1/rpc/corpus_ai_take_course' && req.method === 'POST') {
+    if (FN_NOCOURSE) { send(res, 404, { code: 'PGRST202', details: 'Searched for the function public.corpus_ai_take_course with parameter p_units or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache.', hint: null, message: 'Could not find the function public.corpus_ai_take_course(p_units) in the schema cache' }); return; }
+    const uid = uidOf(req);
+    if (!uid) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_ai_take_course' }); return; }
+    const n = body && body.p_units;
+    if (typeof n !== 'number' || n < 0 || n > 20) { send(res, 400, { code: '22023', message: 'bad_units' }); return; }
+    const day = new Date().toISOString().slice(0, 10), k = uid + '|' + day, cu = courseUsed.get(uid) || 0, left = Math.max(COURSE_FREE - cu, 0);
+    const daily = () => ({ plan: 'free', limit: AI_LIMIT, used: aiUsed.get(k) || 0 });
+    if (n === 0) { send(res, 200, { ok: true, ...daily(), pool: null, course_left: left, course_free: COURSE_FREE }); return; }
+    if (left >= n && (courseDay.get(day) || 0) + n <= COURSE_GLOBAL) {
+      courseUsed.set(uid, cu + n); courseDay.set(day, (courseDay.get(day) || 0) + n);
+      send(res, 200, { ok: true, ...daily(), pool: 'course', course_left: left - n, course_free: COURSE_FREE }); return;
+    }
+    const used = aiUsed.get(k) || 0, fits = used + n <= AI_LIMIT;
+    if (fits) aiUsed.set(k, used + n);
+    send(res, 200, { ok: fits, ...daily(), pool: 'daily', course_left: left, course_free: COURSE_FREE }); return;
+  }
+
   /* ---------- rpc: corpus_demo_take (demo allowance per visitor, as in supabase/demo.sql; service role only) ---------- */
   if (p === '/rest/v1/rpc/corpus_demo_take' && req.method === 'POST') {
     if (!/service-key/.test(req.headers.authorization || '')) { send(res, 401, { code: '42501', message: 'permission denied for function corpus_demo_take' }); return; }
@@ -315,6 +349,7 @@ http.createServer(async (req, res) => {
     let stop = 'end_turn';
     if (tm && at > 0) {
       FN_TR_N++;
+      LAST_TR = { model: body.model, max_tokens: body.max_tokens, system: body.system, turns: body.messages.length, said };
       if (FN_FAIL_AFTER >= 0 && FN_TR_N > FN_FAIL_AFTER) { send(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'rate limit (test)' } }); return; }
       const big = (v) => FN_CASE ? v.replace(/\b[a-z]{3,}/g, (w) => w[0].toUpperCase() + w.slice(1)) : v;
       const tr = (v) => typeof v === 'string' ? (v.includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : '[' + tm[2] + '] ' + big(v))

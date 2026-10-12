@@ -8,6 +8,9 @@
      user      — the signed-in person
      sample    — Claude, through the Supabase Edge Function "corpus-ai" (the site owner's API key,
                  a daily allowance per user). Until that function is deployed, AI features stay hidden.
+   Beyond window.claude, window.CORPUS_WEB.courseAI.translate (signed-in people only) asks the same function for the
+   "translate" task: the function builds the prompt itself and pays from the course allowance first (supabase/ai.sql);
+   window.CORPUS_WEB.aiCourse = { left, free } tells what is left of it.
    Beyond window.claude, window.CORPUS_WEB.shares passes a deck or folder to another person by a short
    code (shown as a QR code): the snapshot lives in public.shares, photos stay in the public bucket and
    are copied into the receiver's own Corpus on import (supabase/share.sql), and window.CORPUS_WEB.push
@@ -93,13 +96,14 @@
     /* AI: known to work on this device → on at once, refreshed in the background; otherwise wait briefly for the answer */
     var aiKnown = false;
     try { aiKnown = localStorage.getItem('corpus.ai') === '1'; } catch (e) {}
-    aiP.then(function (st) { if (st) W.ai = st; try { localStorage.setItem('corpus.ai', st ? '1' : '0'); } catch (e) {} });
+    aiP.then(function (st) { setAi(st); try { localStorage.setItem('corpus.ai', st ? '1' : '0'); } catch (e) {} });
     var aiOn = aiKnown || !!(await Promise.race([aiP, new Promise(function (r) { setTimeout(function () { r(null); }, 2500); })]));
     try { localStorage.setItem('corpus.known', '1'); } catch (e) {}
     ping();
     /* signed out elsewhere (or the session was revoked): start over at the sign-in screen */
     sb.auth.onAuthStateChange(function (ev) { if (ev === 'SIGNED_OUT' && !leaving) setTimeout(function () { location.reload(); }, 0); });
     W.shares = mkShares();
+    if (aiOn) W.courseAI = mkCourseAI();
     return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user), sample: aiOn ? mkSample() : null };
   })();
 
@@ -308,7 +312,7 @@
     guestBanner();
     /* a few AI requests with the cheapest model, counted per visitor by the function (supabase/demo.sql) */
     var st = await Promise.race([aiStatus(), new Promise(function (r) { setTimeout(function () { r(null); }, 3000); })]);
-    if (st) W.ai = st;
+    setAi(st);
     return { db: mkGuestDb(), assets: mkGuestAssets(), downloads: mkDownloads(), user: mkUser({ id: 'guest', email: '' }), sample: st ? mkSample() : null };
   }
   function guestBanner() {
@@ -511,13 +515,20 @@
       body: body ? JSON.stringify(body) : undefined
     });
   }
-  /* today's allowance, or null while the function is not deployed / has no API key */
+  /* what the function said about the allowances: today's (W.ai) and, when it knows, the course one (W.aiCourse) */
+  function noteAi(j) {
+    if (!j) return;
+    if (j.limit != null) W.ai = { plan: j.plan, limit: j.limit, used: j.used };
+    if (j.course && j.course.left != null) W.aiCourse = { left: j.course.left, free: j.course.free, pool: j.course.pool || null };
+  }
+  function setAi(st) { if (st) noteAi({ plan: st.plan, limit: st.limit, used: st.used, course: st.course }); }
+  /* today's allowance (and the course one, if the function has it), or null while the function is not deployed / has no API key */
   async function aiStatus() {
     try {
       var r = await fnFetch('GET');
       if (!r.ok) return null;
       var j = await r.json();
-      return j && j.ready ? { plan: j.plan, limit: j.limit, used: j.used } : null;
+      return j && j.ready ? { plan: j.plan, limit: j.limit, used: j.used, course: j.course || null } : null;
     } catch (e) { return null; }
   }
   function toB64(blob) {
@@ -573,7 +584,7 @@
       }
       var j = null;
       try { j = await r.json(); } catch (e) {}
-      if (j && j.limit != null) W.ai = { plan: j.plan, limit: j.limit, used: j.used };
+      noteAi(j);
       if (!r.ok || !j) throw { code: (j && j.code) || 'unavailable', message: (j && j.message) || ('HTTP ' + r.status) };
       if (opts.onText) { try { opts.onText({ text: j.text, delta: j.text }); } catch (e) {} }
       return j;
@@ -592,6 +603,31 @@
       return { maxPromptBytes: 65536, images: { maxCount: 4, maxInputBytes: 5 * 1024 * 1024, mediaTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] } };
     };
     return Object.freeze(sample);
+  }
+
+  /* ---------- courseAI: the translate task of the corpus-ai function ----------
+     Only the text goes out ({task:'translate', src, dst, input}); the function builds the prompt, picks the model and the size of the answer,
+     and counts the request against the course allowance first. Resolves to the JSON object the model answered, like sample.json.
+     Errors carry the code of the function's answer (invalid_input, quota_exceeded, rate_limited, ...) or invalid_json (cut short / not JSON). */
+  function mkCourseAI() {
+    var translate = async function (src, dst, input, opts) {
+      opts = opts || {};
+      if (opts.signal && opts.signal.aborted) throw { code: 'cancelled', message: 'cancelled' };
+      var r;
+      try { r = await fnFetch('POST', { task: 'translate', purpose: 'course', src: src, dst: dst, input: input }, opts.signal); }
+      catch (e) {
+        if (e && e.name === 'AbortError') throw { code: 'cancelled', message: 'cancelled' };
+        throw { code: 'unavailable', message: String((e && e.message) || e) };
+      }
+      var j = null;
+      try { j = await r.json(); } catch (e) {}
+      noteAi(j);
+      if (!r.ok || !j) throw { code: (j && j.code) || 'unavailable', message: (j && j.message) || ('HTTP ' + r.status) };
+      var p = parseLoose(j.text);
+      if (j.truncated || !p.ok) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON in the answer', text: j.text };
+      return p.v;
+    };
+    return Object.freeze({ translate: translate });
   }
 
   /* ---------- user ---------- */

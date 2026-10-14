@@ -316,31 +316,8 @@ def pdf_file(path, pages):
     pathlib.Path(path).write_bytes(bytes(out))
 
 
-def slides_pdf(path):
-    """A deck of slides by hand: page 1 a list of a bone (bold head and bold item, plain items), pages 2 and 3 a picture with captions (some are text of the page, some are drawn in the picture), page 4 a picture without captions."""
-    from PIL import Image, ImageDraw, ImageFont
-    font = None
-    for f in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'):
-        if pathlib.Path(f).exists():
-            font = ImageFont.truetype(f, 30)
-            break
-    font = font or ImageFont.load_default(size=30)
-
-    def jpeg(labels):
-        im = Image.new('RGB', (1040, 680), 'white')
-        g = ImageDraw.Draw(im)
-        g.ellipse((300, 70, 740, 610), fill=(150, 140, 120), outline=(60, 50, 40), width=4)
-        for (x, y, t) in labels:
-            g.text((x, y), t, fill='black', font=font)
-        b = io.BytesIO(); im.save(b, 'JPEG', quality=90)
-        return b.getvalue(), 1040, 680
-    pages = [
-        {'text': [(True, 28, 120, 780, 'Os parietale'), (True, 16, 160, 740, 'Facies externa'), (False, 16, 100, 710, 'Linea temporalis superior'), (False, 16, 100, 690, 'Tuber parietale'), (False, 16, 100, 670, 'Foramen parietale'), (False, 16, 100, 650, 'Margo sagittalis'), (False, 16, 100, 630, 'Eminentia parietalis')]},
-        {'text': [(True, 28, 50, 790, 'Os parietale'), (False, 14, 60, 520, 'Foramen parietale'), (False, 14, 330, 520, 'Linea temporalis superior'), (False, 14, 60, 130, 'Tuber parietale'), (False, 14, 330, 130, 'Facies externa'), (False, 12, 60, 100, 'Sonde im Canalis hypoglossalis')],
-         'img': jpeg([(15, 90, 'Angulus occipitalis'), (700, 560, 'Margo squamosus')]), 'at': (40, 150, 515, 337)},
-        {'text': [(True, 28, 50, 790, 'Os frontale'), (False, 14, 60, 520, 'Pars orbitalis'), (False, 14, 330, 520, 'Pars nasalis'), (False, 14, 60, 130, 'Facies externa')],
-         'img': jpeg([(15, 90, 'Glabella'), (700, 560, 'Arcus superciliaris'), (15, 300, 'Processus'), (15, 336, 'zygomaticus')]), 'at': (40, 150, 515, 337)},
-        {'text': [], 'img': jpeg([]), 'at': (40, 150, 515, 337)}]
+def _pdf_build(path, pages):
+    """A PDF by hand. page = {'text': [(bold, size, x, y, text)], 'rects': [(x, y, w, h)] filled thin lines (underlines), 'img': (jpeg bytes, w, h), 'at': (x, y, w, h) where the picture goes}."""
     objs = {1: b'<< /Type /Catalog /Pages 2 0 R >>', 3: b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>', 4: b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'}
     kids = []
     for i, pg in enumerate(pages):
@@ -352,8 +329,10 @@ def slides_pdf(path):
             ops.append(b'q %d 0 0 %d %d %d cm /Im0 Do Q' % (w, h, x, y))
             data, iw, ih = pg['img']
             objs[iid] = b'<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\nstream\n' % (iw, ih, len(data)) + data + b'\nendstream'
+        for x, y, w, h in pg.get('rects', []):
+            ops.append(b'0 g %d %d %d %d re f' % (x, y, w, h))
         for bold, size, x, y, text in pg['text']:
-            ops.append(b'BT /F%d %d Tf %d %d Td (' % (2 if bold else 1, size, x, y) + text.encode('cp1252') + b') Tj ET')
+            ops.append(b'BT /F%d %s Tf %d %d Td (' % (2 if bold else 1, str(size).encode(), x, y) + text.encode('cp1252') + b') Tj ET')
         stream = b'\n'.join(ops)
         objs[pid] = ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>%s >> /Contents %d 0 R >>' % (' /XObject << /Im0 %d 0 R >>' % iid if 'img' in pg else '', cid)).encode()
         objs[cid] = b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream'
@@ -368,6 +347,50 @@ def slides_pdf(path):
         out += (b'%010d 00000 n \n' % offs[k]) if k in offs else b'0000000000 65535 f \n'
     out += b'trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n' % (max(objs) + 1, xr)
     pathlib.Path(path).write_bytes(bytes(out))
+
+
+def _slide_jpeg(labels):
+    from PIL import Image, ImageDraw, ImageFont
+    font = None
+    for f in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'):
+        if pathlib.Path(f).exists():
+            font = ImageFont.truetype(f, 30)
+            break
+    font = font or ImageFont.load_default(size=30)
+    im = Image.new('RGB', (1040, 680), 'white')
+    g = ImageDraw.Draw(im)
+    g.ellipse((300, 70, 740, 610), fill=(150, 140, 120), outline=(60, 50, 40), width=4)
+    for (x, y, t) in labels:
+        g.text((x, y), t, fill='black', font=font)
+    b = io.BytesIO(); im.save(b, 'JPEG', quality=90)
+    return b.getvalue(), 1040, 680
+
+
+def slides_pdf(path):
+    """A deck of slides: page 1 a list of a bone in three columns (the head is bold and only a little bigger than the rest; one column head is underlined; indents), pages 2 and 3 a picture with captions
+    (some are text of the page, some are drawn in the picture), page 4 a picture without captions."""
+    AT = (40, 150, 515, 337)
+    pages = [
+        {'text': [(True, 16, 40, 800, 'Os parietale'),
+                  (False, 14, 40, 740, 'Margo sagittalis'), (False, 14, 52, 720, 'Facies externa'), (False, 14, 64, 700, 'Tuber parietale'), (False, 14, 64, 680, 'Foramen parietale'),
+                  (False, 14, 230, 740, 'Linea temporalis'), (False, 14, 242, 720, 'Linea temporalis superior'),
+                  (False, 14, 400, 740, 'Margo occipitalis'), (False, 14, 412, 720, 'Angulus mastoideus')],
+         'rects': [(230, 736, 104, 1)]},
+        {'text': [(True, 16, 50, 810, 'Os parietale'), (False, 14, 60, 520, 'Foramen parietale'), (False, 14, 330, 520, 'Linea temporalis superior'), (False, 14, 60, 130, 'Tuber parietale'), (False, 14, 330, 130, 'Facies externa'),
+                  (False, 14, 330, 100, 'Margo sagittalis'), (False, 14, 200, 555, 'Linea temporalis'), (False, 12, 60, 80, 'Sonde im Canalis hypoglossalis')],
+         'img': _slide_jpeg([(15, 90, 'Angulus occipitalis'), (700, 560, 'Margo squamosus')]), 'at': AT},
+        {'text': [(True, 16, 50, 810, 'Os frontale'), (False, 14, 60, 520, 'Pars orbitalis'), (False, 14, 330, 520, 'Pars nasalis'), (False, 14, 60, 130, 'Facies externa')],
+         'img': _slide_jpeg([(15, 90, 'Glabella'), (700, 560, 'Arcus superciliaris'), (15, 300, 'Processus'), (15, 336, 'zygomaticus'), (700, 100, 'Tes')]), 'at': AT},
+        {'text': [], 'img': _slide_jpeg([]), 'at': AT}]
+    _pdf_build(path, pages)
+
+
+def lecture_pdf(path):
+    """A lecture: 8 pages of text and 3 pages with a picture and three captions (a deck of slides is not what it is)."""
+    pages = [{'text': [(True, 20, 50, 780, 'Abaluu %d' % (i + 1)), (False, 12, 50, 740, 'Spina scapulae on luu.'), (False, 12, 50, 720, 'Processus coracoideus asub abaluu ees.'), (False, 12, 50, 700, 'Fossa supraspinata on kolmnurkne.')]} for i in range(8)]
+    for i in range(3):
+        pages.append({'text': [(True, 16, 50, 810, 'Joonis %d' % (i + 1)), (False, 14, 60, 520, 'Foramen parietale'), (False, 14, 330, 520, 'Margo sagittalis'), (False, 14, 60, 130, 'Tuber parietale')], 'img': _slide_jpeg([]), 'at': (40, 150, 515, 337)})
+    _pdf_build(path, pages)
 
 
 def course_files(d):
@@ -3685,25 +3708,35 @@ async def main():
             kinds = {p['n']: (p.get('sl') or {}).get('ty') for p in pgs}
             lst = next(p for p in pgs if p['n'] == 1)['sl']
             fig = next(p for p in pgs if p['n'] == 2)['sl']
-            check('slides: reading tells the kind of every page: 1 list, 2 and 3 figures, 4 a figure without captions; the list keeps its lines with the indent and bold; the figure keeps the captions of its text layer with boxes and its head',
-                  kinds == {1: 'list', 2: 'fig', 3: 'fig', 4: 'fig'} and lst['head'] == 'Os parietale' and any(x['t'] == 'Facies externa' and x['b'] == 1 for x in lst['ls']) and any(x['t'] == 'Linea temporalis superior' and x['b'] == 0 for x in lst['ls'])
+            check('slides: reading tells the kind of every page: 1 list, 2 and 3 figures, 4 a figure without captions; the head is found although it is only a little bigger (bold); the list keeps its pieces cut by the wide gaps (three columns) with the indent, bold, underline (the thin line under «Linea temporalis») and the column; the figure keeps the captions of its text layer with boxes and its head',
+                  kinds == {1: 'list', 2: 'fig', 3: 'fig', 4: 'fig'} and lst['head'] == 'Os parietale' and any(x['t'] == 'Margo sagittalis' and x['b'] == 0 and x['u'] == 0 and x['c'] == 0 and x['x'] == 40 for x in lst['ls']) and any(x['t'] == 'Linea temporalis' and x['u'] == 1 and x['c'] == 1 for x in lst['ls']) and any(x['t'] == 'Linea temporalis superior' and x['u'] == 0 and x['c'] == 1 for x in lst['ls']) and any(x['t'] == 'Margo occipitalis' and x['c'] == 2 for x in lst['ls']) and any(x['t'] == 'Tuber parietale' and x['x'] == 64 and x['c'] == 0 for x in lst['ls'])
                   and fig['head'] == 'Os parietale' and {'Foramen parietale', 'Tuber parietale', 'Linea temporalis superior'} <= {c['t'] for c in fig['c']} and all(0 <= c['x'] <= 100 and c['w'] > 0 for c in fig['c']) and next(p for p in pgs if p['n'] == 4)['sl']['c'] == [], json.dumps(kinds))
+            md = await ps.evaluate("({sel:[...document.querySelectorAll('.cnmode [role=radio]')].map(b=>b.innerText+'|'+b.getAttribute('aria-checked')),t:document.querySelector('.cnmode').innerText})")
+            check('mode: with 3 pictures the first step offers the mode («Plaani režiim»): slides with pictures is suggested (3 of 4 pages), lecture text is the other', md['sel'] == ['Slaidid piltidega|true', 'Loengu tekst|false'] and 'Pildiga lehti: 3 / 4' in md['t'], json.dumps(md, ensure_ascii=False))
+            await ps.click('.cnmode [data-v=text]')
+            st = await state_when(lambda s: any(r['data'].get('pmode') == 'text' for r in mines(s, 'cdraft')))
+            check('mode: a click on «Loengu tekst» is kept in the draft (cdraft.pmode) and marks the button', any(r['data'].get('pmode') == 'text' for r in mines(st, 'cdraft')) and await ps.get_attribute('.cnmode [data-v=text]', 'aria-checked') == 'true')
+            await ps.click('.cnmode [data-v=slides]')
+            await state_when(lambda s: any(r['data'].get('pmode') == 'slides' for r in mines(s, 'cdraft')))
             await ps.click('.cnmain')
             await ps.wait_for_selector('.cnrd')
+            await ps.wait_for_function("CDRAFTS.get(view.did)._run&&CDRAFTS.get(view.did)._run.dt.mode", timeout=300000)
+            mt = await ps.inner_text('.cnrd') if await ps.query_selector('.cnrd') else ''
             await ps.wait_for_selector('.cnph', timeout=300000)
+            check('mode: the second step says which mode runs («Režiim: slaidid piltidega»)', await ps.evaluate("CDRAFTS.get(view.did)._run.dt.mode") == 'slides' and ('Režiim: slaidid piltidega' in mt or mt == ''), mt[:100])
             plans = [c for c in ai_s if c.get('task') == 'plan']
             check('slides: the mode is chosen (3 pictures, 2 with ≥ 3 captions): no outline request, one plan request in the slides form with 2 candidates and the list', [c.get('task') for c in ai_s] == ['plan'] and plans[0]['input'].get('mode') == 'slides'
-                  and len(plans[0]['input']['cands']) == 2 and len(plans[0]['input']['lists']) == 1 and plans[0]['input']['cands'][0]['page'] == 2 and plans[0]['input']['cands'][1]['page'] == 3 and plans[0]['input']['cands'][0]['head'] == 'Os parietale', json.dumps(plans[0]['input'])[:400])
+                  and len(plans[0]['input']['cands']) == 2 and len(plans[0]['input']['lists']) == 1 and plans[0]['input']['cands'][0]['page'] == 2 and plans[0]['input']['cands'][1]['page'] == 3 and plans[0]['input']['cands'][0]['head'] == 'Os parietale' and plans[0]['input']['cands'][1].get('view') == 'facies externa' and 'view' not in plans[0]['input']['cands'][0], json.dumps(plans[0]['input'])[:600])
             st = await state_when(lambda s: bool(mines(s, 'cplan')))
             doc = mines(st, 'cplan')[0]['data']
             les = [l for p in doc['parts'] for l in p['lessons']]
             tm = {l['title']: {t['la']: t for t in l['terms']} for l in les}
             l1 = tm['Os parietale']
-            l2 = tm['Os frontale']
-            check('slides: the plan has 2 lessons — the two pictures (pages 2 and 3), the third picture without captions is no lesson; the picture of a lesson is its page (g:<material>:<page>); the AI named the part and the lessons', doc.get('slides') is True and len(les) == 2 and len(doc['parts']) == 1 and doc['parts'][0]['name'] == 'Luud'
+            l2 = tm['Os frontale — facies externa']
+            check('slides: the plan has 2 lessons — the two pictures (pages 2 and 3), the third picture without captions is no lesson; the picture of a lesson is its page (g:<material>:<page>); the AI named the part and the lessons (the view of the second picture is in its title)', doc.get('slides') is True and len(les) == 2 and len(doc['parts']) == 1 and doc['parts'][0]['name'] == 'Luud'
                   and [l['pic'].split(':')[2] for l in les] == ['2', '3'] and all(l['pic'].startswith('g:') for l in les), json.dumps(doc)[:300])
             check('slides: every caption is a structure with a frame (box in percent): the text ones and the raster ones read on the drawn page (OCR); none without a box',
-                  {'Foramen parietale', 'Tuber parietale', 'Linea temporalis superior', 'Facies externa', 'Angulus occipitalis', 'Margo squamosus'} <= set(l1) and {'Pars orbitalis', 'Pars nasalis', 'Facies externa', 'Glabella'} <= set(l2)
+                  {'Foramen parietale', 'Tuber parietale', 'Linea temporalis superior', 'Linea temporalis', 'Margo sagittalis', 'Facies externa', 'Angulus occipitalis', 'Margo squamosus'} <= set(l1) and {'Pars orbitalis', 'Pars nasalis', 'Glabella'} <= set(l2)
                   and all(len(t.get('bx', [])) == 4 and 0 <= t['bx'][0] <= 100 and t['bx'][2] > 1 and t['bx'][3] > 0.5 for l in les for t in l['terms']), json.dumps(l1)[:500])
             check('slides: a caption of two lines drawn in the picture («Processus» / «zygomaticus») is one structure «Processus zygomaticus» with one frame over both lines (higher than a one-line caption), not two pieces; the German words of «Sonde im Canalis hypoglossalis» are cut out',
                   'Processus zygomaticus' in l2 and 'zygomaticus' not in l2 and 'Processus' not in l2 and l2['Processus zygomaticus']['bx'][3] > 1.5 * l2['Glabella']['bx'][3] and 'Canalis hypoglossalis' in l1 and not any('Sonde' in k for k in l1), json.dumps([list(l1), list(l2)]))
@@ -3713,8 +3746,13 @@ async def main():
               return cnSlideTerms(raw,1.5).map(t=>[t.la,t.bx[0],t.bx[1],t.bx[3]]);}""")
             check('slides: the filter of captions: two lines joined (frame = the union, 3 + 3.4 high), a single word that is a part of a longer caption («parietale»), a word without a capital («frontalis»), a common noun alone («Facies», «Margo», «Tuber»), German words only («mit Rest der») are dropped',
                   [t[0] for t in un31] == ['Processus zygomaticus', 'Foramen parietale', 'Vomer', 'Canalis hypoglossalis', 'Lineae temporales'] and abs(un31[0][3] - 6.4) < 0.01, json.dumps(un31))
-            check('slides: importance from the list: bold «Facies externa» P1 (in both lessons), the items «Foramen parietale», «Tuber parietale», «Linea temporalis superior» P2; the captions of the pictures that are in no list («Angulus occipitalis», «Margo squamosus», «Pars orbitalis», «Glabella») P3',
-                  l1['Facies externa']['p'] == 1 and l2['Facies externa']['p'] == 1 and all(l1[x]['p'] == 2 for x in ('Foramen parietale', 'Tuber parietale', 'Linea temporalis superior')) and all(l1[x]['p'] == 3 for x in ('Angulus occipitalis', 'Margo squamosus')) and l2['Pars orbitalis']['p'] == 3 and l2['Glabella']['p'] == 3, json.dumps({k: v['p'] for k, v in l1.items()}))
+            check('slides: importance from the lists: the underlined «Linea temporalis» and the first level of a column («Margo sagittalis») P1; the deeper ones («Facies externa», «Tuber parietale», «Foramen parietale», «Linea temporalis superior») P2 whatever their font; the captions of the pictures that are in no list («Angulus occipitalis», «Margo squamosus», «Canalis hypoglossalis», «Pars orbitalis», «Glabella») P3',
+                  all(l1[x]['p'] == 1 for x in ('Linea temporalis', 'Margo sagittalis')) and all(l1[x]['p'] == 2 for x in ('Facies externa', 'Foramen parietale', 'Tuber parietale', 'Linea temporalis superior')) and all(l1[x]['p'] == 3 for x in ('Angulus occipitalis', 'Margo squamosus', 'Canalis hypoglossalis'))
+                  and l2['Pars orbitalis']['p'] == 3 and l2['Glabella']['p'] == 3, json.dumps({k: v['p'] for k, v in l1.items()}))
+            check('slides: «Facies externa» is a structure of the first slide (its bone list names it as a section) but only the view of the second slide (no list of that bone): not in its structures, in its title and in the plan input as view; «Tes» (a short word read only by the text recognition) is dropped',
+                  'Facies externa' in l1 and 'Facies externa' not in l2 and 'Tes' not in l2 and not any(t.lower() == 'tes' for t in l2) and les[1]['title'] == 'Os frontale — facies externa', json.dumps(list(l2)))
+            ju = await ps.evaluate("[cnJunkWord('Tes',true,null),cnJunkWord('Itale',true,null),cnJunkWord('Itale',true,{}),cnJunkWord('Glabella',true,null),cnJunkWord('Tes',false,null),cnJunkWord('Spina scapulae',true,null)]")
+            check('slides: a word of fewer than 6 letters found only by the text recognition is noise unless a list, a question or a text names it', ju == [True, True, False, False, False, False], json.dumps(ju))
             check('slides: the source of a structure: «Kolju praktikum, lk 1 · loetelu» for a list item, «ainult pildil» for a caption of the picture only',
                   l1['Foramen parietale']['src'] == 'l|Kolju praktikum|1' and l1['Margo squamosus']['src'] == 'f', json.dumps([l1['Foramen parietale']['src'], l1['Margo squamosus']['src']]))
             await ps.click(f'.cnpl:has(.cnlt:text-is("Os parietale")) .cnplh')
@@ -3728,10 +3766,35 @@ async def main():
             pl = await ps.evaluate("S.plates.map(p=>({t:p.title,page:p.page,n:cardsOfPlate(p.id).length,nf:cardsOfPlate(p.id).filter(c=>c.noframe).length,fr:cardsOfPlate(p.id).every(c=>c.w>1&&c.h>0.5),pr:Object.fromEntries(cardsOfPlate(p.id).map(c=>[c.term,c.prio]))}))")
             by = {p['t']: p for p in pl}
             check('slides: built: 2 lessons on the pages 2 and 3 with all their captions as cards with frames (none waits for a frame), P as in the plan; 2 requests to the AI for the texts',
-                  len(pl) == 2 and by['Os parietale']['page'] == 2 and by['Os frontale']['page'] == 3 and all(p['nf'] == 0 and p['fr'] for p in pl) and by['Os parietale']['n'] == len(l1) and by['Os frontale']['n'] == len(l2) and by['Os parietale']['pr']['Facies externa'] == 1
+                  len(pl) == 2 and by['Os parietale']['page'] == 2 and by['Os frontale — facies externa']['page'] == 3 and all(p['nf'] == 0 and p['fr'] for p in pl) and by['Os parietale']['n'] == len(l1) and by['Os frontale — facies externa']['n'] == len(l2) and by['Os parietale']['pr']['Facies externa'] == 2 and by['Os parietale']['pr']['Linea temporalis'] == 1
                   and by['Os parietale']['pr']['Margo squamosus'] == 3 and len([c for c in ai_s[n_ai:] if c.get('task') == 'lesson']) == 2, json.dumps(pl)[:500])
             check('slides: no script errors or failed requests in the browser', not errs_s, '; '.join(errs_s)[:500])
             await ctx_s.close()
+
+            # --- a lecture (8 pages of text, 3 pictures with captions): not slides — the old way: outline, then the plan of topics ---
+            lecture_pdf(tmp / 'Loeng.pdf')
+            ctx_t, pt, errs_t = await open_ctx()
+            await pt.goto(SITE + '?create=1&i=' + INVITE)
+            await pt.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pt.fill('input[name=email]', 'lect@test.ee')
+            await pt.fill('input[name=password]', 'kolju2026')
+            await pt.click('.cw-go')
+            await app_ready(pt)
+            await ui_lang(pt, 'et')
+            ai_t = watch_ai(pt)
+            await pt.evaluate("go({name:'courses'})")
+            await pt.wait_for_selector('.cnnew')
+            await pt.click('.cnnew')
+            await pt.wait_for_selector('.cnw')
+            await pt.set_input_files('#cnFile', [str(tmp / 'Loeng.pdf')])
+            await pt.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=1&&d.mats.every(m=>m.status!=='reading')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            mt2 = await pt.evaluate("[...document.querySelectorAll('.cnmode [role=radio]')].map(b=>b.innerText+'|'+b.getAttribute('aria-checked'))")
+            check('mode: 3 pictures among 11 pages is a lecture: the first step suggests «Loengu tekst»', mt2 == ['Slaidid piltidega|false', 'Loengu tekst|true'], json.dumps(mt2))
+            await pt.click('.cnmain')
+            await pt.wait_for_selector('.cnph', timeout=300000)
+            check('mode: a lecture is not slides: the old way — outline requests first, the plan of the old form (no slides), the mode «text»', ai_t and ai_t[0].get('task') == 'outline' and all((c.get('input') or {}).get('mode') != 'slides' for c in ai_t) and await pt.evaluate("CDRAFTS.get(view.did)._run.dt.mode") == 'text' and await pt.evaluate("!CDRAFTS.get(view.did)._plan.slides"), json.dumps([c.get('task') for c in ai_t]))
+            check('mode: no script errors or failed requests in the browser', not errs_t, '; '.join(errs_t)[:500])
+            await ctx_t.close()
 
             # --- the function directly: forms of the requests, no payment for a refused one, the prompt and the model are the function\'s own ---
             tokp = signup_token('planfn@test.ee')
@@ -3906,7 +3969,7 @@ async def main():
             bad_sl = {
                 'mode other': with_sl(input={'mode': 'text'}), 'foreign key': with_sl(input={'x': 1}), 'topics in slides': with_sl(input={'topics': []}), 'no cands': {**good_sl, 'input': {k: v for k, v in good_sl['input'].items() if k != 'cands'}},
                 'cands empty': with_sl(input={'cands': []}), '121 cands': with_sl(input={'cands': [cand(i, terms=[{'id': f'x{i}', 'la': 'a'}]) for i in range(1, 122)]}), 'cand foreign key': with_sl(input={'cands': [cand(1, x=1)]}),
-                'page 0': with_sl(input={'cands': [cand(1, page=0)]}), 'page 1.5': with_sl(input={'cands': [cand(1, page=1.5)]}), 'head a number': with_sl(input={'cands': [cand(1, head=5)]}), 'head of 301': with_sl(input={'cands': [cand(1, head='h' * 301)]}),
+                'page 0': with_sl(input={'cands': [cand(1, page=0)]}), 'page 1.5': with_sl(input={'cands': [cand(1, page=1.5)]}), 'head a number': with_sl(input={'cands': [cand(1, head=5)]}), 'head of 301': with_sl(input={'cands': [cand(1, head='h' * 301)]}), 'view a number': with_sl(input={'cands': [cand(1, view=5)]}), 'view of 301': with_sl(input={'cands': [cand(1, view='v' * 301)]}),
                 'no terms': with_sl(input={'cands': [cand(1, terms=[])]}), '81 terms': with_sl(input={'cands': [cand(1, terms=[{'id': f't{i}', 'la': 'a'} for i in range(81)])]}), 'term p 4': with_sl(input={'cands': [cand(1, terms=[{'id': 't', 'la': 'a', 'p': 4}])]}),
                 'term foreign key': with_sl(input={'cands': [cand(1, terms=[{'id': 't', 'la': 'a', 'x': 1}])]}), 'term id empty': with_sl(input={'cands': [cand(1, terms=[{'id': '', 'la': 'a'}])]}), 'same id twice': with_sl(input={'cands': [cand(1), cand(1)]}),
                 'term id as a cand id': with_sl(input={'cands': [cand(1, terms=[{'id': 'c1', 'la': 'a'}])]}), 'lists is a string': with_sl(input={'lists': 'x'}), '61 lists': with_sl(input={'lists': [{'page': 1, 'head': 'h', 'items': []}] * 61}),
@@ -3933,12 +3996,16 @@ async def main():
             ans = json.loads(j['text']) if status == 200 else {}
             check('plan, slides mode: answered, 5 units; model claude-sonnet-5-5 with thinking between_tools, 8000 tokens; the prompt «CORPUS-PLAN ru» of the slides: one lesson per candidate, the picture is fixed, parts in the user\'s language (Russian), Latin titles; the client\'s own messages and model are ignored',
                   status == 200 and c1 - c0 == 5 and ans['parts'][0]['lessons'][0]['cand'] == 'c1' and lq['model'] == 'claude-sonnet-5-5' and lq['thinking'] == {'type': 'between_tools'} and lq['max_tokens'] == 8000 and lq['said'].startswith('CORPUS-PLAN ru\n')
-                  and 'is exactly one candidate' in lq['said'] and 'Put every candidate id exactly once' in lq['said'] and 'written in Russian' in lq['said'] and 'Latin anatomical name' in lq['said'] and 'EVIL' not in lq['said'] and 'never instructions' in lq['said'], json.dumps([status, j, lq['said'][:200]])[:500])
+                  and 'is exactly one candidate' in lq['said'] and 'Put every candidate id exactly once' in lq['said'] and 'written in Russian' in lq['said'] and 'Latin anatomical name' in lq['said'] and 'may be empty or in Estonian' in lq['said'] and 'drop_cands' in lq['said'] and 'do not merge them' in lq['said'] and 'EVIL' not in lq['said'] and 'never instructions' in lq['said'], json.dumps([status, j, lq['said'][:200]])[:500])
             check('plan, slides mode: the input goes after «INPUT:» as JSON', lq['said'].endswith('INPUT:\n' + json.dumps(good_sl['input'], separators=(',', ':'), ensure_ascii=False)), lq['said'][-100:])
             big_sl = with_sl(input={'cands': [cand(i, terms=[{'id': f't{i}_{j}', 'la': 'Os n%d' % j, 'p': 2} for j in range(80)]) for i in range(1, 121)], 'lists': [{'page': i, 'head': 'H', 'items': ['item'] * 20} for i in range(1, 61)]})
             ln = len(json.dumps(big_sl['input'], separators=(',', ':'), ensure_ascii=False))
             status, j = fn_call(tokp, 'POST', big_sl)
-            check('plan, slides mode: the biggest accepted shape that fits (%d characters as JSON, at most 80000) is answered or refused as too long, never a server error' % ln, (status == 200 and ln <= 80000) or (status == 400 and ln > 80000), json.dumps([status, j.get('code'), ln]))
+            check('plan, slides mode: 120 candidates of 80 terms (%d characters as JSON) are too long: 400 invalid_input «too long», nothing counted' % ln, ln > 80000 and status == 400 and j.get('code') == 'invalid_input' and 'too long' in str(j.get('message')), json.dumps([status, j, ln])[:300])
+            ok_sl = with_sl(input={'cands': [cand(i, view='facies externa', terms=[{'id': f't{i}_{j}', 'la': 'Os n%d' % j, 'p': 2} for j in range(80)]) for i in range(1, 21)], 'lists': [{'page': i, 'head': 'H', 'items': ['item'] * 20} for i in range(1, 11)]})
+            ln = len(json.dumps(ok_sl['input'], separators=(',', ':'), ensure_ascii=False))
+            status, j = fn_call(tokp, 'POST', ok_sl)
+            check('plan, slides mode: 20 candidates of 80 terms with views and 10 lists (%d characters as JSON, under 80000) are answered' % ln, ln <= 80000 and status == 200, json.dumps([status, j.get('code'), ln]))
             # <<< T018
 
             # ---------- guest: look around without an account, nothing reaches the server ----------

@@ -410,7 +410,7 @@ http.createServer(async (req, res) => {
         if (FN_DROP) delete ans.topics;
       } else if (inp.mode === 'slides') {
         /* plan, slides mode: one part «Luud» holding every candidate in order, titled by the head of its slide; a term named ATTACK is dropped */
-        ans = { parts: [{ name: evil((inp.cands[0] && inp.cands[0].head) ? 'Luud' : 'Luud'), lessons: (inp.cands || []).map((c) => ({ cand: c.id, title: evil(c.head || c.terms[0].la) })) }], drop: (inp.cands || []).flatMap((c) => c.terms.filter((x) => /ATTACK/.test(x.la)).map((x) => x.id)) };
+        ans = { parts: [{ name: evil((inp.cands[0] && inp.cands[0].head) ? 'Luud' : 'Luud'), lessons: (inp.cands || []).map((c) => ({ cand: c.id, title: evil(c.head ? c.head + (c.view ? ' — ' + c.view : '') : c.terms[0].la) })) }], drop: (inp.cands || []).flatMap((c) => c.terms.filter((x) => /ATTACK/.test(x.la)).map((x) => x.id)) };
         if (FN_DROP) delete ans.parts;
       } else {
         /* plan: a part for every topic, a lesson for every term of it; the picture is the photo with the most labels equal to the terms of the lesson (here one: the term itself),

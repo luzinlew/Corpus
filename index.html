@@ -4108,9 +4108,9 @@ function cnDraftOk(o,id){
     m.kind=['pdf','img','text'].indexOf(m.kind)>=0?m.kind:'text';if(CN_ROLES.indexOf(m.role)<0)m.role=m.kind==='img'?'pics':'extra';
     if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';
     m.lang=cnLangOk(m.lang);if(!m.lang)delete m.lang;m.chunks=cnStrs(m.chunks);if(typeof m.qdoc!=='string')delete m.qdoc;
-    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.slp!==undefined)m.slp=typeof m.slp==='string'&&/^[01\-]*$/.test(m.slp)?m.slp.slice(0,CN_LIM.pages):'';if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);
+    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.pf&&typeof m.pf==='object'){const q=v=>Math.max(0,Math.min(999,Math.round(+v||0)));m.pf={f:q(m.pf.f),l:q(m.pf.l),c:q(m.pf.c)};}else delete m.pf;if(m.slp!==undefined)m.slp=typeof m.slp==='string'&&/^[01\-]*$/.test(m.slp)?m.slp.slice(0,CN_LIM.pages):'';if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);
     return m;});
-  return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,planAt:Math.max(0,+o.planAt||0),bldAt:Math.max(0,+o.bldAt||0),courseId:typeof o.courseId==='string'&&o.courseId.length<80?o.courseId:'',lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
+  return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,planAt:Math.max(0,+o.planAt||0),pmode:o.pmode==='slides'||o.pmode==='text'?o.pmode:'',bldAt:Math.max(0,+o.bldAt||0),courseId:typeof o.courseId==='string'&&o.courseId.length<80?o.courseId:'',lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
 }
 /* the cloud copy merged into the local draft d: materials by id; the ones this tab changed (d._dirty) stay as they are, the rest are the cloud's; the removed (gone) do not come back */
 function cnMerge(d,c){
@@ -4125,7 +4125,8 @@ function cnMerge(d,c){
   d.mats=out.slice(0,CN_LIM.mats);d.gone=Array.from(gone).slice(-200);
   if(!d._nameDirty&&c.updatedAt){d.name=c.name;}
   d.createdAt=c.createdAt||d.createdAt;d.updatedAt=Math.max(d.updatedAt||0,c.updatedAt||0);
-  d.lang=cnLang(d)||c.lang||'';d.planAt=Math.max(d.planAt||0,c.planAt||0);if(!d._bldDirty){d.bldAt=Math.max(d.bldAt||0,c.bldAt||0);d.courseId=d.courseId||c.courseId||'';}
+  d.lang=cnLang(d)||c.lang||'';d.planAt=Math.max(d.planAt||0,c.planAt||0);if(!d._pmDirty)d.pmode=c.pmode||'';
+  if(!d._bldDirty){d.bldAt=Math.max(d.bldAt||0,c.bldAt||0);d.courseId=d.courseId||c.courseId||'';}
 }
 /* the drafts of this person (a few small documents): every opening of the tab asks the cloud again */
 function cnLoad(){
@@ -4151,7 +4152,7 @@ function cnSave(d,m){
 }
 function cnPayload(d){
   const o={name:d.name,createdAt:d.createdAt,updatedAt:d.updatedAt,gone:d.gone,mats:d.mats.map(m=>{const r={};for(const k in m)if(k[0]!=='_')r[k]=m[k];return r;})};
-  if(d.lang)o.lang=d.lang;if(d.planAt)o.planAt=d.planAt;if(d.bldAt)o.bldAt=d.bldAt;if(d.courseId)o.courseId=d.courseId;
+  if(d.lang)o.lang=d.lang;if(d.planAt)o.planAt=d.planAt;if(d.bldAt)o.bldAt=d.bldAt;if(d.courseId)o.courseId=d.courseId;if(d.pmode)o.pmode=d.pmode;
   return JSON.parse(JSON.stringify(o));
 }
 async function cnWrite(coll,id,data){
@@ -4163,10 +4164,10 @@ async function cnWrite(coll,id,data){
 async function cnPush(d){
   if(!S.db)return;
   try{const g=await S.db.collection('cdraft').doc(d.id).get();if(g.exists)cnMerge(d,cnDraftOk(g.data()||{},d.id));}catch(e){}
-  const sent=new Map(d._dirty||[]);const nsent=d._nameDirty||0,bsent=d._bldDirty||0;
+  const sent=new Map(d._dirty||[]);const nsent=d._nameDirty||0,bsent=d._bldDirty||0,psent=d._pmDirty||0;
   try{
     await cnWrite('cdraft',d.id,cnPayload(d));
-    sent.forEach((v,id)=>{if(d._dirty&&d._dirty.get(id)===v)d._dirty.delete(id);cnT(d.id,id).nosave=false;});if((d._nameDirty||0)===nsent)d._nameDirty=0;if((d._bldDirty||0)===bsent)d._bldDirty=0;cnPaint();
+    sent.forEach((v,id)=>{if(d._dirty&&d._dirty.get(id)===v)d._dirty.delete(id);cnT(d.id,id).nosave=false;});if((d._nameDirty||0)===nsent)d._nameDirty=0;if((d._bldDirty||0)===bsent)d._bldDirty=0;if((d._pmDirty||0)===psent)d._pmDirty=0;cnPaint();
   }catch(e){
     sent.forEach((v,id)=>{cnT(d.id,id).nosave=e.code;});cnPaint();
     if(!d._warned){d._warned=true;setTimeout(()=>{d._warned=false;},8000);toast(e.code==='quota'?cnQuotaText():T3('Не удалось сохранить черновик. Проверьте соединение.','Could not save the draft. Check the connection.','Mustandit ei õnnestunud salvestada. Kontrolli ühendust.'),5000);}
@@ -4219,7 +4220,7 @@ async function cnPageText(pg,task,lib){
   const its=tc.items.filter(i=>typeof i.str==='string'&&i.str.trim()&&i.transform).slice(0,CN_LIM.items);
   let ol=null;try{ol=await cnTO(pg.getOperatorList(),task);}catch(e){if(e&&e.code==='timeout')throw e;}
   /* big pictures of the page (a slide with a drawing) — for the kind of the page, see cnSlideInfo */
-  let vp=null,imgs=[];try{vp=pg.getViewport({scale:1});if(ol&&lib&&lib.OPS)imgs=cnPageImages(ol,lib.OPS,vp);}catch(e){}
+  let vp=null,imgs=[],uls=[];try{vp=pg.getViewport({scale:1});if(ol&&lib&&lib.OPS){const g=cnPageOps(ol,lib.OPS,vp);imgs=g.px>CN_BLD.pagePx?[]:g.imgs;uls=g.uls;}}catch(e){}   // a page with more than 150 million pixels of pictures is no slide
   if(!its.length)return {text:'',em:[],sl:imgs.length?{ty:'fig',head:'',ni:imgs.length,ar:vp?r2(vp.width/vp.height):1.5,c:[]}:null};
   const bold={},isBold=fn=>{if(fn in bold)return bold[fn];let b=false;try{const f=pg.commonObjs.get(fn);b=/bold|black|heavy|demi/i.test((f&&f.name)||'')||!!(f&&f.bold);}catch(e){}return bold[fn]=b;};
   const hs=its.map(i=>i.height||Math.abs(i.transform[3])||0).filter(h=>h>0).sort((a,b)=>a-b),med=hs.length?hs[hs.length>>1]:0;
@@ -4240,13 +4241,13 @@ async function cnPageText(pg,task,lib){
     if(run)endRun();
     out.push(s.replace(/\s+/g,' ').trim());
   });
-  let sl=null;try{sl=cnSlideInfo(lines,vp,imgs);}catch(e){}
+  let sl=null;try{sl=cnSlideInfo(lines,vp,imgs,uls);}catch(e){}
   return {text:out.filter(Boolean).join('\n'),em:em,sl:sl};
 }
-/* The kind of a slide (T-031). fig: the page has a big picture; its short standalone pieces of text (the captions of the text layer; a line is cut into pieces where the gap is wide) are {t,x,y,w,h} in percent
-   and the biggest line at the top is the head (not a caption). list: no picture and at least 5 short Latin lines: the lines with the indent (x) and bold — they tell the importance of the structures.
-   Anything else is a slide of no use for a course: null. */
-function cnSlideInfo(lines,vp,imgs){
+/* The kind of a slide (T-031). fig: the page has a big picture; its short standalone pieces of text (the captions of the text layer; a line is cut into pieces where the gap is wide) are {t,x,y,w,h} in percent.
+   The head is the topmost bold line in the top fifth of the page (else the biggest one there) and is no caption. list: no picture and at least 5 short Latin lines; every piece of a line (a column) is an entry
+   {t, x (indent in points), b (bold), u (underlined: a thin line right under it, as long as the text), c (column)} — they tell the importance of the structures. Anything else: null. */
+function cnSlideInfo(lines,vp,imgs,uls){
   if(!vp||!lines.length)return null;
   const W=vp.width,H=vp.height,ni=(imgs||[]).length;
   const frac=l=>{try{return vp.convertToViewportPoint(l.its[0].x,l.y)[1]/H;}catch(e){return 1;}};
@@ -4255,27 +4256,35 @@ function cnSlideInfo(lines,vp,imgs){
     const ax=Math.min(r[0],r[2]),bx=Math.max(r[0],r[2]),ay=Math.min(r[1],r[3]),by=Math.max(r[1],r[3]),pd=0.4,x=Math.max(0,ax/W*100-pd),y=Math.max(0,ay/H*100-pd);
     return {x:r2(x),y:r2(y),w:r2(Math.max(0.3,Math.min(100-x,(bx-ax)/W*100+2*pd))),h:r2(Math.max(0.3,Math.min(100-y,(by-ay)/H*100+2*pd)))};};
   const hs=lines.map(l=>l.h).sort((a,b)=>a-b),med=hs[hs.length>>1]||10;
-  let hi=-1,hh=0;
-  lines.forEach((l,i)=>{if(frac(l)<0.3&&l.h>=med*1.15&&l.h>hh&&join(l.its).length<=80){hh=l.h;hi=i;}});
+  let hi=-1;
+  const top=lines.map((l,i)=>i).filter(i=>frac(lines[i])<0.2&&join(lines[i].its).length<=80);
+  const bolds=top.filter(i=>lines[i].its.every(it=>it.em));
+  if(bolds.length)hi=bolds.reduce((a,b)=>frac(lines[b])<frac(lines[a])?b:a);
+  else if(top.length)hi=top.reduce((a,b)=>lines[b].h>lines[a].h?b:a);
   const head=hi>=0?join(lines[hi].its).slice(0,100):'';
   const segs=[];
-  lines.forEach((l,li)=>{if(li===hi)return;let cur=[];const flush=()=>{if(cur.length)segs.push(cur);cur=[];};
+  lines.forEach((l,li)=>{if(li===hi)return;let cur=[],k=0;const flush=()=>{if(cur.length)segs.push({a:cur,li:li,k:k++});cur=[];};
     l.its.forEach(it=>{const prev=cur[cur.length-1];if(prev&&it.x-(prev.x+prev.w)>2.2*Math.min(it.h,prev.h))flush();cur.push(it);});flush();});
-  const caps=segs.map(a=>({t:join(a),r:a})).filter(c=>c.t.length>=2&&c.t.length<=60);
+  const caps=segs.map(g=>({t:join(g.a),r:g.a,g:g})).filter(c=>c.t.length>=2&&c.t.length<=60);
   if(ni>0)return {ty:'fig',head:head,ni:ni,ar:r2(W/H),c:caps.slice(0,120).map(c=>Object.assign({t:c.t},rect(c.r)))};
-  if(caps.filter(c=>cnLatin(c.t)).length>=5){
-    const ls=lines.map((l,i)=>({t:join(l.its).slice(0,120),x:Math.round(l.its[0].x),b:l.its.every(it=>it.em)||i===hi?1:0})).filter(x=>x.t).slice(0,80);
-    return {ty:'list',head:head,ni:0,ls:ls};
+  if(caps.reduce((n,c)=>n+c.t.split(/[;\/]/).filter(x=>cnLatin(x.trim())).length,0)>=5){
+    /* the columns of a list: the first one starts at the leftmost beginning of a line, the others where a piece is not the first of its line */
+    const first=segs.filter(g=>g.k===0).map(g=>g.a[0].x),starts=[Math.min(...first)];
+    segs.filter(g=>g.k>0).map(g=>g.a[0].x).sort((a,b)=>a-b).forEach(x=>{if(x-starts[starts.length-1]>3*med)starts.push(x);});
+    const colOf=x=>{let c=0;starts.forEach((v,i)=>{if(v<=x+4)c=i;});return c;};
+    const under=(g,l)=>{const x0=g.a[0].x,x1=g.a[g.a.length-1].x+g.a[g.a.length-1].w;return (uls||[]).some(u=>u.y<=l.y+0.1*g.a[0].h&&u.y>=l.y-0.45*g.a[0].h&&Math.min(x1,u.x1)-Math.max(x0,u.x0)>=0.5*Math.min(x1-x0,u.x1-u.x0));};
+    const ls=segs.map(g=>({t:join(g.a).slice(0,120),x:Math.round(g.a[0].x),b:g.a.every(it=>it.em)?1:0,u:under(g,lines[g.li])?1:0,c:colOf(g.a[0].x)})).filter(x=>x.t).slice(0,100);
+    return {ty:'list',head:head,ni:0,lh:r2(med),ls:ls};
   }
   return null;
 }
-/* a page record from the cloud */
+/* a page record from the cloud: nothing is trusted */
 function cnSlOk(o){
   if(!o||typeof o!=='object')return null;
   const ty=o.ty==='fig'||o.ty==='list'?o.ty:'';if(!ty)return null;
-  const s=(v,n)=>typeof v==='string'?v.slice(0,n):'',num=v=>Number.isFinite(+v)?+v:0,r={ty:ty,head:s(o.head,100),ni:Math.max(0,Math.min(99,Math.round(+o.ni||0))),ar:Number.isFinite(+o.ar)&&+o.ar>0.2&&+o.ar<5?+o.ar:1.5};
-  if(ty==='fig')r.c=(Array.isArray(o.c)?o.c:[]).slice(0,120).map(x=>x&&typeof x.t==='string'?{t:x.t.slice(0,80),x:num(x.x),y:num(x.y),w:num(x.w),h:num(x.h)}:null).filter(Boolean);
-  else r.ls=(Array.isArray(o.ls)?o.ls:[]).slice(0,80).map(x=>x&&typeof x.t==='string'?{t:x.t.slice(0,120),x:Math.round(num(x.x)),b:x.b?1:0}:null).filter(Boolean);
+  const s=(v,n)=>typeof v==='string'?v.slice(0,n):'',num=v=>Number.isFinite(+v)?+v:0,pc=v=>Math.max(0,Math.min(100,num(v))),r={ty:ty,head:s(o.head,100),ni:Math.max(0,Math.min(99,Math.round(+o.ni||0))),ar:Number.isFinite(+o.ar)&&+o.ar>0.2&&+o.ar<5?+o.ar:1.5};
+  if(ty==='fig')r.c=(Array.isArray(o.c)?o.c:[]).slice(0,120).map(x=>x&&typeof x.t==='string'?{t:x.t.slice(0,80),x:pc(x.x),y:pc(x.y),w:pc(x.w),h:pc(x.h)}:null).filter(Boolean);
+  else{r.lh=Math.max(4,Math.min(60,num(o.lh)||12));r.ls=(Array.isArray(o.ls)?o.ls:[]).slice(0,100).map(x=>x&&typeof x.t==='string'?{t:x.t.slice(0,120),x:Math.max(0,Math.min(5000,Math.round(num(x.x)))),b:x.b?1:0,u:x.u?1:0,c:Math.max(0,Math.min(9,Math.round(num(x.c))))}:null).filter(Boolean);}
   return r;
 }
 /* Exam questions from the lines of the text (heuristic). A question starts with «1.» / «1)» (the number, then a space or the end of the line) or with «küsimus 1» / «question 1» / «вопрос 1»
@@ -4295,26 +4304,29 @@ function cnQuestions(lines){
 }
 /* the writer of the text of one material: pages go into chunks of ≤200 KB, each is a document ctext/<draft>.<material>.<n>; a refusal of the storage (quota) stops the reading */
 function cnSink(d,m){
-  const enc=new TextEncoder(),ids=[];let cur=[],bytes=0,ci=0,chars=0,tb=0,sample='',lines=[];
+  const enc=new TextEncoder(),ids=[];let cur=[],bytes=0,ci=0,chars=0,tb=0,sample='',lines=[],pf={f:0,l:0,c:0};
   const pre=m.gen?'g'+m.gen+'_':'',flush=async()=>{if(!cur.length)return;const id=d.id+'.'+m.id+'.'+pre+(ci++),data={pages:cur};cur=[];bytes=0;if(S.db)await cnWrite('ctext',id,data);ids.push(id);m.chunks=ids.slice();};
   return {
     async add(n,text,em,sl){
       text=String(text).slice(0,CN_LIM.pageChars);const pg={n:n,text:text,em:em||[]};if(sl)pg.sl=sl;const b=enc.encode(JSON.stringify(pg)).length;
       if(cur.length&&bytes+b>CN_LIM.chunk)await flush();
-      cur.push(pg);bytes+=b;chars+=text.length;tb+=enc.encode(text).length;m.bytes=tb;
+      cur.push(pg);bytes+=b;chars+=text.length;tb+=enc.encode(text).length;
+      if(sl){tb+=enc.encode(JSON.stringify(sl)).length;pf[sl.ty==='fig'?'f':'l']++;}   // the slide data counts into the size of the draft
+      if(sl||text.trim().length>=20)pf.c++;
+      m.bytes=tb;
       if(sample.length<8000)sample+=text+'\n';
       text.split('\n').forEach(l=>lines.push(l));
       if(cnBytes(d)>CN_LIM.draftBytes||cnAllBytes()>CN_LIM.allBytes)throw {code:'limit'};
     },
     async done(){
-      await flush();m.chars=chars;const qs=cnQuestions(lines);
+      await flush();m.chars=chars;m.pf=pf;const qs=cnQuestions(lines);
       if(qs.length){const id=d.id+'.'+m.id+'.'+pre+'q';if(S.db)await cnWrite('ctext',id,{qs:qs});ids.push(id);m.qdoc=id;m.qn=qs.length;}else{delete m.qn;delete m.qdoc;}
       m.chunks=ids.filter(x=>x!==m.qdoc);
       const letters=(sample.match(/\p{L}/gu)||[]).length;   // too few letters: the language is not told
       m.lang=letters>=40&&letters/sample.length>=0.4?cnLangOk(crGuessLang(sample.slice(0,8000))):'';
       if(!m.lang)delete m.lang;
     },
-    drop(){cnDelIds(ids);ids.length=0;cur=[];m.chunks=[];delete m.qdoc;delete m.qn;m.bytes=0;m.chars=0;}
+    drop(){cnDelIds(ids);ids.length=0;cur=[];pf={f:0,l:0,c:0};delete m.pf;m.chunks=[];delete m.qdoc;delete m.qn;m.bytes=0;m.chars=0;}
   };
 }
 async function cnRead(d,m,file,retry){
@@ -4335,7 +4347,7 @@ async function cnRead(d,m,file,retry){
     if(m.kind==='pdf'){
       let lib;try{lib=await cnTO(cnPdfLib());}catch(e){throw {code:'lib'};}
       let buf;try{buf=new Uint8Array(await cnTO(file.arrayBuffer()));}catch(e){throw {code:'broken'};}
-      const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false});t.task=task;
+      const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false,maxImageSize:CN_BLD.maxImg});t.task=task;
       try{doc=await cnTO(task.promise,task);}
       catch(e){throw {code:e&&e.code==='timeout'?'timeout':e&&e.name==='PasswordException'?'encrypted':'broken'};}
       if(t.dead){return;}
@@ -4507,10 +4519,22 @@ function cnWarns(d){
   }
   return h;
 }
+/* the slides: pictures / lists / pages with content of the PDFs (counted when they were read) and the mode that is suggested */
+function cnSlideHint(d){
+  const t={f:0,l:0,c:0};
+  d.mats.forEach(m=>{if(m.kind==='pdf'&&m.role!=='exam'&&m.status==='ready'&&m.pf){t.f+=m.pf.f;t.l+=m.pf.l;t.c+=m.pf.c;}});
+  t.sug=t.f>=3&&t.f>=0.3*t.c?'slides':'text';return t;
+}
+function cnModeHtml(d){
+  const h=cnSlideHint(d);if(h.f<3)return '';
+  const cur=d.pmode||h.sug,b=(v,lab)=>'<button role="radio" class="cnr r-base" aria-checked="'+(cur===v)+'" data-cn="pmode" data-v="'+v+'">'+lab+'</button>';
+  return '<div class="cnf cnmode"><div class="cnfm"><span class="cnfn">'+T3('Режим плана','Plan mode','Plaani režiim')+'</span><span class="cnfs">'+esc(T3('Найдено страниц с рисунком: '+h.f+' из '+h.c+', слайдов-списков: '+h.l+'. '+(h.sug==='slides'?'Похоже на слайды: каждая страница с рисунком станет уроком.':'Похоже на текст лекций: темы возьмёт ИИ.'),'Pages with a picture: '+h.f+' of '+h.c+', list slides: '+h.l+'. '+(h.sug==='slides'?'Looks like slides: every page with a picture becomes a lesson.':'Looks like lecture text: the AI finds the topics.'),'Pildiga lehti: '+h.f+' / '+h.c+', loetelu-slaide: '+h.l+'. '+(h.sug==='slides'?'Paistab olevat slaidid: iga pildiga leht saab õppetunniks.':'Paistab olevat loengu tekst: teemad leiab TI.')))+(d.pmode?'':'')+'</span></div>'+
+    '<div class="cnrg cnrg2" role="radiogroup" aria-label="'+esc(T3('Режим плана','Plan mode','Plaani režiim'))+'">'+b('slides',T3('Слайды с рисунками','Slides with pictures','Slaidid piltidega'))+b('text',T3('Текст лекций','Lecture text','Loengu tekst'))+'</div></div>';
+}
 function cnListHtml(d){
   const lang=cnLang(d),L=CN_LNAME[lang];
   return (d.mats.length?'<div class="cnh"><span>'+T3('Материалы · ','Materials · ','Materjalid · ')+d.mats.length+'</span><span>'+T3('роль решает, что главное','the role decides what matters most','roll otsustab, mis on peamine')+'</span></div>'+d.mats.map(m=>cnMatHtml(d,m)).join(''):'')+
-    cnWarns(d)+
+    cnWarns(d)+cnModeHtml(d)+
     (L?'<div class="cnnote"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg><span><b>'+
       T3('Материалы на '+L[0][0]+'.','Materials in '+L[0][1]+'.','Materjalid on '+L[0][2]+' keeles.')+'</b> '+
       T3('Уроки будут на вашем языке — '+CN_LNAME[LANG][1]+', латинские названия остаются латинскими. На других языках курс переведётся при первом открытии.',
@@ -4572,6 +4596,7 @@ SCREENS.courseNew={
       else if(a==='files')$('#cnFile').click();
       else if(a==='cam')$('#cnCam').click();
       else if(a==='role'&&m&&m.role!==b.dataset.r&&CN_ROLES.indexOf(b.dataset.r)>=0){m.role=b.dataset.r;cnSave(d,m);cnPaintNow();}
+      else if(a==='pmode'&&(b.dataset.v==='slides'||b.dataset.v==='text')){d.pmode=b.dataset.v;d._pmDirty=(d._pmDirty||0)+1;cnSave(d);cnPaintNow();}
       else if(a==='rm'&&m)cnRemoveMat(d,m);
       else if(a==='retry'&&m)cnRetry(d,m);
     };
@@ -4659,6 +4684,7 @@ async function cnRun(d,r){
     await cnStepSlideOcr(d,r);if(r.cancel)return;
     const sm=await cnSlideDetect(d,r);if(r.cancel)return;
     let T;
+    r.dt.mode=sm?'slides':'text';cnRPaint();
     if(sm){   // слайды с рисунками: уроки — страницы-рисунки, ИИ только группирует их (T-031)
       r.sm=sm;r.est=5;r.i=1;r.dt.out={k:0,n:0,topics:0,sl:sm.cands.length,ls:sm.lists.length};cnRPaint();
       const qs=await cnStepExam(d,r);if(r.cancel)return;
@@ -4974,26 +5000,31 @@ async function cnPageOcr(d,m,p,r){
 }
 async function cnStepSlideOcr(d,r){
   const L=r.dt.lab;if(!L)return;L.pn=0;L.pk=0;L.pskip=0;
-  const todo=[];let nfig=0;
+  const pm=d.pmode||'';if(pm==='text')return;
+  const todo=[];let nfig=0,nc=0;
   for(const m of cnPdfMats(d)){
     const pgs=await cnSlPages(d,r,m);if(r.cancel)return;
     m.slp=String(m.slp||'').padEnd(m.pages||0,'0').slice(0,m.pages||0);
-    pgs.forEach(p=>{if(p.sl&&p.sl.ty==='fig'){nfig++;if(m.slp[p.n-1]==='0')todo.push({m:m,p:p});}});
+    pgs.forEach(p=>{if(p.sl||p.text.trim().length>=20)nc++;if(p.sl&&p.sl.ty==='fig'){nfig++;if(m.slp[p.n-1]==='0')todo.push({m:m,p:p});}});
   }
-  if(nfig<3)return;   // not a deck of slides: the pictures are not read
+  if(pm==='slides'?!nfig:(nfig<3||nfig<0.3*nc))return;   // not a deck of slides: the pictures are not read
   todo.splice(80);L.pn=todo.length;cnRPaint();
   let touched=false;
   try{
     for(const j of todo){
       if(r.cancel)return;
       L.pk++;L.bn=0;cnRPaint();
-      if(L.ocr){L.pskip++;continue;}
+      if(L.ocr||L.quota){L.pskip++;continue;}
       let res;try{res=await cnPageOcr(d,j.m,j.p,r);}catch(e){res=undefined;if(e&&e.code==='ocr')L.ocr=true;}
       if(r.cancel)return;
       if(!res){L.pskip++;continue;}
       const ch=c=>{j.m.slp=j.m.slp.slice(0,j.p.n-1)+c+j.m.slp.slice(j.p.n);touched=true;};
-      if(res.out.length){await cnWrite('ctext',cnSlId(d,j.m,j.p.n),{n:j.p.n,labels:res.out});ch('1');}
-      else if(res.ok)ch('-');
+      if(res.out.length){
+        const doc={n:j.p.n,labels:res.out},sz=JSON.stringify(doc).length;
+        if(cnBytes(d)+sz>CN_LIM.draftBytes||cnAllBytes()+sz>CN_LIM.allBytes){L.quota=true;L.pskip++;continue;}
+        try{await cnWrite('ctext',cnSlId(d,j.m,j.p.n),doc);}catch(e){if(e&&e.code==='quota'){L.quota=true;L.pskip++;continue;}throw e;}   // no room: the rest of the pictures is skipped, the plan goes on
+        j.m.bytes=(j.m.bytes||0)+sz;ch('1');
+      }else if(res.ok)ch('-');
       cnDirty(d,j.m);
     }
   }finally{if(touched||todo.length){todo.forEach(j=>cnDirty(d,j.m));cnSave(d);}}
@@ -5035,56 +5066,79 @@ function cnSlideTerms(raw,ar){
   const parts=new Set();all.forEach(t=>{if(/\s/.test(t.k))t.k.split(' ').forEach(w=>parts.add(w));});
   return all.filter(t=>/\s/.test(t.k)||(/^[A-Z]/.test(t.la)&&!parts.has(t.k)&&!cnWeak(t.k)));
 }
-/* the pages that are lessons and the pages that are lists → {cands, lists} or null (the old way) */
+/* the pages that are lessons and the pages that are lists → {cands, lists} or null (the old way). The mode: «text» never; «slides» when at least one picture has captions; else (automatic)
+   at least 3 pictures, and those with at least 3 captions are at least 30 % of the pages with content (and at least 2) */
 async function cnSlideDetect(d,r){
-  const cands=[],lists=[];let nfig=0,nlab=0;
+  const pm=d.pmode||'';if(pm==='text')return null;
+  const cands=[],lists=[];let nfig=0,nlab=0,nc=0;
   for(const m of cnPdfMats(d)){
     const pgs=await cnSlPages(d,r,m),sp=String(m.slp||'');
     for(const p of pgs){
+      if(p.sl||p.text.trim().length>=20)nc++;
       if(!p.sl)continue;
       if(p.sl.ty==='list'){lists.push({m:m,p:p});continue;}
       nfig++;
       let raw=(p.sl.c||[]).map(c=>Object.assign({},c,{ocr:false}));
       if(sp[p.n-1]==='1'){
         const o=await cnDocData('ctext',cnSlId(d,m,p.n));if(r.cancel)return null;
-        raw=raw.concat((o&&Array.isArray(o.labels)?o.labels:[]).filter(x=>x&&typeof x.t==='string'&&[x.x,x.y,x.w,x.h].every(v=>Number.isFinite(+v))).map(x=>({t:x.t,x:+x.x,y:+x.y,w:+x.w,h:+x.h,ocr:true})));
+        const pc=v=>Math.max(0,Math.min(100,+v));
+        raw=raw.concat((o&&Array.isArray(o.labels)?o.labels.slice(0,150):[]).filter(x=>x&&typeof x.t==='string'&&[x.x,x.y,x.w,x.h].every(v=>Number.isFinite(+v))).map(x=>({t:x.t.slice(0,120),x:pc(x.x),y:pc(x.y),w:pc(x.w),h:pc(x.h),ocr:true})));
       }
       const terms=cnSlideTerms(raw,p.sl.ar||1.5);
       if(terms.length>=3){nlab++;cands.push({m:m,n:p.n,head:p.sl.head||'',terms:terms});}
     }
   }
-  return nfig>=3&&nlab>=2?{cands:cands,lists:lists,nfig:nfig}:null;
+  const ok=pm==='slides'?nlab>=1:(nfig>=3&&nlab>=Math.max(2,Math.ceil(0.3*nc)));
+  return ok?{cands:cands,lists:lists,nfig:nfig}:null;
 }
-/* importance and the sources of the structures; the input of the plan */
+const CN_VIEW=/^facies\s+(externa|interna|anterior|posterior|superior|inferior|lateralis|medialis|temporalis|orbitalis|cerebralis|nasalis|dorsalis|ventralis|palatina|lingualis|buccalis|labialis|articularis|auricularis|infratemporalis)$/i;
+/* a single word found only by the text recognition and shorter than 6 letters is noise («Itale», «Tes») unless a list, a question or a text names it */
+const cnJunkWord=(la,ocr,named)=>!named&&!!ocr&&!/\s/.test(la)&&la.replace(/[^A-Za-z]/g,'').length<6;
+/* importance and the sources of the structures; the input of the plan.
+   Lists: a piece of a list is P1 when it is underlined, bold (the head of the slide is bold too) or at the first level of its column (the indent against the leftmost piece of the column), else P2.
+   A caption is matched with the lists of its own bone (the head of the list is the head of the slide); when the bone has no list, with all of them.
+   «Facies externa» and the like on a slide are the view of the picture: when the list of the bone does not name it as a section it is not a structure but cand.view. */
 async function cnStepSlideTerms(d,r,sm,qs){
   r.i=3;cnRPaint();
   const entries=[];
   sm.lists.forEach(({m,p})=>{
-    const ls=p.sl.ls||[],xs=Array.from(new Set(ls.map(l=>Math.round(l.x/6)))).sort((a,b)=>a-b),anyB=ls.some(l=>l.b);
-    ls.forEach(l=>{const strong=l.b||(!anyB&&Math.round(l.x/6)===xs[0]);
-      l.t.split(';').forEach(part=>{const k=cnStem(part);if(k)entries.push({k:k,h:' '+k+' ',p:strong?1:2,src:'l|'+cnNameOf(m.name)+'|'+p.n});});});
+    const ls=p.sl.ls||[],lh=p.sl.lh||12,bone=cnNorm(p.sl.head||''),src='l|'+cnNameOf(m.name)+'|'+p.n,cols={};
+    ls.forEach(l=>{(cols[l.c]=cols[l.c]||[]).push(l);});
+    Object.keys(cols).forEach(c=>{
+      const xs=Array.from(new Set(cols[c].map(l=>l.x))).sort((a,b)=>a-b),cl=[];
+      xs.forEach(x=>{if(!cl.length||x-cl[cl.length-1].hi>0.5*lh)cl.push({lo:x,hi:x});else cl[cl.length-1].hi=x;});
+      cols[c].forEach(l=>{l.lv=cl.findIndex(q=>l.x>=q.lo&&l.x<=q.hi);});
+    });
+    if(p.sl.head){const k=cnStem(p.sl.head);if(k)entries.push({k:k,h:' '+k+' ',p:1,src:src,bone:bone});}
+    ls.forEach(l=>{const strong=!!(l.u||l.b||l.lv===0);
+      l.t.split(/[;\/]/).forEach(part=>{const k=cnStem(part);if(k)entries.push({k:k,h:' '+k+' ',p:strong?1:2,src:src,bone:bone});});});
   });
   const other=[];
   for(const m of cnTextMats(d)){(await cnSlPages(d,r,m)).forEach(p=>{if(!p.sl&&p.text)other.push({m:m,n:p.n,h:' '+cnStem(p.text)+' '});});if(r.cancel)return null;}
   qs.forEach(q=>{q.hay=' '+cnStem(q.q)+' ';});
-  const cs=[];let k=0,cnt=[0,0,0,0],cut=0;
+  const cs=[];let k=0,cnt=[0,0,0,0],cut=0,views=0,junk=0;
+  /* a slide titled only with a view («Facies interna») belongs to the bone of the slide before it */
+  sm.cands.forEach((c,i)=>{const pv=sm.cands[i-1];if(CN_VIEW.test(c.head||'')&&pv&&pv.m===c.m&&c.n-pv.n<=2&&pv.head&&!CN_VIEW.test(pv.head)){c.viewHead=c.head.toLowerCase();c.head=pv.head;}});
   sm.cands.forEach((c,i)=>{
-    if(i>=CN_PL.lessons){cut+=c.terms.length;return;}
-    const terms=c.terms.slice(0,CN_PL.perLesson).map(t=>{
-      const key=' '+cnStem(t.la)+' ',weak=cnWeak(t.k);let best=null;
-      entries.forEach(e=>{if(e.k===cnStem(t.la)||(!weak&&e.h.indexOf(key)>=0)){if(!best||e.p<best.p)best=e;}});
+    if(cs.length>=CN_PL.lessons){cut+=c.terms.length;return;}
+    const bone=cnNorm(c.head),vw=c.viewHead?[c.viewHead]:[],own=bone&&entries.some(e=>e.bone===bone)?entries.filter(e=>e.bone===bone):entries,terms=[];
+    c.terms.forEach(t=>{
+      const st=cnStem(t.la),key=' '+st+' ',weak=cnWeak(t.k);let best=null;
+      own.forEach(e=>{if(e.k===st||(!weak&&e.h.indexOf(key)>=0)){if(!best||e.p<best.p)best=e;}});
+      if(CN_VIEW.test(t.la)&&!(own!==entries&&own.some(e=>e.k===st))){vw.push(t.la);views++;return;}   // the view of the slide, not a structure of the bone
       let ex=null;if(!weak)for(const q of qs)if(q.hay.indexOf(key)>=0){ex=q;break;}
       let tx=null;if(!weak&&!best&&!ex)for(const o of other)if(o.h.indexOf(key)>=0){tx=o;break;}
+      if(cnJunkWord(t.la,t.ocr,best||ex||tx)){junk++;return;}
       const p=ex?1:best?best.p:tx?2:3,ps=[];
       if(best)ps.push(best.src);if(ex)ps.push('q|'+cnNameOf(ex.m.name)+'|'+ex.k);if(!ps.length)ps.push(tx?'t|'+cnNameOf(tx.m.name)+'|'+tx.n:'f');
       cnt[p]++;
-      return {id:'t'+(++k),la:t.la,p:p,src:ps.join('~'),bx:t.bx,ocr:t.ocr};
+      terms.push({id:'t'+(++k),la:t.la,p:p,src:ps.join('~'),bx:t.bx,ocr:t.ocr});
     });
-    cs.push({id:'c'+(i+1),m:c.m,n:c.n,head:c.head,terms:terms});
+    if(terms.length)cs.push({id:'c'+(cs.length+1),m:c.m,n:c.n,head:c.head,view:vw.length?Array.from(new Set(vw.map(x=>x.toLowerCase()))).join(' / ').slice(0,100):'',terms:terms.slice(0,CN_PL.perLesson)});
   });
-  r.dt.terms={n:k,p1:cnt[1],p2:cnt[2],p3:cnt[3],dropped:cut};cnRPaint();
+  r.dt.terms={n:k,p1:cnt[1],p2:cnt[2],p3:cnt[3],dropped:cut};r.dt.views=views;r.dt.junk=junk;cnRPaint();
   const inp={mode:'slides',name:(d.name||'Course').slice(0,300),
-    cands:cs.map(c=>({id:c.id,page:c.n,head:c.head.slice(0,200),terms:c.terms.map(t=>({id:t.id,la:t.la,p:t.p}))})),
+    cands:cs.map(c=>{const o={id:c.id,page:c.n,head:c.head.slice(0,200),terms:c.terms.map(t=>({id:t.id,la:t.la,p:t.p}))};if(c.view)o.view=c.view;return o;}),
     lists:sm.lists.slice(0,60).map(({m,p})=>({page:p.n,head:(p.sl.head||'').slice(0,200),items:(p.sl.ls||[]).map(l=>l.t.slice(0,200)).slice(0,60)})),
     exam:qs.slice(0,CN_PL.exam).map((q,i)=>({id:'q'+(i+1),q:q.q.slice(0,600)}))};
   const fit=()=>JSON.stringify(inp).length<=CN_PL.planJson;
@@ -5093,17 +5147,21 @@ async function cnStepSlideTerms(d,r,sm,qs){
   if(!fit())inp.lists.forEach(l=>{l.items=l.items.slice(0,20);});
   if(!fit())inp.lists=[];
   if(!fit())throw {code:'toolarge'};
+  if(!inp.cands.length)throw {code:'noterms'};
   return {inp:inp,sm:{cands:cs},cut:[]};
 }
 /* the answer of plan in the slides mode: {parts:[{name, lessons:[{cand, title}]}], drop:[term ids]}; known candidates only, each once; the rest goes to a tail part */
 function cnSlidePlanBuild(raw,T,soft){
   if(!raw||!Array.isArray(raw.parts))throw {code:'invalid_json'};
-  const byC=new Map(T.sm.cands.map(c=>[c.id,c])),used=new Set(),drop=new Set((Array.isArray(raw.drop)?raw.drop:[]).filter(x=>typeof x==='string')),str=(v,n)=>typeof v==='string'?v.replace(/\s+/g,' ').trim().slice(0,n):'';
+  const byC=new Map(T.sm.cands.map(c=>[c.id,c])),used=new Set(),str=(v,n)=>typeof v==='string'?v.replace(/\s+/g,' ').trim().slice(0,n):'';
+  const drop=new Set((Array.isArray(raw.drop)?raw.drop:[]).filter(x=>typeof x==='string')),dropC=new Set((Array.isArray(raw.drop_cands)?raw.drop_cands:[]).filter(x=>typeof x==='string'));
   const lost=[];let li=0,pi=0;const parts=[];
+  /* a slide that is no lesson (the AI says so: drop_cands) stays in the plan, switched off */
   const mk=(c,title)=>{
     const ts=c.terms.filter(t=>{if(drop.has(t.id)){lost.push(t.la);return false;}return true;});
     if(!ts.length||li>=CN_PL.lessons)return null;
-    return {id:'l'+(++li),title:str(title,80)||c.head.slice(0,80)||ts[0].la,pic:'g:'+c.m.id+':'+c.n,off:false,terms:ts.map(t=>{const o={id:t.id,la:t.la.slice(0,80),p:t.p,src:t.src.slice(0,200)};if(t.bx)o.bx=t.bx;return o;})};
+    const fb=c.head?c.head.slice(0,80)+(c.view?' — '+c.view:''):c.view||ts[0].la;
+    return {id:'l'+(++li),title:str(title,80)||str(fb,80),pic:'g:'+c.m.id+':'+c.n,off:dropC.has(c.id),terms:ts.map(t=>{const o={id:t.id,la:t.la.slice(0,80),p:t.p,src:t.src.slice(0,200)};if(t.bx)o.bx=t.bx;return o;})};
   };
   raw.parts.slice(0,CN_PL.parts).forEach(p=>{
     if(!p||!Array.isArray(p.lessons))return;
@@ -5134,7 +5192,7 @@ function cnHeadHtml(d,on,title){
 function cnReadRows(r){
   const dt=r.dt,L=dt.lab,O=dt.out,E=dt.exam,TT=dt.terms,done=r.state==='done';
   const det=[
-    !L?'':L.photos===0?T3('Фото не добавлены','No photos added','Fotosid pole lisatud'):r.i===0&&!done?T3('фото '+L.k+' из '+L.n,'photo '+L.k+' of '+L.n,'foto '+L.k+' / '+L.n)+(L.pn?T3(' · страницы '+L.pk+' из '+L.pn,' · pages '+L.pk+' of '+L.pn,' · lehti '+L.pk+' / '+L.pn):'')+(L.bn?T3(' · рамка '+L.bk+' из '+L.bn,' · frame '+L.bk+' of '+L.bn,' · raam '+L.bk+' / '+L.bn):''):
+    !L?'':L.photos===0?T3('Фото не добавлены','No photos added','Fotosid pole lisatud'):r.i===0&&!done?T3('фото '+L.k+' из '+L.n,'photo '+L.k+' of '+L.n,'foto '+L.k+' / '+L.n)+(L.quota?T3(' · нет места: картинки пропущены',' · no room: pictures skipped',' · ruumi pole: pildid jäetud vahele'):'')+(L.pn?T3(' · страницы '+L.pk+' из '+L.pn,' · pages '+L.pk+' of '+L.pn,' · lehti '+L.pk+' / '+L.pn):'')+(L.bn?T3(' · рамка '+L.bk+' из '+L.bn,' · frame '+L.bk+' of '+L.bn,' · raam '+L.bk+' / '+L.bn):''):
       T3('Подписи найдены на '+L.withLab+' из '+L.photos+' фото','Labels found on '+L.withLab+' of '+L.photos+' photos','Silte leitud '+L.withLab+' / '+L.photos+' fotolt')+
       (L.bad?T3(' · не распознано: '+L.bad,' · not recognised: '+L.bad,' · tuvastamata: '+L.bad):'')+(L.skip?(L.ocr?T3(' · распознавание текста не запустилось',' · text recognition did not start',' · teksti tuvastus ei käivitunud'):T3(' · пропущено '+L.skip+': оригинала нет на этом устройстве',' · skipped '+L.skip+': the original is not on this device',' · vahele jäetud '+L.skip+': originaali pole selles seadmes')):''),
     !O?'':O.sl!==undefined?T3('Слайдов с рисунком: '+O.sl+' · списков: '+O.ls,'Slides with a picture: '+O.sl+' · lists: '+O.ls,'Pildiga slaide: '+O.sl+' · loetelusid: '+O.ls):r.i===1&&!done?T3('запрос '+O.k+' из '+O.n,'request '+O.k+' of '+O.n,'päring '+O.k+' / '+O.n):T3('Тем: '+O.topics,'Topics: '+O.topics,'Teemasid: '+O.topics),
@@ -5160,6 +5218,7 @@ function cnReadInner(d){
   const r=d._run;if(!r)return '';
   const left=cnLeft();
   let h='<div class="cnrhd">'+CN_MASC+'<b>'+T3('ИИ составляет план','The AI is making the plan','TI koostab plaani')+'</b><span>'+T3('Фото читаются на этом устройстве — это может занять несколько минут. Можно свернуть приложение.','Photos are read on this device, which may take a few minutes. You can minimise the app.','Fotod loetakse selles seadmes, see võib võtta mõne minuti. Rakenduse võib minimeerida.')+'</span></div>'+
+    (r.dt.mode?'<div class="cnspend">'+esc(r.dt.mode==='slides'?T3('Режим: слайды с рисунками','Mode: slides with pictures','Režiim: slaidid piltidega'):T3('Режим: текст лекций','Mode: lecture text','Režiim: loengu tekst'))+'</div>':'')+
     '<div class="cnck">'+cnReadRows(r).map(x=>'<div class="cnrow '+x[2]+'"><span class="cndot">'+(x[2]==='done'?CN_CHK:x[2]==='cur'?CN_SP14:x[2]==='bad'?'!':'')+'</span><span class="cnrx"><b>'+esc(x[0])+'</b><small>'+esc(x[1])+'</small></span></div>').join('')+'</div>'+
     '<div class="cnspend">'+esc(T3('Израсходовано '+r.spent+' из ≈ '+r.est+' запросов','Used '+r.spent+' of ≈ '+r.est+' requests','Kasutatud '+r.spent+' / ≈ '+r.est+' päringut')+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):''))+'</div>';
   if(r.state==='err')h+='<div class="cnwarn cnerr" role="alert">'+esc(cnRunErrText(r.err.k,left))+'</div>';
@@ -5184,7 +5243,7 @@ function cnPlanDoc(o){
   const s=(v,n)=>typeof v==='string'?v.slice(0,n):'';
   return {bld:cnBldDoc(o.bld),at:+o.at||0,ed:+o.ed||0,fp:s(o.fp,40),edited:!!o.edited,fallback:!!o.fallback,slides:!!o.slides,lost:(Array.isArray(o.lost)?o.lost:[]).filter(x=>typeof x==='string').slice(0,300).map(x=>x.slice(0,80)),lang:cnLangOk(o.lang),parts:o.parts.slice(0,40).map(p=>({id:s(p&&p.id,20),name:s(p&&p.name,80),lessons:(Array.isArray(p&&p.lessons)?p.lessons:[]).slice(0,CN_PL.lessons).map(l=>({
     id:s(l&&l.id,20),title:s(l&&l.title,80),pic:l&&typeof l.pic==='string'&&/^[pg]:/.test(l.pic)?l.pic.slice(0,80):null,off:!!(l&&l.off),
-    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>{const r={id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)};if(t&&Array.isArray(t.bx)&&t.bx.length===4&&t.bx.every(v=>Number.isFinite(+v)))r.bx=t.bx.map(v=>r2(+v));if(t&&(+t.pu===1||+t.pu===2||+t.pu===3))r.pu=+t.pu;return r;})}))}))};
+    terms:(Array.isArray(l&&l.terms)?l.terms:[]).slice(0,CN_PL.perLesson).map(t=>{const r={id:s(t&&t.id,20),la:s(t&&t.la,80),p:t&&(+t.p===1||+t.p===2)?+t.p:3,src:s(t&&t.src,200)};if(t&&Array.isArray(t.bx)&&t.bx.length===4&&t.bx.every(v=>Number.isFinite(+v)))r.bx=t.bx.map(v=>r2(Math.max(0,Math.min(100,+v))));if(t&&(+t.pu===1||+t.pu===2||+t.pu===3))r.pu=+t.pu;return r;})}))}))};
 }
 function cnPlanLoad(d){
   d._planLoad=true;d._planErr='';
@@ -5409,7 +5468,7 @@ function cnAddTerm(d,l,inp){
    Состояние — в плане: cplan/<черновик>.bld = {at, base, parts:{id части: id колоды}, ls:{id урока: {st:'ok'|'err', pid, err, nf, nt, np}}}; nf — карточек без рамки, nt — урок без текстов ИИ, np — урок без рисунка.
    Папка курса — cdraft.courseId (повторная сборка того же черновика пишет в ту же папку). У фото-урока plate.cb = '<черновик>|<время плана>|<урок>': недостроенный урок после обрыва находится по нему и пересоздаётся.
    Пауза — после текущего урока (запрос ИИ не обрывается: он уже оплачен). Перезагрузка — сборка стоит на паузе, «Продолжить» идёт с первого не собранного урока. */
-const CN_BLD={ptStep:10000,lsStep:100,maxCand:6000,run:8,img:1600,text:18000,exam:15,json:38000};
+const CN_BLD={pagePx:150e6,maxImg:40e6,ptStep:10000,lsStep:100,maxCand:6000,run:8,img:1600,text:18000,exam:15,json:38000};
 const CN_DEV=Array.from(crypto.getRandomValues(new Uint8Array(6)),x=>(x%36).toString(36)).join('');   // not Math.random: it must not shift the app's own random choices
 const cnBldNew=()=>({at:Date.now(),base:Date.now(),spent:0,parts:Object.create(null),ls:Object.create(null),pa:Object.create(null),run:null});
 const cnSpend=(d,b,n)=>{b.spent+=n;d._plan.bld.spent=b.spent;};
@@ -5577,28 +5636,35 @@ async function cnBldOpenPdf(d,b,m){
   let lib;try{lib=await cnTO(cnPdfLib());}catch(e){throw {code:'pic'};}
   let buf;try{buf=new Uint8Array(await cnTO(blob.arrayBuffer()));}catch(e){throw {code:'pic'};}
   /* WebKit (iPhone, Safari) draws no raster pictures of a page with OffscreenCanvas / ImageDecoder: both are off for the render. window.__CN_BLANK is the test switch: 1 — the areas of the pictures stay white after the render (as in a broken WebKit), 2 — the same and the check of the blank page is off */
-  const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false});
+  const task=lib.getDocument({data:buf,isEvalSupported:false,disableFontFace:true,enableXfa:false,useWorkerFetch:false,isOffscreenCanvasSupported:false,isImageDecoderSupported:false,maxImageSize:CN_BLD.maxImg});
   let doc;try{doc=await cnTO(task.promise,task);}catch(e){throw {code:'pic'};}
   o={doc:doc,task:task,lib:lib};b.pdf.set(m.id,o);return o;
 }
 /* строки текстового слоя страницы → кандидаты на подпись {t, x, y, w, h} в процентах: подряд идущие куски одной строки, от одного до восьми */
 /* image areas of a page from the operators: the matrix of the page is followed (save, restore, transform); a picture is the unit square under it. → [{x0,y0,x1,y1}] in the units of the page, only the big ones */
-function cnPageImages(ol,OPS,vp){
+/* What the operators of a page draw: big pictures (the unit square under the matrix, in viewport units; only those of at least 6 % of the page), thin horizontal paths (underlines: at most 2.5 high,
+   at least 8 wide, in the units of the page = of the text) and the number of pixels of all pictures (px). The matrix of the page is followed (save, restore, transform). */
+function cnPageOps(ol,OPS,vp){
   const mul=(a,b)=>[a[0]*b[0]+a[1]*b[2],a[0]*b[1]+a[1]*b[3],a[2]*b[0]+a[3]*b[2],a[2]*b[1]+a[3]*b[3],a[4]*b[0]+a[5]*b[2]+b[4],a[4]*b[1]+a[5]*b[3]+b[5]];
-  let m=[1,0,0,1,0,0];const st=[],out=[];
+  let m=[1,0,0,1,0,0],px=0;const st=[],imgs=[],uls=[];
+  const box=(x0,y0,x1,y1)=>{const xs=[x0,x1,x0,x1].map((u,k)=>m[0]*u+m[2]*[y0,y0,y1,y1][k]+m[4]),ys=[x0,x1,x0,x1].map((u,k)=>m[1]*u+m[3]*[y0,y0,y1,y1][k]+m[5]);return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];};
+  const line=b=>{if(b[3]-b[1]<=2.5&&b[2]-b[0]>=8&&b[2]-b[0]<=0.9*vp.width&&uls.length<400)uls.push({x0:b[0],x1:b[2],y:(b[1]+b[3])/2});};
   for(let i=0;i<ol.fnArray.length&&i<200000;i++){
     const f=ol.fnArray[i],a=ol.argsArray[i];
     if(f===OPS.save)st.push(m);else if(f===OPS.restore){if(st.length)m=st.pop();}
     else if(f===OPS.transform&&Array.isArray(a)&&a.length>=6)m=mul(a,m);
+    else if(f===OPS.constructPath&&Array.isArray(a)&&Array.isArray(a[2])&&a[2].length>=4&&a[2].every(Number.isFinite))line(box(a[2][0],a[2][1],a[2][2],a[2][3]));
+    else if(f===OPS.rectangle&&Array.isArray(a)&&a.length>=4)line(box(a[0],a[1],a[0]+a[2],a[1]+a[3]));
     else if(f===OPS.paintImageXObject||f===OPS.paintInlineImageXObject||f===OPS.paintImageXObjectRepeat){
-      const xs=[0,1,0,1].map((u,k)=>m[0]*u+m[2]*[0,0,1,1][k]+m[4]),ys=[0,1,0,1].map((u,k)=>m[1]*u+m[3]*[0,0,1,1][k]+m[5]);
-      const r=vp.convertToViewportRectangle([Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)]);
+      if(Array.isArray(a)&&Number.isFinite(+a[1])&&Number.isFinite(+a[2]))px+=Math.max(0,+a[1])*Math.max(0,+a[2]);
+      const b=box(0,0,1,1),r=vp.convertToViewportRectangle(b);
       const x0=Math.min(r[0],r[2]),x1=Math.max(r[0],r[2]),y0=Math.min(r[1],r[3]),y1=Math.max(r[1],r[3]);
-      if((x1-x0)*(y1-y0)>=0.06*vp.width*vp.height)out.push({x0:x0,y0:y0,x1:x1,y1:y1});
+      if((x1-x0)*(y1-y0)>=0.06*vp.width*vp.height)imgs.push({x0:x0,y0:y0,x1:x1,y1:y1});
     }
   }
-  return out;
+  return {imgs:imgs,uls:uls,px:px};
 }
+const cnPageImages=(ol,OPS,vp)=>cnPageOps(ol,OPS,vp).imgs;
 /* The captions of a page: {t, x, y, w, h} in percent. Only short lines that stand alone (a line of at most 4 pieces and 50 characters; a line with a long text is a paragraph),
    from one to four pieces in a row. A name inside a paragraph gets no frame. Inside the area of a picture, when the page has one, they come first. */
 function cnPageCands(items,vp,imgs){
@@ -8619,7 +8685,7 @@ if(window.__TEST__){
   Object.defineProperty(window,'view',{get:()=>view});
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnSlideTerms=cnSlideTerms;window.cnBldMatch=cnBldMatch;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnPlanClean=cnPlanClean;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnSlideTerms=cnSlideTerms;window.cnJunkWord=cnJunkWord;window.cnBldMatch=cnBldMatch;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
@@ -9096,7 +9162,8 @@ html.vkb .panel{padding-bottom:12px}
 .cnbth2{flex:none;width:44px;height:44px;border-radius:11px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);color:var(--ink3)}.cnbth2 img{width:100%;height:100%;object-fit:cover}.cnbth2 svg{width:22px;height:22px}
 .cnbx0{font-size:20px;font-weight:700;color:var(--learn-ink)}
 .cnbp{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:5px 9px;border-radius:11px;white-space:nowrap}
-.cnbp.ok{background:var(--easy-soft);color:var(--ok-ink)}.cnbp.chk{background:var(--hard-soft);color:var(--learn-ink)}.cnbp.bad{background:var(--bad-soft);color:var(--bad-ink)}.cnbp.acc{background:var(--primary-soft);color:var(--accent-ink)}.cnbp.plain{background:var(--surface2);color:var(--ink2)}
+.cnbp.ok{background:var(--easy-soft);color:var(--ok-ink)}.cnbp.chk{background:var(--hard-soft);color:var(--learn-ink)}.cnbp.bad{background:var(--bad-soft);color:var(--bad-ink)}.cnbp.acc{background:var(--primary-soft);color:var(--accent-ink)}.cnrg2{grid-template-columns:repeat(2,minmax(0,1fr))}.cnmode{flex-direction:column}
+.cnbp.plain{background:var(--surface2);color:var(--ink2)}
 </style>
 </body>
 </html>

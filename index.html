@@ -5834,11 +5834,11 @@ function cnBldDoc(b){
   const r=b.run&&typeof b.run==='object'&&typeof b.run.dev==='string'?{dev:s(b.run.dev,20),at:+b.run.at||0}:null;   // run: who is building now (another tab or device does not start a second build)
   return {at:+b.at||0,base:+b.base||0,spent:Math.max(0,Math.min(99999,Math.round(+b.spent||0))),parts:parts,ls:ls,pa:pa,run:r};
 }
-/* the record of the cloud into mine: what is not in mine is added, a ready lesson wins over an error */
+/* the record of the cloud into mine: what is not in mine is added, a ready lesson wins over an error; a lesson rebuilt with AI text wins over a ready one without it */
 function cnBldMerge(mine,cl){
   if(cl.base&&(!mine.base||cl.base<mine.base)){mine.base=cl.base;mine.at=cl.at||mine.at;}
   Object.keys(cl.parts).forEach(k=>{if(!Object.hasOwn(mine.parts,k))mine.parts[k]=cl.parts[k];});
-  Object.keys(cl.ls).forEach(k=>{if(!Object.hasOwn(mine.ls,k)||(cl.ls[k].st==='ok'&&mine.ls[k].st!=='ok'))mine.ls[k]=cl.ls[k];});
+  Object.keys(cl.ls).forEach(k=>{if(!Object.hasOwn(mine.ls,k)||(cl.ls[k].st==='ok'&&(mine.ls[k].st!=='ok'||(cl.ls[k].nt||0)<(mine.ls[k].nt||0))))mine.ls[k]=cl.ls[k];});   // also a lesson rebuilt with AI text elsewhere (fewer units without it) wins over my older record: «Retry» in a stale tab must not pay for it again
   Object.keys(cl.pa).forEach(k=>{if(!Object.hasOwn(mine.pa,k)&&!(Object.hasOwn(mine.ls,k)&&mine.ls[k].st==='ok'))mine.pa[k]=cl.pa[k];});
   if(!mine.run&&cl.run)mine.run=cl.run;
   mine.spent=Math.max(mine.spent||0,cl.spent||0);
@@ -6423,7 +6423,9 @@ async function cnBldKnowledgeOne(d,b,it){
   const expected=p.knowledgeIds.slice().sort(),stored=units.map(x=>x.id).sort();
   if(expected.length!==stored.length||expected.some((x,i)=>x!==stored[i])||JSON.stringify({plate:p,cards:cards}).length>CN_KLESSON.savedChars){if(up&&S.assets)S.assets.delete(up.id).catch(()=>{});return fail(expected.length!==stored.length?'knowledge_coverage':'lesson_limit');}
   if(b.cancel){if(up&&S.assets)S.assets.delete(up.id).catch(()=>{});return null;}
-  S.plates.filter(x=>x.cb===key).forEach(old=>{cardsOfPlate(old.id).forEach(c=>removeCard(c.id));if(old.assetId&&S.assets)S.assets.delete(old.assetId).catch(()=>{});dropPlate(old);});
+  const studied=new Map();   // a retry replaces the saved lesson: the study progress of a card of the same unit goes over to the new card
+  S.plates.filter(x=>x.cb===key).forEach(old=>{cardsOfPlate(old.id).forEach(c=>{if(c.knowledgeId&&(c.reps>0||c.type!=='new'))studied.set(c.knowledgeId,Object.assign({},c));removeCard(c.id);});if(old.assetId&&S.assets)S.assets.delete(old.assetId).catch(()=>{});dropPlate(old);});
+  cards.forEach(c=>{const o=studied.get(c.knowledgeId);if(o)['type','step','ease','ivl','due','lapses','fs','fd','lr','reps','ok','miss','last','leechNoted'].forEach(k=>{if(Object.hasOwn(o,k))c[k]=o[k];});});
   b.i=4;cnBPaint();S.plates.push(p);persist('plates',p.id);packAdd(cards);
   const nf=units.filter(x=>x.generationStatus==='fallback').length;
   const stop=await cnBldRecord(d,b,l,{st:'ok',outcome:ai.generationStatus,pid:p.id,err:reason,nf:0,nt:nf,np:pic?0:1});

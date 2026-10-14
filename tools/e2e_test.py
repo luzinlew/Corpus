@@ -3983,6 +3983,254 @@ async def main():
             # <<< T032A
             await ctx_k.close()
 
+            # >>> T032R
+            # ---------- T-032, limited release: what the reader can do to a built v2 course (retry of a lesson, role of a material, delete of a material, edits of the plan) ----------
+            knowledge_files(tmp / 'kn2')
+            KN2 = tmp / 'kn2'
+            urllib.request.urlopen(API + '/__fn?v2lessons=7')
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            ctx_r, pr, errs_r = await open_ctx(legacy=False)
+            await pr.goto(SITE + '?create=1&i=' + INVITE)
+            await pr.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pr.fill('input[name=email]', 'release@test.ee')
+            await pr.fill('input[name=password]', 'kolju2026')
+            await pr.click('.cw-go')
+            await app_ready(pr)
+            await ui_lang(pr, 'et')
+            ai_r = watch_ai(pr)
+            uid_r = await pr.evaluate('CORPUS_WEB.uid')
+            mine_r = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_r]
+            used_r = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_r, 0)
+            lessons_r = lambda: [c for c in ai_r if c.get('task') == 'lesson']
+            await pr.evaluate("go({name:'courses'})")
+            await pr.wait_for_selector('.cnnew')
+            await pr.click('.cnnew')
+            await pr.wait_for_selector('.cnw')
+            did_r = await pr.evaluate('view.did')
+            await pr.fill('#cnName', 'Release')
+            await pr.press('#cnName', 'Tab')
+            await pr.set_input_files('#cnFile', [str(KN2 / 'Heat notes.pdf'), str(KN2 / 'Extra reading.pdf')])
+            await pr.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            await pr.click('.cnmain')
+            await pr.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_r(s, 'cplan')) and len([r for r in mine_r(s, 'ctext') if '.ku1.' in r['id']]) == 2 and any(r['data'].get('planAt') for r in mine_r(s, 'cdraft')))
+            plan_r = mine_r(st, 'cplan')[0]['data']
+            plan_l = [l for pt in plan_r['parts'] for l in pt['lessons']]
+            lid_r = [l['id'] for l in plan_l]
+            mats_r = await pr.evaluate("Object.fromEntries(CDRAFTS.get(view.did).mats.map(m=>[m.name,m.id]))")
+            mid_core, mid_extra = mats_r['Heat notes.pdf'], mats_r['Extra reading.pdf']
+            # build: the first two lessons without the AI's units (the fake model answers without them: the saved lesson is a fallback with nt = 2), the other five normally
+            urllib.request.urlopen(API + '/__fn?delay=2500&drop=1&v2lessons=7')
+            await pr.click('.cnbtns [data-cn=build]')
+            await pr.wait_for_function("view.step===4&&!!CDRAFTS.get(view.did)._bld", timeout=60000)
+            for _ in range(200):
+                if len(lessons_r()) >= 2:
+                    break
+                await pr.wait_for_timeout(50)
+            await pr.click('[data-cn=pause]')
+            await pr.wait_for_function("CDRAFTS.get(view.did)._bld.state==='pause'", timeout=60000)
+            await pr.wait_for_timeout(300)
+            urllib.request.urlopen(API + '/__fn?v2lessons=7')
+            await pr.click('[data-cn=resume]')
+            await pr.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            await pr.wait_for_timeout(300)
+            st = await state_when(lambda s: len(mine_r(s, 'plates')) == 7 and all(not r['data']['bld'].get('run') for r in mine_r(s, 'cplan')))
+            bls = lambda: pr.evaluate("JSON.parse(JSON.stringify(CDRAFTS.get('" + did_r + "')._plan.bld.ls))")
+            ls0 = await bls()
+            snap = lambda did: pr.evaluate("""(did)=>({plates:S.plates.filter(p=>p.cb&&p.cb.startsWith(did+'|')).map(p=>[p.id,p.cb,p.title,p.generationStatus].join('~')).sort(),
+              cards:S.cards.filter(c=>c.knowledgeId).map(c=>c.id+"~"+c.plateId+"~"+c.knowledgeId).sort()})""", did)
+            check('release: the course is built: 7 lessons; lessons 1-2 are saved without AI units (ok, nt 2), lessons 3-7 are normal (ok, nt 0); 14 cards; 7 lesson requests, 7 + 14 units paid',
+                  len(lessons_r()) == 7 and used_r() == 7 + 14 and [(ls0[i]['st'], ls0[i]['nt']) for i in lid_r[:2]] == [('ok', 2), ('ok', 2)] and all((ls0[i]['st'], ls0[i]['nt']) == ('ok', 0) for i in lid_r[2:])
+                  and len((await snap(did_r))['cards']) == 14, json.dumps([len(lessons_r()), used_r(), {k: [v['st'], v['nt'], v['outcome']] for k, v in ls0.items()}]))
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:4})")
+            await pr.wait_for_selector('.cnbl')
+            lre = lambda: pr.evaluate("[...document.querySelectorAll('[data-cn=lretry]')].map(b=>b.dataset.lid)")
+            check('retry: «Proovi uuesti» is offered for the two lessons without AI units only (not for the five normal ones)', await lre() == lid_r[:2], json.dumps(await lre()))
+            # ---- 1a: a finished lesson is not built again, even when the retry is called for it directly
+            s0 = await snap(did_r)
+            n0, u0 = len(lessons_r()), used_r()
+            await pr.evaluate("(lid)=>{const b=document.createElement('button');b.dataset.cn='lretry';b.dataset.lid=lid;b.hidden=true;document.querySelector('.cnbl').appendChild(b);b.click();b.remove();}", lid_r[2])   # the same handler as the button; no button is shown for a lesson with AI text
+            await pr.wait_for_timeout(800)
+            check('retry of a normal lesson: no request to the AI, nothing paid, the plates and the cards are the same, no run mark', len(lessons_r()) == n0 and used_r() == u0 and await snap(did_r) == s0
+                  and await pr.evaluate("!CDRAFTS.get('" + did_r + "')._bld||CDRAFTS.get('" + did_r + "')._bld.state!=='run'") and (await bls()) == ls0)
+            # ---- 1b: retry of a lesson saved without AI units: one request, the old plate and its cards are replaced; the reader's progress on the cards stays
+            c1 = await pr.evaluate("""(a)=>{const p=S.plates.find(x=>x.cb===a);const cs=cardsOfPlate(p.id).sort((x,y)=>x.id<y.id?-1:1);const c=cs[0];c.type='review';c.reps=3;c.ivl=6;c.ease=2.2;c.ok=3;c.miss=1;c.due=Date.now()+5*86400000;c.note='MY NOTE';persist('terms',c.id);
+              return {pid:p.id,kid:c.knowledgeId,old:cs.map(x=>x.id),due:c.due};}""", did_r + '|' + str(plan_r['at']) + '|' + lid_r[0])
+            await pr.wait_for_timeout(1500)
+            await pr.click('[data-cn=lretry][data-lid="' + lid_r[0] + '"]')
+            await pr.wait_for_function("CDRAFTS.get('" + did_r + "')._bld.state==='done'", timeout=60000)
+            await pr.wait_for_timeout(500)
+            st = await state_when(lambda s: len(mine_r(s, 'plates')) == 7 and not any(r['id'] == c1['pid'] for r in mine_r(s, 'plates')))
+            s1 = await snap(did_r)
+            ls1 = await bls()
+            cn = await pr.evaluate("""(a)=>{const p=S.plates.find(x=>x.cb===a);return {pid:p.id,gen:p.generationStatus,cards:cardsOfPlate(p.id).map(c=>({id:c.id,k:c.knowledgeId,type:c.type,reps:c.reps,ivl:c.ivl,ok:c.ok,miss:c.miss,due:c.due,note:c.note}))};}""", did_r + '|' + str(plan_r['at']) + '|' + lid_r[0])
+            kcard = next((c for c in cn['cards'] if c['k'] == c1['kid']), {})
+            check('retry of a lesson without AI units: exactly one lesson request (+2 units), the lesson has one new plate under the same key (7 plates in all, none doubled), 14 cards each once, the old plate is gone from the cloud, the record is ok with nt 0',
+                  len(lessons_r()) == n0 + 1 and used_r() == u0 + 2 and len(s1['plates']) == 7 and len(s1['cards']) == 14 and len({c.split('~')[2] for c in s1['cards']}) == 14 and cn['pid'] != c1['pid'] and cn['gen'] == 'ai'
+                  and not any(r['id'] == c1['pid'] for r in mine_r(st, 'plates')) and (ls1[lid_r[0]]['st'], ls1[lid_r[0]]['nt']) == ('ok', 0) and not (set(c1['old']) & {c['id'] for c in cn['cards']}), json.dumps([len(lessons_r()), used_r(), cn, ls1[lid_r[0]]])[:600])
+            check('retry of a lesson without AI units: the reader\'s study progress on a card (type review, 3 repetitions, interval 6, due in 5 days) is kept on the new card of the same unit',
+                  kcard.get('type') == 'review' and kcard.get('reps') == 3 and kcard.get('ivl') == 6 and kcard.get('ok') == 3 and kcard.get('miss') == 1 and kcard.get('due') == c1['due'], json.dumps([kcard, c1]))
+            # ---- 1c: the model service refuses (429): the old lesson stays whole; the function has charged the request (the rule of the function: a refusal of the model is charged), the app counts it once
+            sA = await snap(did_r)
+            nA, uA = len(lessons_r()), used_r()
+            refusal_window['on'] = True
+            urllib.request.urlopen(API + '/__fn?fail_after=0&v2lessons=7')
+            await pr.click('[data-cn=lretry][data-lid="' + lid_r[1] + '"]')
+            await pr.wait_for_function("CDRAFTS.get('" + did_r + "')._bld.state!=='run'&&CDRAFTS.get('" + did_r + "')._bld.state!=='pausing'", timeout=60000)
+            await pr.wait_for_timeout(500)
+            sB = await snap(did_r)
+            lsB = await bls()
+            check('retry when the model service refuses: one request, 2 units charged by the function, the old plate and its cards of that lesson are untouched (same ids), no other plate or card changed; the lesson waits («Ootel») without a record',
+                  len(lessons_r()) == nA + 1 and used_r() == uA + 2 and sB == sA and lid_r[1] not in lsB and await pr.evaluate("CDRAFTS.get('" + did_r + "')._bld.spent") == 18,
+                  json.dumps([len(lessons_r()) - nA, used_r() - uA, lsB.get(lid_r[1]), await pr.evaluate("CDRAFTS.get('" + did_r + "')._bld.spent")]))
+            refusal_window['on'] = False
+            urllib.request.urlopen(API + '/__fn?v2lessons=7')
+            await pr.wait_for_timeout(300)
+            await pr.click('[data-cn=resume]')
+            await pr.wait_for_function("CDRAFTS.get('" + did_r + "')._bld.state==='done'", timeout=60000)
+            lsB2 = await bls()
+            check('retry: «Jätka» after a refusal sends no request (the saved lesson is found by its key and recorded again as it was, nt 2) and the plates and cards are the same; «Proovi uuesti» is back for that lesson',
+                  len(lessons_r()) == nA + 1 and used_r() == uA + 2 and await snap(did_r) == sA and (lsB2[lid_r[1]]['st'], lsB2[lid_r[1]]['nt']) == ('ok', 2) and lid_r[1] in await lre(), json.dumps([lsB2.get(lid_r[1]), await lre()]))
+            # ---- 1d: a second tab (stale: loaded before the retry) must not build the lesson that the first tab has just rebuilt
+            pr2 = await ctx_r.new_page()
+            ai_r2 = watch_ai(pr2)
+            await pr2.goto(SITE)
+            await app_ready(pr2)
+            await pr2.click('.tabbar [data-v=courses]')
+            await pr2.wait_for_selector('.crs .cnd')
+            await pr2.click('.cnd .cndgo')
+            await pr2.wait_for_selector('.cnbl', timeout=30000)
+            await pr2.wait_for_function("!!(CORPUS_WEB.courseAI&&CORPUS_WEB.courseAI.lesson)", timeout=30000)
+            tab2_has = await pr2.evaluate("[...document.querySelectorAll('[data-cn=lretry]')].map(b=>b.dataset.lid)")
+            await pr.bring_to_front()
+            await pr.click('[data-cn=lretry][data-lid="' + lid_r[1] + '"]')
+            await pr.wait_for_function("CDRAFTS.get('" + did_r + "')._bld.state==='done'", timeout=60000)
+            await pr.wait_for_timeout(500)
+            nC, uC = len(lessons_r()), used_r()
+            await pr2.bring_to_front()
+            await pr2.click('[data-cn=lretry][data-lid="' + lid_r[1] + '"]')
+            await pr2.wait_for_timeout(3000)
+            st = await state_when(lambda s: True)
+            plates_c = [r for r in mine_r(st, 'plates') if r['data'].get('cb', '').endswith('|' + lid_r[1])]
+            check('retry in a second tab that was opened before the first tab rebuilt the lesson: the stale tab offered the button; pressing it sends no request to the AI, pays nothing and leaves exactly one plate of the lesson in the cloud',
+                  lid_r[1] in tab2_has and len([c for c in ai_r2 if c.get('task') == 'lesson']) == 0 and used_r() == uC and len(plates_c) == 1, json.dumps([tab2_has, len(ai_r2), used_r() - uC, len(plates_c)]))
+            await pr2.close()
+            await pr.bring_to_front()
+            # ---- 4: the edits of a v2 plan. The plan screen of the knowledge plan has no edit controls (no tick, no rename, no move, no delete, no add): the units cannot be lost by editing
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:3})")
+            await pr.wait_for_selector('.cnph')
+            cp4 = mine_r(state(), 'cplan')[0]['data']
+            ui4 = await pr.evaluate("""()=>({acts:[...new Set([...document.querySelectorAll('#cnPl [data-cn]')].map(b=>b.dataset.cn))].sort(),tickButtons:document.querySelectorAll('#cnPl button.cnck1').length,ticks:document.querySelectorAll('#cnPl .cnck1').length,
+              inputs:document.querySelectorAll('#cnPl input').length,off:document.querySelectorAll('#cnPl .cnpl.off').length,renames:document.querySelectorAll('#cnPl .cnptb[data-cn]').length,bar:document.querySelector('.cnbtns [data-cn=build] small').innerText,ph:document.querySelector('.cnph').innerText,x1:document.querySelector('.cnpx1').innerText})""")
+            await pr.click('#cnPl .cnck1 >> nth=0')
+            await pr.click('#cnPl .cnptb >> nth=0')
+            await pr.click('#cnPl [data-cn=lopen] >> nth=0')
+            await pr.wait_for_timeout(1500)
+            cp4b = mine_r(state(), 'cplan')[0]['data']
+            idx4 = cp4['knowledgeIndex']
+            planned4 = [i for pt in cp4['parts'] for l in pt['lessons'] for i in l['knowledgeIds']]
+            check('plan edit (v2): the plan screen has only «open the lesson» (no tick, no rename, no add, no move, no delete); ticks are not buttons; the bar says «valmis: 7 / 7 · umbes 0 kvoodiühikut»; nothing is written to the cloud when the reader taps (same document, not edited)',
+                  ui4['acts'] == ['lopen'], json.dumps(ui4, ensure_ascii=False))
+            check('plan edit (v2): …tapping the tick, the part and a lesson changes nothing in the cloud (the same cplan, no `edited`, no off lesson); the registry is covered exactly once: 14 eligible ids, each in exactly one lesson, coverage 14 / 14, missing 0, duplicates 0, unknown 0',
+                  ui4['tickButtons'] == 0 and ui4['inputs'] == 0 and ui4['off'] == 0 and ui4['renames'] == 0 and ui4['bar'] == 'valmis: 7 / 7 · umbes 0 kvoodiühikut' and cp4b == cp4 and not cp4.get('edited') and not any(l.get('off') for pt in cp4['parts'] for l in pt['lessons'])
+                  and sorted(planned4) == sorted(x['id'] for x in idx4 if x['eligible']) and len(planned4) == 14 and cp4['coverage']['planned'] == 14 and cp4['coverage']['expected'] == 14 and not (cp4['coverage']['missing'] or cp4['coverage']['duplicates'] or cp4['coverage']['unknown']), json.dumps(cp4['coverage']))
+            # ---- 2: the role of a material changes after the registry and the plan exist
+            kdocs_of = lambda s: sorted(r['id'] for r in mine_r(s, 'ctext') if '.ku1.' in r['id'])
+            mats_now = lambda: pr.evaluate("CDRAFTS.get('" + did_r + "').mats.map(m=>[m.id,m.role,m.kstatus,(m.kdocs||[]).join(',')])")
+            m2 = await mats_now()
+            k2 = kdocs_of(state())
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "'})")
+            await pr.wait_for_selector('.cnrg')
+            nR, uR = len(ai_r), used_r()
+            await pr.click('[data-cn=role][data-mid="' + mid_extra + '"][data-r=exam]')
+            await pr.wait_for_timeout(1500)
+            st = state()
+            m2b = await mats_now()
+            stale2 = await pr.evaluate("cnFp(CDRAFTS.get('" + did_r + "'))!==CDRAFTS.get('" + did_r + "')._plan.fp")
+            cp2 = mine_r(st, 'cplan')[0]['data']
+            extra_units = {u['id'] for r in mine_r(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == mid_extra for u in r['data']['units']}
+            planned2 = {i for pt in cp2['parts'] for l in pt['lessons'] for i in l['knowledgeIds']}
+            check('role change (Extra → Exam) after the plan: the registry of the material is kept (same kdocs and kstatus, same 2 registry documents in the cloud), the plan is the same document (7 lessons, 14 units, 6 of them from the material that is now «Eksam»), no request to the AI, nothing paid; the plan is stale by its fingerprint',
+                  [x for x in m2b if x[0] == mid_extra][0][1] == 'exam' and [x[2:] for x in m2b] == [x[2:] for x in m2] and kdocs_of(st) == k2 and len(k2) == 2 and cp2 == cp4 and len(extra_units) == 6 and extra_units <= planned2 and stale2 and len(ai_r) == nR and used_r() == uR,
+                  json.dumps([m2b, stale2, len(extra_units), len(planned2)]))
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:3})")
+            await pr.wait_for_selector('.cnph')
+            ui2 = await pr.evaluate("({txt:document.querySelector('#cnPl').innerText,bar:document.querySelector('.cnbtns [data-cn=build] small').innerText})")
+            print('INFO known gap: the v2 plan screen shows no «materials changed» line after a role change:', 'muutusid' not in ui2['txt'], '| bar:', ui2['bar'])
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "'})")
+            await pr.wait_for_selector('.cnrg')
+            await pr.click('[data-cn=role][data-mid="' + mid_extra + '"][data-r=extra]')
+            await pr.wait_for_timeout(1000)
+            check('role change: Exam → Extra again brings the fingerprint back (the plan is not stale), still nothing was asked of the AI', not await pr.evaluate("cnFp(CDRAFTS.get('" + did_r + "'))!==CDRAFTS.get('" + did_r + "')._plan.fp") and len(ai_r) == nR)
+            # the role changes and the plan is made again: the units of the material are not in the new plan; the built course stays as it is
+            await pr.click('[data-cn=role][data-mid="' + mid_extra + '"][data-r=exam]')
+            await pr.wait_for_timeout(1000)
+            old_keys = await snap(did_r)
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:3})")
+            await pr.wait_for_selector('.cnbtns [data-cn=replan]:not([disabled])')
+            await pr.click('.cnbtns [data-cn=replan]')
+            await pr.click('#layer [data-s="1"]')
+            await pr.wait_for_function("view.step===3&&CDRAFTS.get(view.did)._run&&CDRAFTS.get(view.did)._run.state==='done'&&CDRAFTS.get(view.did)._plan.at!==" + str(plan_r['at']), timeout=120000)
+            await pr.wait_for_timeout(500)
+            st = await state_when(lambda s: mine_r(s, 'cplan')[0]['data']['at'] != plan_r['at'] and not any(r['data'].get('materialId') == mid_extra and r['data']['units'] for r in mine_r(s, 'ctext') if '.ku1.' in r['id']))
+            cp2b = mine_r(st, 'cplan')[0]['data']
+            planned2b = [i for pt in cp2b['parts'] for l in pt['lessons'] for i in l['knowledgeIds']]
+            src2b = {s['materialId'] for x in cp2b['knowledgeIndex'] for s in x['sources']}
+            ku2 = [r for r in mine_r(st, 'ctext') if '.ku1.' in r['id']]
+            extra_docs = [r for r in ku2 if r['data']['materialId'] == mid_extra]
+            check('role change then «Koosta plaan uuesti»: the new plan holds the 8 units of the Core only (coverage 8 / 8, none from the material that is «Eksam»); the registry of that material has no units any more (old documents deleted); the old course stays: 7 plates and 14 cards as before; the folder is dropped from the draft (the next build makes a new one)',
+                  len(planned2b) == 8 and cp2b['coverage']['expected'] == 8 and cp2b['coverage']['planned'] == 8 and src2b == {mid_core} and len(extra_docs) == 1 and not extra_docs[0]['data']['units'] and len(ku2) == 2
+                  and await snap(did_r) == old_keys and await pr.evaluate("[CDRAFTS.get('" + did_r + "').bldAt,CDRAFTS.get('" + did_r + "').courseId]") == [0, ''] and len(mine_r(st, 'plates')) == 7 and len(ai_r) == nR + 2 and used_r() == uR + 6,
+                  json.dumps([len(planned2b), cp2b['coverage'], sorted(src2b), len(extra_docs), len(ku2), len(ai_r) - nR, used_r() - uR]))
+            # ---- 3: the Core is deleted from the course: the registry, the original, the pages go; the plan, the lessons already built and their citations stay
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "'})")
+            await pr.wait_for_selector('.cnrg')
+            idb_keys = lambda: pr.evaluate("""async()=>{const db=await new Promise((res,rej)=>{const r=indexedDB.open('corpus-local',1);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
+              return await new Promise(res=>{const rq=db.transaction('mats').objectStore('mats').getAllKeys();rq.onsuccess=()=>res(rq.result);});}""")
+            keys_b = [k for k in await idb_keys() if '/' + did_r + '/' + mid_core in k]
+            ctext_b = [r['id'] for r in mine_r(state(), 'ctext') if r['id'].startswith(did_r + '.' + mid_core + '.')]
+            plates_b = {r['id']: r['data'] for r in mine_r(state(), 'plates')}
+            await pr.click('[data-cn=rm][data-mid="' + mid_core + '"]')
+            await pr.wait_for_timeout(500)
+            st = await state_when(lambda s: not any(r['id'].startswith(did_r + '.' + mid_core + '.') for r in mine_r(s, 'ctext')))
+            keys_a = [k for k in await idb_keys() if '/' + did_r + '/' + mid_core in k]
+            ctext_a = [r['id'] for r in mine_r(st, 'ctext') if r['id'].startswith(did_r + '.' + mid_core + '.')]
+            dr = [r['data'] for r in mine_r(st, 'cdraft') if r['id'] == did_r][0]
+            left_ids = {r['id'] for r in mine_r(st, 'ctext') if r['id'].startswith(did_r + '.')}
+            mats_ids = {m['id'] for m in dr['mats']}
+            own = {i for m in dr['mats'] for i in (m.get('chunks') or []) + (m.get('kdocs') or []) + ([m['qdoc']] if m.get('qdoc') else []) + [x for x in (m.get('lab') or []) if x and x != '-']}
+            plates_a = {r['id']: r['data'] for r in mine_r(st, 'plates')}
+            check('delete the Core (with registry, in the plan and in 7 built lessons): its 4 text pages (chunks), its registry documents and its original on this device are gone (before: ' + str(len(ctext_b)) + ' documents, ' + str(len(keys_b)) + ' original; after: 0 and 0); the draft lists only the Extra and remembers the deleted id; the other documents of the draft belong to materials that are still there',
+                  len(ctext_b) == 2 and len(keys_b) == 1 and not ctext_a and not keys_a and mats_ids == {mid_extra} and mid_core in dr.get('gone', []) and left_ids == own and all(i.split('.')[1] == mid_extra for i in left_ids), json.dumps([ctext_b, keys_b, ctext_a, keys_a, sorted(left_ids), sorted(own)]))
+            cp3 = mine_r(st, 'cplan')[0]['data']
+            check('delete the Core: the lessons already built stay whole: 7 plates and 14 cards, the same plate documents byte for byte (citations to the deleted material are inside the lessons); the plan is the same document (still names the Core as the source of 8 units); the fingerprint is stale',
+                  len(plates_a) == 7 and plates_a == plates_b and json.dumps(await snap(did_r)) == json.dumps(old_keys) and cp3 == cp2b and await pr.evaluate("cnFp(CDRAFTS.get('" + did_r + "'))!==CDRAFTS.get('" + did_r + "')._plan.fp"), json.dumps([len(plates_a), plates_a == plates_b, cp3 == cp2b]))
+            n_err = len(errs_r)
+            pid_o = await pr.evaluate("S.plates.find(p=>p.cb&&p.cb.startsWith('" + did_r + "|')&&p.generationStatus==='ai').id")
+            await pr.evaluate("openLesson('" + pid_o + "',{name:'courseNew',did:'" + did_r + "',step:4})")
+            await pr.wait_for_function("view.name==='courseLesson'", timeout=10000)
+            await pr.wait_for_timeout(800)
+            check('delete the Core: a lesson built from it still opens (its overview text is there), no script error', 'Overview of' in await pr.evaluate("document.body.innerText") and len(errs_r) == n_err, json.dumps(errs_r[n_err:])[:300])
+            # a build of the plan that names the deleted material: every lesson ends with the error «missing source» before any request, nothing is paid, no plate is made
+            nD, uD = len(ai_r), used_r()
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:3})")
+            await pr.wait_for_selector('.cnbtns [data-cn=build]:not([disabled])')
+            await pr.click('.cnbtns [data-cn=build]')
+            await pr.wait_for_function("view.step===4&&CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=60000)
+            await pr.wait_for_timeout(500)
+            lsD = await bls()
+            st = state()
+            check('delete the Core: building the plan that still names it ends every lesson with an error before any request: 0 requests to the AI, 0 units paid, no new plate or card, all records are errors «missing_source»',
+                  len(ai_r) == nD and used_r() == uD and len(lsD) == len(cp3['parts'][0]['lessons']) + sum(len(p['lessons']) for p in cp3['parts'][1:]) and all(v['st'] == 'err' and v['err'] == 'missing_source' for v in lsD.values()) and len(mine_r(st, 'plates')) == 7, json.dumps([len(ai_r) - nD, used_r() - uD, {k: v['err'] for k, v in lsD.items()}, len(mine_r(st, 'plates'))]))
+            lid_e = next(iter(lsD))
+            await pr.click('[data-cn=lretry][data-lid="' + lid_e + '"]')
+            await pr.wait_for_function("CDRAFTS.get('" + did_r + "')._bld.state==='done'", timeout=60000)
+            await pr.wait_for_timeout(300)
+            check('delete the Core: «Proovi uuesti» of such a lesson makes no request either (0 paid) and does not create a plate', len(ai_r) == nD and used_r() == uD and len(mine_r(state(), 'plates')) == 7)
+            check('release: no script errors or failed requests in the browser', not errs_r, '; '.join(errs_r)[:500])
+            await ctx_r.close()
+            # <<< T032R
+
             # ---------- T-032: a draft and a plan in the old format (v1: parts / lessons / terms, no registry, as the app of cb61180 wrote them) open and build in the real app, nothing of v2 is written ----------
             # >>> T032C
             plan_files(tmp / 'pl32')

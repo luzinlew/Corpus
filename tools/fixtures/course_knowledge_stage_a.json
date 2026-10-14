@@ -1,0 +1,28 @@
+{
+  "material": { "id": "fixture-mixed-source", "name": "Synthetic mixed study material", "role": "base" },
+  "pages": [
+    { "n": 1, "text": "Key concepts\nDensity\nDensity is mass per unit volume.", "em": ["Key concepts", "Density"], "diag": { "known": true } },
+    { "n": 2, "text": "Вода кипит при 100 °C при нормальном давлении.\nVesi keeb normaalsel rõhul 100 °C juures.", "em": [], "diag": { "known": true } },
+    { "n": 3, "text": "Open the valve. Measure the flow. Record the result.", "em": [], "diag": { "known": true } },
+    { "n": 4, "text": "v = d / t; v in m/s, d in m, t in s.", "em": [], "diag": { "known": true } },
+    { "n": 5, "text": "State | Symbol\nsolid | S\nliquid | L", "em": [], "diag": { "known": true } },
+    { "n": 6, "text": "Diagram: energy flow\nLabels: input, output", "em": [], "diag": { "known": true, "visual": true } },
+    { "n": 7, "text": "At 1 atm, water boils at 100 °C.\nAt 1 atm, water boils at 90 °C.", "em": [], "diag": { "known": true } },
+    { "n": 8, "text": "At 1 atm, water boils at 100 °C.", "em": [], "diag": { "known": true } },
+    { "n": 9, "text": "", "em": [], "diag": { "known": true, "visual": true } }
+  ],
+  "expectedUnits": [
+    { "type": "term", "content": "Density", "page": 1, "quote": "Density" },
+    { "type": "definition", "content": "Density is mass per unit volume.", "page": 1, "quote": "Density is mass per unit volume." },
+    { "type": "statement", "content": "Вода кипит при 100 °C при нормальном давлении.", "page": 2, "quote": "Вода кипит при 100 °C при нормальном давлении." },
+    { "type": "statement", "content": "Vesi keeb normaalsel rõhul 100 °C juures.", "page": 2, "quote": "Vesi keeb normaalsel rõhul 100 °C juures." },
+    { "type": "process", "content": { "steps": ["Open the valve.", "Measure the flow.", "Record the result."] }, "page": 3, "quote": "Open the valve. Measure the flow. Record the result." },
+    { "type": "formula", "content": { "expression": "v = d / t", "variables": [{ "symbol": "v", "meaning": "speed", "unit": "m/s" }, { "symbol": "d", "meaning": "distance", "unit": "m" }, { "symbol": "t", "meaning": "time", "unit": "s" }] }, "page": 4, "quote": "v = d / t; v in m/s, d in m, t in s." },
+    { "type": "table", "content": { "caption": "States and symbols", "headers": ["State", "Symbol"], "rows": [["solid", "S"], ["liquid", "L"]] }, "page": 5, "quote": "State | Symbol\nsolid | S\nliquid | L" },
+    { "type": "visual", "content": { "caption": "energy flow", "labels": ["input", "output"] }, "page": 6, "quote": "Diagram: energy flow\nLabels: input, output" },
+    { "type": "statement", "content": "At 1 atm, water boils at 100 °C.", "page": 7, "quote": "At 1 atm, water boils at 100 °C." },
+    { "type": "statement", "content": "At 1 atm, water boils at 90 °C.", "page": 7, "quote": "At 1 atm, water boils at 90 °C." },
+    { "type": "statement", "content": "At 1 atm, water boils at 100 °C.", "page": 8, "quote": "At 1 atm, water boils at 100 °C." }
+  ],
+  "legacyOutline": { "topics": [{ "title": "Key concepts", "pages": [1], "terms": ["Density"] }] }
+}

@@ -14,6 +14,13 @@ description: Как собрать и проверить Corpus — build.py --c
 4. e2e: `<python> tools/e2e_test.py > $TMPD/e2e.log 2>&1; echo exit=$?; grep -c '^PASS' $TMPD/e2e.log; grep -v '^PASS' $TMPD/e2e.log | tail -20`.
    Успех: exit=0, последняя строка `ALL PASSED`, число PASS не меньше прежнего (126 на 2026-10-09).
 5. Push (если менялись corpus-push или push.sql): `CORPUS_PUSH_NO_SERVE=1 npx --yes deno run --allow-net --allow-env --allow-read --allow-sys tools/push_test.ts | tail -3` → `ALL PUSH TESTS PASSED`.
+5a. Офлайн-тесты курсов (node, без браузера и сети; запускать после правок курсов/реестра знаний в `src/corpus.html` или `supabase/functions/corpus-ai`). Каждый — exit=0 и строка успеха:
+   - `node tools/course_logic_test.cjs` → `COURSE LOGIC TESTS PASSED (`
+   - `node tools/course_discovery_test.cjs` → `DISCOVERY SYNTHETIC PASSED:`
+   - `node tools/course_replay_test.cjs` → `DISCOVERY/CONTEXT/VISUAL TESTS PASSED` и `BUILD RESUME TESTS PASSED`
+   - `node tools/course_limits_test.cjs` → `COURSE LIMITS TESTS PASSED`
+   - `node tools/pdf_visual_test.mjs` → `PDF VISUAL REGRESSION TESTS PASSED`
+   Предупреждение `ExperimentalWarning: stripTypeScriptTypes` — норма. Режимы на реальных данных (`--evidence`, путь к evidence) здесь не нужны.
 6. После: повторить п.3 и `git status --short` — тест не оставляет файлов.
 
 Докладывать команды, exit-коды и последние строки. Никогда «прошло» без них.

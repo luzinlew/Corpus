@@ -1,0 +1,79 @@
+{
+  "material": {
+    "id": "universal-lists",
+    "name": "Circuit and language notes"
+  },
+  "pages": [
+    {
+      "n": 1,
+      "text": "CIRCUIT\nComponents:\nResistor\nBattery\nSwitch\n",
+      "em": [
+        "CIRCUIT"
+      ]
+    },
+    {
+      "n": 2,
+      "text": "Цвета\nКрасный\nСиний\nЗелёный\n",
+      "em": [
+        "Цвета"
+      ]
+    },
+    {
+      "n": 3,
+      "text": "天气\n温度\n湿度\n",
+      "em": [
+        "天气"
+      ]
+    }
+  ],
+  "expected": [
+    {
+      "page": 1,
+      "type": "term",
+      "content": "Resistor",
+      "quote": "Resistor"
+    },
+    {
+      "page": 1,
+      "type": "term",
+      "content": "Battery",
+      "quote": "Battery"
+    },
+    {
+      "page": 1,
+      "type": "term",
+      "content": "Switch",
+      "quote": "Switch"
+    },
+    {
+      "page": 2,
+      "type": "term",
+      "content": "Красный",
+      "quote": "Красный"
+    },
+    {
+      "page": 2,
+      "type": "term",
+      "content": "Синий",
+      "quote": "Синий"
+    },
+    {
+      "page": 2,
+      "type": "term",
+      "content": "Зелёный",
+      "quote": "Зелёный"
+    },
+    {
+      "page": 3,
+      "type": "term",
+      "content": "温度",
+      "quote": "温度"
+    },
+    {
+      "page": 3,
+      "type": "term",
+      "content": "湿度",
+      "quote": "湿度"
+    }
+  ]
+}

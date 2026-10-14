@@ -642,16 +642,19 @@
       var j = null;
       try { j = await r.json(); } catch (e) {}
       noteAi(j);
-      if (!r.ok || !j) throw { code: (j && j.code) || 'unavailable', message: (j && j.message) || ('HTTP ' + r.status) };
+      var meta = j && j.model && (j.usage || j.charged) ? { model: String(j.model), charged: j.charged === true,
+        usage: { input_tokens: Number(j.usage && j.usage.input_tokens) || 0, output_tokens: Number(j.usage && j.usage.output_tokens) || 0 } } : null;
+      if (!r.ok || !j) throw { code: (j && j.code) || 'unavailable', message: (j && j.message) || ('HTTP ' + r.status), courseAI: meta };
       var p = parseLoose(j.text);
-      if (j.truncated || !p.ok) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON in the answer', text: j.text };
+      if (j.truncated || !p.ok || !p.v || typeof p.v !== 'object' || Array.isArray(p.v)) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON object in the answer', truncated: !!j.truncated, text: j.text, courseAI: meta };
+      if (meta && p.v && typeof p.v === 'object') Object.defineProperty(p.v, '__courseAI', { value: meta, enumerable: false });
       return p.v;
     };
     var translate = function (src, dst, input, opts) { return call({ task: 'translate', purpose: 'course', src: src, dst: dst, input: input }, opts); };
-    /* outline: the topics of one material ({name, pages:[{n,text,em}]}); plan: the parts and lessons of a course (task "plan" of the function) */
+    /* outline: legacy topics plus a typed, source-linked knowledge registry ({name, pages:[{n,blocks,em}]}); plan and lesson requests stay on their existing shapes */
     var outline = function (lang, input, opts) { return call({ task: 'outline', purpose: 'course', lang: lang, input: input }, opts); };
     var plan = function (lang, input, opts) { return call({ task: 'plan', purpose: 'course', lang: lang, input: input }, opts); };
-    /* lesson: the texts of one lesson of a course ({title, terms:[{id,la,p}], text, exam:[string]}) → {intro, notes, q} (task "lesson") */
+    /* lesson: legacy terms lessons or v2 typed KnowledgeUnit lessons use the same `lesson` task and model */
     var lesson = function (lang, input, opts) { return call({ task: 'lesson', purpose: 'course', lang: lang, input: input }, opts); };
     return Object.freeze({ translate: translate, outline: outline, plan: plan, lesson: lesson });
   }

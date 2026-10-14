@@ -34,6 +34,7 @@ let FN_DELAY = 0;
    The same switches work for the course outline, plan and lesson requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
    trunc — cut short with stop_reason max_tokens; fail_after — 429 from the model service */
 let FN_DROP = false, FN_TRUNC = false, FN_HANG = '', FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
+let FN_V2L = 0;   // v2lessons=N: the knowledge plan has exactly N lessons (the units spread evenly, in source order); 0: FAKE_V2_PER_LESSON units (default 3) in a lesson
 let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
 let FN_TAKEERR = '';       // takeerr=1: corpus_ai_take fails (as with a missing private.ai_global: 42P01) for p_units >= 1; takeerr=all: for p_units = 0 too (the status), also in corpus_ai_take_course
 let FN_NOCOURSE = '';   // nocourse=1: the database has no corpus_ai_take_course yet (supabase/ai.sql not run): PostgREST answers PGRST202; nocourse=err: the function fails (500) and has taken nothing
@@ -161,9 +162,9 @@ http.createServer(async (req, res) => {
     FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan', 'lesson'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = ['plan', 'lesson'].includes(u.searchParams.get('hang')) ? u.searchParams.get('hang') : ''; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
     FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
-    FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0;
+    FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0; FN_V2L = +u.searchParams.get('v2lessons') || 0;
     FN_TAKEERR = ['1', 'all'].includes(u.searchParams.get('takeerr')) ? u.searchParams.get('takeerr') : '';
-    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, hang: FN_HANG, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR }); return;
+    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, hang: FN_HANG, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR, v2lessons: FN_V2L }); return;
   }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen); statusdelay=ms: the status (p_units=0) comes that much later; takeerr=1|all: the limit RPC fails
 
   /* ---------- auth ---------- */
@@ -398,16 +399,51 @@ http.createServer(async (req, res) => {
       const norm = (v) => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       const evil = (v) => String(v).includes('ATTACK') ? '<img src=x onerror=window.__xss=7>' : String(v);
       let ans;
-      if (lm) {
+      if (lm && inp.kind === 'knowledge-v1') {
+        /* lesson v2: an overview and one claim for every unit, each with a quote copied from the source blocks passed in (the first line of the block); [<lang>] marks the language asked for */
+        const bl = new Map((inp.sourceBlocks || []).map((x) => [x.id, x]));
+        const ev = (id) => { const x = bl.get(id); return [{ blockId: id, quote: (String(x ? x.text : '').split('\n').map((y) => y.trim()).find((y) => y.length >= 3) || '').slice(0, 300).trim() }]; };
+        const first = (inp.sourceBlocks || [])[0];
+        ans = { intro: [{ text: '[' + lm[1] + '] Overview of ' + evil(inp.title) + '.', evidence: ev(first && first.id) }],
+          units: (inp.units || []).map((u) => ({ id: u.id, claims: [{ text: '[' + lm[1] + '] The source states this (' + u.type + ').', evidence: ev(u.sourceBlockIds[0]) }] })) };
+        if (FN_DROP) delete ans.units;
+      } else if (lm) {
         /* lesson: [<lang>] marks the language asked for; the intro names the title, a note for every term, one question of relations when there are 4 terms or more (the first term, the next three are the wrong answers) */
         const ts = Array.isArray(inp.terms) ? inp.terms : [];
+        const ev = String(inp.text || '').split('\n').map((x) => x.trim().replace(/^\[[^\]]*\]\s*/, '')).find((x) => x.length >= 16) || '';   // the quote is a piece of a source block: without the «[name, page] » label the app adds in front of it
         ans = { intro: ['[' + lm[1] + '] ' + evil(inp.title) + ' intro one.', 'Second sentence of ' + evil(inp.title) + '.'], notes: Object.fromEntries(ts.map((t) => [t.id, '[' + lm[1] + '] Note on ' + t.la + ' (p' + (t.p || 3) + ', text ' + String(inp.text || '').length + ', exam ' + (inp.exam || []).length + ').'])),
-          q: ts.length >= 4 ? [{ q: '[' + lm[1] + '] Which structure is described first in the text?', ans: ts[0].id, opts: ts.slice(1, 4).map((t) => t.id) }] : [] };
+          q: ts.length >= 4 ? [{ q: '[' + lm[1] + '] Which structure is described first in the text?', ans: ts[0].id, opts: ts.slice(1, 4).map((t) => t.id) }] : [],
+          evidence: { intro: ['' + ev, '' + ev], notes: Object.fromEntries(ts.map((t) => [t.id, ev])), q: ts.length >= 4 ? [ev] : [] } };
         if (FN_DROP) delete ans.notes;
       } else if (om) {
-        /* outline: a topic for every page that has bold text (the first bold line is its title); its terms are the Latin pairs «Capital lower» of the page */
-        ans = { topics: (inp.pages || []).filter((pg) => pg.em && pg.em.length).map((pg) => ({ title: pg.em[0], pages: [pg.n], terms: [...new Set(pg.text.match(/\b[A-Z][a-z]+ [a-z]{4,}\b/g) || [])] })) };
+        /* outline: the legacy topics/terms shape plus a deterministic typed registry (no model): an emphasized block is a «term» (its first line), every other block with
+           more than 20 characters is a «statement» whose source is an exact quote (the block text, at most 240 characters) of that block. Pages of the old shape (text, no blocks) give no registry. */
+        const emOf = (pg) => (pg.em && pg.em.length) ? pg.em : (pg.blocks || []).filter((b) => b.emphasis).map((b) => b.text.trim());
+        const firstLine = (t) => String(t).split('\n').map((x) => x.trim()).find((x) => x) || '';
+        const knowledge = [];
+        for (const pg of inp.pages || []) for (const b of pg.blocks || []) {
+          const t = String(b.text || '').trim();
+          if (b.emphasis) { const q = firstLine(b.text).slice(0, 240).trim(); if (q) knowledge.push({ type: 'term', content: q, sources: [{ block_id: b.id, quote: q }] }); }
+          else if (t.length > 20) { const q = t.slice(0, 240).trim(); knowledge.push({ type: 'statement', content: q, sources: [{ block_id: b.id, quote: q }] }); }
+        }
+        ans = {
+          topics: (inp.pages || []).filter((pg) => emOf(pg).length).map((pg) => {
+            const text = typeof pg.text === 'string' ? pg.text : (pg.blocks || []).map((b) => b.text || '').join('\n');
+            return { title: emOf(pg)[0], pages: [pg.n], terms: [...new Set(text.match(/\b[A-Z][a-z]+ [a-z]{4,}\b/g) || [])] };
+          }),
+          knowledge, knowledge_limited: false,
+        };
         if (FN_DROP) delete ans.topics;
+      } else if (inp.kind === 'knowledge-v1') {
+        /* plan v2: every unit of the registry exactly once; a lesson holds at most FAKE_V2_PER_LESSON (default 3) units in source order, a part at most 3 lessons; the title is the beginning of the first unit */
+        const per = +(process.env.FAKE_V2_PER_LESSON || 3), ids = (inp.knowledge || []).map((u) => u.id), label = (u) => String(typeof u.content === 'string' ? u.content : JSON.stringify(u.content)).slice(0, 50);
+        const lessons = [];
+        const cuts = FN_V2L > 0 ? Array.from({ length: Math.min(FN_V2L, ids.length) + 1 }, (_, i) => Math.floor(i * ids.length / Math.min(FN_V2L, ids.length))) : Array.from({ length: Math.ceil(ids.length / per) + 1 }, (_, i) => Math.min(i * per, ids.length));
+        for (let k = 0; k + 1 < cuts.length; k++) lessons.push({ title: (lessons.length + 1) + '. ' + label(inp.knowledge[cuts[k]]), knowledgeIds: ids.slice(cuts[k], cuts[k + 1]), rationale: 'Kept in source order, lesson ' + (lessons.length + 1) + '.' });
+        const parts = [];
+        for (let i = 0; i < lessons.length; i += 3) parts.push({ name: 'Part ' + (parts.length + 1), lessons: lessons.slice(i, i + 3) });
+        ans = { parts };
+        if (FN_DROP) delete ans.parts;
       } else {
         /* plan: a part for every topic, a lesson for every term of it; the picture is the photo with the most labels equal to the terms of the lesson (here one: the term itself),
            the terms that are in no topic (only on the pictures) go into the last part «Atlas» */

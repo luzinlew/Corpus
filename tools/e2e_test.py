@@ -4046,6 +4046,94 @@ async def main():
             await pr.wait_for_selector('.cnbl')
             lre = lambda: pr.evaluate("[...document.querySelectorAll('[data-cn=lretry]')].map(b=>b.dataset.lid)")
             check('retry: «Proovi uuesti» is offered for the two lessons without AI units only (not for the five normal ones)', await lre() == lid_r[:2], json.dumps(await lre()))
+            # ---- T032, round 2: a v2 course says on its screens that it is a test and not verified (plan, build, lesson, card, list of courses), in the three languages
+            DIS = {
+                'banner': {'ru': 'Тестовая функция. План и уроки собраны автоматически: источники и смысл не проверены, часть знаний могла не найтись. Не используйте как единственный материал.',
+                           'en': 'Test feature. The plan and lessons are generated automatically: sources and meaning are not verified, and some knowledge may be missed. Do not rely on this as your only material.',
+                           'et': 'Testfunktsioon. Plaan ja õppetunnid on koostatud automaatselt: allikaid ja tähendust pole kontrollitud ning osa teadmisi võis jääda leidmata. Ära kasuta seda ainsa õppematerjalina.'},
+                'built': {'ru': 'Курс собран, но не проверен: полнота источников не подтверждена. Уроки можно учить.', 'en': 'Course built, not verified: source completeness is not confirmed. You can study the lessons.',
+                          'et': 'Kursus on koostatud, kuid kontrollimata: lähtematerjali täielikkust ei kinnitata. Õppetunde saab õppida.'},
+                'limit': {'ru': 'Достигнут лимит поиска знаний; часть единиц могла не попасть в реестр.', 'en': 'The knowledge-discovery limit was reached; some units may be missing from the registry.', 'et': 'Teadmiste tuvastamise piirang sai täis; osa üksusi võib registrist puududa.'},
+                'visual': {'ru': 'Картинка не разобрана: показана страница источника целиком.', 'en': 'Image not analysed: the whole source page is shown.', 'et': 'Pilti ei analüüsitud: näidatakse kogu lähtelehekülge.'},
+                'quote': {'ru': 'Цитата подтверждает происхождение текста, а не правильность объяснения.', 'en': 'The quote shows where the text came from, not that the explanation is correct.', 'et': 'Tsitaat näitab teksti päritolu, mitte selgituse õigsust.'},
+                'pill': {'ru': 'AI-текст, не проверен', 'en': 'AI text, not verified', 'et': 'AI tekst, kontrollimata'},
+                'onepic': {'ru': 'Один урок — один рисунок', 'en': 'One lesson, one picture', 'et': 'Üks õppetund – üks pilt'},
+                'tag': {'ru': 'тест', 'en': 'test', 'et': 'test'},
+            }
+            got = {}
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pr, lg_)
+                g = {}
+                await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:3})")
+                await pr.wait_for_selector('.cnph')
+                g['plan'] = await pr.evaluate("[...document.querySelectorAll('#cnPl .cnktest')].map(e=>[e.innerText,!!e.closest('details')])")
+                await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:4})")
+                await pr.wait_for_selector('.cnbl')
+                g['build'] = await pr.evaluate("[...document.querySelectorAll('#cnBd .cnktest')].map(e=>[e.innerText,!!e.closest('details')])")
+                g['note'] = await pr.evaluate("document.querySelector('.cnbnote').innerText")
+                g['pills'] = await pr.evaluate("[...document.querySelectorAll('.cnbl .cnbp')].map(e=>[e.innerText.trim(),e.className])")
+                # the registry warning for the limit issues (in memory only), the lesson texts and the reading screen (functions called directly)
+                g['limit'] = await pr.evaluate("""(did)=>{const d=CDRAFTS.get(did);const m=d._plan.sourceAssessment.materials[0];const old=m.issues;m.issues=(old||[]).concat(['unit_limit']);
+                  go({name:'courseNew',did:did,step:3});const a=document.querySelector('#cnPl').innerText;m.issues=(old||[]).concat(['model_limit_reported']);cnPlanPaint();const b=document.querySelector('#cnPl').innerText;m.issues=old;cnPlanPaint();const c=document.querySelector('#cnPl').innerText;
+                  return [a,b,c];}""", did_r)
+                g['lesson'] = await pr.evaluate("""()=>{const p=S.plates.find(x=>x.lessonVersion===2&&x.generationStatus==='ai'),c=S.cards.find(x=>x.plateId===p.id&&x.knowledgeId);
+                  const strip=h=>{const e=document.createElement('div');e.innerHTML=h;return e;};
+                  const v=strip(cnKnowledgeLessonStatusHtml(Object.assign({},p,{visualStatus:'source_page_shown_unresolved'}))),n=strip(cnKnowledgeLessonStatusHtml(p)),u=strip(cnKnowledgeUnitInfoHtml(p,c));
+                  const q=[...u.querySelectorAll('.cnphint')].map(e=>[e.textContent,!!e.closest('details')]);
+                  return {visual:v.innerText||v.textContent,no:n.textContent,quote:q,detailsAfter:!!u.querySelector('.cnphint + details')};}""")
+                g['rows'] = await pr.evaluate("""()=>{const mk=t=>cnReadRows({dt:{terms:t},i:4,state:'run'}).map(x=>x[0]+'|'+x[1]);return {v2:mk({knowledge:true,n:3,unresolved:0,review:0,incomplete:0}),none:mk(undefined)};}""")
+                got[lg_] = g
+            await ui_lang(pr, 'et')
+            for lg_ in ('et', 'ru', 'en'):
+                g = got[lg_]
+                check('disclosure [' + lg_ + ']: the plan and the build screens of a v2 course show the permanent test banner (outside any <details>), exact text',
+                      g['plan'] == [[DIS['banner'][lg_], False]] and g['build'] == [[DIS['banner'][lg_], False]], json.dumps([g['plan'], g['build']], ensure_ascii=False))
+                check('disclosure [' + lg_ + ']: a built v2 course says «built, not verified: source completeness is not confirmed» in the build note; the pill of an AI lesson is neutral «' + DIS['pill'][lg_] + '» (no green tick, class plain); the lessons with a partial answer keep their own pill',
+                      g['note'].startswith(DIS['built'][lg_]) and sorted(p_[0] for p_ in g['pills']).count(DIS['pill'][lg_]) == 5 and all(p_[1] == 'cnbp plain' for p_ in g['pills'] if p_[0] == DIS['pill'][lg_]) and not any('ok' in p_[1].split() for p_ in g['pills']), json.dumps([g['note'], g['pills']], ensure_ascii=False))
+                check('disclosure [' + lg_ + ']: the issues unit_limit and model_limit_reported show the registry-limit line next to the other registry warnings (each of them; gone when the issue is gone)',
+                      all((': ' + DIS['limit'][lg_]) in x for x in g['limit'][:2]) and DIS['limit'][lg_] not in g['limit'][2], json.dumps([x[:200] for x in g['limit']], ensure_ascii=False)[:400])
+                check('disclosure [' + lg_ + ']: a lesson whose picture is the whole source page says so (visible line); other lessons do not; a card of the lesson shows the quote line above the <details>, not inside it',
+                      DIS['visual'][lg_] in g['lesson']['visual'] and DIS['visual'][lg_] not in g['lesson']['no'] and g['lesson']['quote'] == [[DIS['quote'][lg_], False]] and g['lesson']['detailsAfter'], json.dumps(g['lesson'], ensure_ascii=False)[:500])
+                check('disclosure [' + lg_ + ']: the hint «' + DIS['onepic'][lg_] + '» is not shown when the plan is the knowledge plan, and is shown for a plan of terms (the step of the reading screen)',
+                      not any(DIS['onepic'][lg_] in x for x in g['rows']['v2']) and any(DIS['onepic'][lg_] in x for x in g['rows']['none']), json.dumps(g['rows'], ensure_ascii=False)[:400])
+            # the real lesson page (Estonian): the line about the whole page, then the quote line on the card step
+            pid_v = await pr.evaluate("S.plates.find(p=>p.cb&&p.cb.startsWith('" + did_r + "|')&&p.generationStatus==='ai').id")
+            vs_orig = await pr.evaluate("(pid)=>plateById(pid).visualStatus", pid_v)
+            await pr.evaluate("(pid)=>{plateById(pid).visualStatus='source_page_shown_unresolved';openLesson(pid,{name:'courseNew',did:'" + did_r + "',step:4});}", pid_v)
+            await pr.wait_for_function("view.name==='courseLesson'", timeout=10000)
+            await pr.wait_for_timeout(600)
+            ov_txt = await pr.evaluate("document.body.innerText")
+            await pr.evaluate("([pid,v])=>{plateById(pid).visualStatus=v;}", [pid_v, vs_orig])
+            for _ in range(4):
+                if await pr.query_selector('.cterm'):
+                    break
+                await pr.click('#cnx')
+                await pr.wait_for_timeout(300)
+            tu = await pr.evaluate("[...document.querySelectorAll('.cnphint')].map(e=>[e.innerText,!!e.closest('details')])")
+            check('disclosure [et]: the real lesson page shows the whole-page line on the overview and the quote line on the card step (outside <details>)', DIS['visual']['et'] in ov_txt and [DIS['quote']['et'], False] in tu, json.dumps([ov_txt[:300], tu], ensure_ascii=False))
+            # the list of courses: the badge «test» on the course made from the knowledge plan (the home of the one course; the card in the list of courses)
+            tags = {}
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pr, lg_)
+                await pr.evaluate("go({name:'courses'})")
+                await pr.wait_for_selector('.crs .chsub')
+                tags[lg_] = [await pr.evaluate("[...document.querySelectorAll('.crs .chsub .cktest')].map(e=>e.innerText)")]
+            await pr.evaluate("""()=>{const f=S.folders[0],g={id:'tmpfolder',name:'Other',mode:'hideAll',createdAt:Date.now()+1},dk={id:'tmpdeck',name:'x',folderId:g.id,createdAt:1,mode:'hideAll',newPerDay:20},p={id:'tmpplate',deckId:dk.id,title:'T',createdAt:1,lang:'et',intro:['x'],link:[{q:'q',ans:'a',opts:['b','c','d']}]};
+              window.__tmp={g,dk,p};S.folders.push(g);S.decks.push(dk);S.plates.push(p);}""")
+            await pr.evaluate("go({name:'courses',fid:'x'})")
+            await pr.wait_for_selector('.ccards', timeout=10000)
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pr, lg_)
+                await pr.evaluate("go({name:'courses',fid:'x'})")
+                await pr.wait_for_selector('.ccards')
+                tags[lg_].append(await pr.evaluate("[...document.querySelectorAll('.ccard')].map(c=>[c.querySelector('.ccn b').innerText,[...c.querySelectorAll('.cktest')].map(e=>e.innerText)])"))
+            await pr.evaluate("()=>{const t=window.__tmp;S.folders=S.folders.filter(x=>x!==t.g);S.decks=S.decks.filter(x=>x!==t.dk);S.plates=S.plates.filter(x=>x!==t.p);}")
+            await ui_lang(pr, 'et')
+            check('disclosure: the course made from the knowledge plan carries the badge «test»/«test»/«тест» on the home of the course and on its card in the list (the other course in the list has none); no badge field is stored: it is read from lessonVersion 2 of the lessons',
+                  all(tags[l][0] == [DIS['tag'][l]] for l in tags) and all([c for c in tags[l][1] if c[0] == 'Release'] == [['Release', [DIS['tag'][l]]]] and [c for c in tags[l][1] if c[0] == 'Other'] == [['Other', []]] for l in tags), json.dumps(tags, ensure_ascii=False))
+            check('disclosure: no script errors or failed requests in the browser', not errs_r, '; '.join(errs_r)[:500])
+            await pr.evaluate("go({name:'courseNew',did:'" + did_r + "',step:4})")
+            await pr.wait_for_selector('.cnbl')
             # ---- 1a: a finished lesson is not built again, even when the retry is called for it directly
             s0 = await snap(did_r)
             n0, u0 = len(lessons_r()), used_r()

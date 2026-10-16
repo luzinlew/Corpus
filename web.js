@@ -428,7 +428,8 @@
     function fail(res, thrown) {
       var e = (res && res.error) || thrown || {}, m = String(e.message || ''), c = String(e.code || '');
       if (thrown && !res) return { code: 'offline', message: m || 'network error' };
-      if (c === 'PGRST202' || c === '42883' || c === '404' || (res && res.status === 404) || /could not find the function/i.test(m)) return { code: 'unavailable', message: m };
+      if (c === 'PGRST202' || c === '42883' || /could not find the function/i.test(m))   // only PostgREST's own answer; a bare 404 from a proxy / CDN is a temporary error
+        return { code: 'unavailable', message: m };
       if (/bad_alias/.test(m)) return { code: 'bad_alias', message: m };
       if (/bad_mode/.test(m)) return { code: 'bad_mode', message: m };
       if (/failed to fetch|networkerror|load failed|network request/i.test(m) || (res && res.status === 0)) return { code: 'offline', message: m };

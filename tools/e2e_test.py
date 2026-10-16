@@ -502,6 +502,7 @@ async def main():
                       and not ('/rpc/corpus_share_open' in r.url and r.status == 404)             # provoked: a wrong share code
                       and not ('/rpc/corpus_rating_' in r.url and r.status == 404)               # provoked: supabase/rating.sql not run (PGRST202), the rating block hides itself
                       and not ('/rpc/corpus_rating_set_profile' in r.url and r.status == 400)    # provoked: a bad nickname (bad_alias)
+                      and not ('/rpc/corpus_rating_get' in r.url and r.status == 500)            # provoked: a server error while the table loads
                       and not (quota_window['on'] and r.status in (400, 413, 503))                 # provoked: the account limits (see «limits» below)
                       and errs.append(f'http {r.status}: {r.url}'))
                 return ctx, pg, errs
@@ -5109,19 +5110,72 @@ async def main():
                 await pg.wait_for_timeout(100)
             sb = rt_api()['submits']
             check('rating: the first send has only the days of this week, as YYYY-MM-DD → {n, ok}', len(sb) == 1 and sb[0] == {tday: {'n': 30, 'ok': 24}}, json.dumps(sb))
-            await pg.evaluate('rateSubmit()')
+            # too early is not lost: ONE timer for the rest of the window (the timers are caught here so that no real 10 minutes pass)
+            await pg.evaluate("""(()=>{window.__tm=[];const o=window.setTimeout;window.__stOrig=o;window.setTimeout=function(f,ms,...a){if(ms>100000)window.__tm.push([f,ms]);return o.call(window,f,ms,...a);};})()""")
+            await pg.evaluate('rateSubmit();rateSubmit();rateSubmit()')
             await pg.wait_for_timeout(500)
-            check('rating: not more often than once in 10 minutes', len(rt_api()['submits']) == 1 and rq.count('submit') == 1, json.dumps(rq))
-            await pg.evaluate("localStorage.setItem('corpus.ratingAt.'+CORPUS_WEB.uid,String(Date.now()-11*60000));rateSubmit()")
+            tms = await pg.evaluate('window.__tm.map(t=>t[1])')
+            check('rating: not more often than once in 10 minutes; three early calls set one timer for the rest of the window', len(rt_api()['submits']) == 1 and rq.count('submit') == 1 and len(tms) == 1 and 585000 < tms[0] < 602000, json.dumps([rq, tms]))
+            await pg.evaluate("localStorage.setItem('corpus.ratingAt.'+CORPUS_WEB.uid,String(Date.now()-5*60000));window.__tm[0][0]()")   # that timer fires 5 minutes into the window
+            await pg.evaluate('rateSubmit();rateSubmit()')
+            await pg.wait_for_timeout(400)
+            tms = await pg.evaluate('window.__tm.map(t=>t[1])')
+            check('rating: 5 minutes in: still nothing sent, one new timer for the remaining ~5 minutes (more early calls add none)', len(rt_api()['submits']) == 1 and len(tms) == 2 and 295000 < tms[1] < 302000, json.dumps(tms))
+            await pg.evaluate("localStorage.setItem('corpus.ratingAt.'+CORPUS_WEB.uid,String(Date.now()-11*60000));window.__tm[1][0]()")
             for _ in range(40):
                 if len(rt_api()['submits']) > 1:
                     break
                 await pg.wait_for_timeout(100)
-            check('rating: after 10 minutes it sends again', len(rt_api()['submits']) == 2)
+            check('rating: when the timer fires after the window the held-back send goes out', len(rt_api()['submits']) == 2)
+            await pg.evaluate('window.setTimeout=window.__stOrig;0')
+            # the tab goes to the background: a send that is due goes out
+            await pg.evaluate("localStorage.setItem('corpus.ratingAt.'+CORPUS_WEB.uid,String(Date.now()-11*60000));document.dispatchEvent(new Event('visibilitychange'))")
+            await pg.wait_for_timeout(300)
+            check('rating: nothing is sent while the tab is visible on visibilitychange', len(rt_api()['submits']) == 2)
+            await pg.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>'hidden'});document.dispatchEvent(new Event('visibilitychange'))")
+            for _ in range(40):
+                if len(rt_api()['submits']) > 2:
+                    break
+                await pg.wait_for_timeout(100)
+            check('rating: …and when the tab is hidden the due send goes out', len(rt_api()['submits']) == 3)
+            await pg.evaluate("delete document.visibilityState;0")
             # a long session: finishing it sends too (the throttle is shorter than the wait here, so only the call itself is checked)
             check('rating: the end of a session and the app start call rateSubmit', await pg.evaluate("/rateSubmit/.test(String(A.studyExit))&&/rateSubmit/.test(String(sessSummary))"))
             mine = [w for w in rt_api()['weeks'] if w['answers'] == 30]
             check('rating: the server has the week (30 answers, 24 correct, 1 day)', len(mine) == 1 and mine[0]['correct'] == 24 and mine[0]['active_days'] == 1 and mine[0]['points'] == 24, json.dumps(mine))
+
+            # the app start sends the week by itself (2.5 s after the start): the days are saved as documents, the page is reloaded
+            await pg.evaluate("S.decks.some(d=>d.id==='rd1')||0;persist('decks','rd1');persist('stats','rd1');0")
+            await state_when(lambda st: any(d['coll'] == 'stats' and d['id'] == 'rd1' for d in st['docs']) and any(d['coll'] == 'decks' and d['id'] == 'rd1' for d in st['docs']))
+            n_sub = len(rt_api()['submits'])
+            await pg.evaluate("localStorage.removeItem('corpus.ratingAt.'+CORPUS_WEB.uid);0")
+            await pg.reload()
+            await app_ready(pg)
+            for _ in range(80):
+                if len(rt_api()['submits']) > n_sub:
+                    break
+                await pg.wait_for_timeout(100)
+            sb = rt_api()['submits']
+            check('rating: the app start sends this week by itself (saved days → one submit after reload, only this week)', len(sb) == n_sub + 1 and sb[-1] == {tday: {'n': 30, 'ok': 24}}, json.dumps(sb[-1:]))
+            # leaving a real session sends too
+            await pg.evaluate("""(()=>{const t0=Date.now(),did='rs1';S.decks.push({id:did,name:'Sess',newPerDay:50,mode:'hideAll',createdAt:t0});
+              for(let i=0;i<3;i++)S.cards.push(normCard({id:newId('terms'),kind:'text',type:'new',dir:'f',deckId:did,front:'os '+i,back:'luu '+i,createdAt:t0+i}));})()""")
+            await pg.evaluate("startStudy('rs1')")
+            await pg.wait_for_selector('.full.study')
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            await pg.evaluate('rate(3)')
+            await pg.wait_for_function("SS.phase==='ask'", timeout=5000)
+            n_sub = len(rt_api()['submits'])
+            await pg.evaluate("localStorage.removeItem('corpus.ratingAt.'+CORPUS_WEB.uid);0")
+            await pg.click('[data-act=studyExit]')
+            for _ in range(40):
+                if len(rt_api()['submits']) > n_sub:
+                    break
+                await pg.wait_for_timeout(100)
+            sb = rt_api()['submits']
+            check('rating: leaving a session (after one answer) sends the week with that answer', len(sb) == n_sub + 1 and sb[-1].get(tday, {}).get('n') == 31, json.dumps(sb[-1:]))
+            await pg.evaluate("S.decks=S.decks.filter(d=>d.id!=='rs1');0")
 
             # --- the screen: the first-visit question, once per session; «Later» saves nothing ---
             rq.clear()
@@ -5147,7 +5201,7 @@ async def main():
             await app_ready(pg)
             await pg.evaluate("go({name:'globalStats'})")
             await pg.wait_for_selector('#layer .dlg .rate-ch', timeout=8000)
-            check('rating: after «Позже» the next visit asks again', True)
+            check('rating: after «Позже» the next visit asks again (the same question)', await pg.evaluate("(document.querySelector('#layer .dlg h3')||{}).textContent==='Как показывать тебя в рейтинге?'"))
             await pg.click('#layer [data-s="alias"]')
             await pg.wait_for_selector('#dlgIn')
             for bad in ['x', 'a<b>c', 'a' * 21]:
@@ -5165,17 +5219,17 @@ async def main():
             check('rating: a good nickname is saved, the toast names it and my row carries it', prof[0]['mode'] == 'alias' and prof[0]['alias'] == 'Rate Me' and prof[0]['asked'] is True
                   and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Rate Me'"))
             rws = await rt_rows(pg)
-            check('rating: «Верные»: top 10, then «…», then me with the places around (16 people, I am 16th with 24 points)',
-                  len(rws) == 15 and rws[10] == '…' and rws[-1] == '16|Rate Me|24|me' and rws[-2].startswith('15|' + names[1] + '|140') and rws[0].startswith('1|Студент|1290'), json.dumps(rws, ensure_ascii=False))
+            check('rating: «Верные»: top 10, then «…», then me with the places around (16 people, I am 16th with 25 points)',
+                  len(rws) == 15 and rws[10] == '…' and rws[-1] == '16|Rate Me|25|me' and rws[-2].startswith('15|' + names[1] + '|140') and rws[0].startswith('1|Студент|1290'), json.dumps(rws, ensure_ascii=False))
             me_line = await pg.inner_text('#rateBox .rate-me')
             hint = await pg.inner_text('#rateBox .rate-hint')
-            check('rating: «Твоё место: 16 из 16» and the hint to the next place (140 − 24 + 1 = 117)', me_line == 'Твоё место: 16 из 16' and hint == 'До следующего места: 117', me_line + ' / ' + hint)
+            check('rating: «Твоё место: 16 из 16» and the hint to the next place (140 − 25 + 1 = 116)', me_line == 'Твоё место: 16 из 16' and hint == 'До следующего места: 116', me_line + ' / ' + hint)
             check('rating: the first three have badges, my row is marked', await pg.evaluate("['m1','m2','m3'].every((c,i)=>document.querySelectorAll('#rateBox .rate-n')[i].classList.contains(c))&&document.querySelectorAll('#rateBox .rate-r.me[aria-current]').length===1"))
             # --- the other two tables: I am not in them yet (30 answers, 1 day) ---
             await pg.click('#rateBox [data-v=accuracy]')
             await pg.wait_for_function("document.querySelector('#rateBox [data-v=accuracy]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-me')&&/Нужно/.test(document.querySelector('#rateBox .rate-me').textContent)", timeout=5000)
-            check('rating: «Подготовлен» for someone with too few answers explains it («Нужно 100 ответов и 2 дня занятий — пока у тебя 30 ответов»)',
-                  await pg.inner_text('#rateBox .rate-me') == 'Нужно 100 ответов и 2 дня занятий — пока у тебя 30 ответов' and not await pg.query_selector('#rateBox .rate-hint') and not await pg.query_selector('#rateBox .rate-r.me')
+            check('rating: «Подготовлен» for someone with too few answers explains it («Нужно 100 ответов и 2 дня занятий — пока у тебя 31 ответ»)',
+                  await pg.inner_text('#rateBox .rate-me') == 'Нужно 100 ответов и 2 дня занятий — пока у тебя 31 ответ' and not await pg.query_selector('#rateBox .rate-hint') and not await pg.query_selector('#rateBox .rate-r.me')
                   and await pg.evaluate("document.querySelector('#rateBox [data-v=points]').getAttribute('aria-pressed')==='false'"))
             # translations of this state and of the dialogs, English and Estonian
             async def rt_sweep(tag, scope='#rateBox'):
@@ -5247,7 +5301,7 @@ async def main():
             # the dictionary has the new strings (I18N_DICT is not reachable from the page: read the source)
             src = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
             need = ['Рейтинг недели', 'Верные', 'Подготовлен', 'Меньше ошибок', 'Ответь на карточки, и ты появишься в таблице', 'Загрузка…', 'Нет связи', 'Пока в таблице никого нет', 'Ты скрыт из рейтинга', 'Вернуться в рейтинг',
-                    'Как показывать тебя в рейтинге?', 'Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже',
+                    'Как показывать тебя в рейтинге?', 'Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже', 'Не удалось загрузить рейтинг. Попробуй позже', 'Повторить',
                     'Показывать по имени из почты', 'Псевдоним…', 'Удалить мои данные рейтинга', 'Удалить мои данные рейтинга?', 'Псевдоним', '2–20 символов: буквы, цифры, пробел . _ -']
             lost = [k for k in need if not re.search(r'\["' + re.escape(k) + r'"\s*,\s*"[^"]+"\s*,\s*"[^"]+"\]', src)]
             check('rating: every new interface string has an [ru, en, et] entry in I18N_DICT', lost == [], json.dumps(lost, ensure_ascii=False))
@@ -5295,22 +5349,49 @@ async def main():
             prof = [p for p in st_r['profiles'] if p['email'] == 'rate@test.ee']
             check('rating: deleting removes my week, leaves me hidden and asked, and the block says «Ты скрыт»', prof[0]['mode'] == 'hidden' and prof[0]['asked'] is True and not any(w['user_id'] == my_id for w in st_r['weeks']) and await pg.evaluate("META.ratingMode==='hidden'"))
 
-            # --- the connection drops: «Нет связи», the block stays, a chip retries ---
+            # --- back in the tables (a week of data is seeded), then the connection drops: «Нет связи», the block stays, a chip retries ---
+            await pg.click('#rateBox [data-act=rateBack]')
+            await pg.wait_for_selector('#layer .rate-ch')
+            await pg.click('#layer [data-s="real"]')
+            await pg.wait_for_selector('#rateBox .rate-chips')
+            rt_api('', [{'email': 'rate@test.ee', 'answers': 200, 'correct': 177, 'active_days': 2, 'points': 177}])
+            await pg.evaluate("go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox .rate-r.me')
             await pg.evaluate("go({name:'home'})")
             await pg.route('**/rpc/corpus_rating_get', lambda route: route.abort('aborted'))
             await pg.evaluate("RATE.res=null;go({name:'globalStats'})")
             await pg.wait_for_function("document.querySelector('#rateBox .rate-note')&&document.querySelector('#rateBox .rate-note').textContent==='Нет связи'", timeout=8000)
-            check('rating: without a connection the block shows «Нет связи» and stays', True)
+            check('rating: without a connection the block stays and says «Нет связи» (no retry button, no hiding)', await pg.evaluate("RATE.off===false&&!!document.querySelector('#rateBox')&&!document.querySelector('#rateBox [data-act=rateRetry]')"))
             await pg.unroute('**/rpc/corpus_rating_get')
             await pg.click('#rateBox [data-v=accuracy]')
-            await pg.wait_for_function("document.querySelector('#rateBox [data-act=rateBack]')||document.querySelector('#rateBox .rate-list')", timeout=8000)
-            check('rating: a tap on a chip after the connection is back loads again', True)
-
-            # --- the artifact (no CORPUS_WEB) sees no block ---
-            await pg.evaluate("go({name:'home'});window.__w=window.CORPUS_WEB;window.CORPUS_WEB=undefined;go({name:'globalStats'})")
-            await pg.wait_for_selector('#app .h1t')
-            check('rating: without CORPUS_WEB (the claude.ai artifact) there is no block and nothing breaks', not await pg.query_selector('#rateBox') and await pg.evaluate('(rateSubmit(),rateApi()===null)'))
-            await pg.evaluate("window.CORPUS_WEB=window.__w;0")
+            await pg.wait_for_selector('#rateBox .rate-r.me', timeout=8000)
+            check('rating: a tap on a chip after the connection is back loads that table (my row is shown, the chip is pressed)', await pg.evaluate("document.querySelector('#rateBox [data-v=accuracy]').getAttribute('aria-pressed')==='true'&&!document.querySelector('#rateBox .rate-note')"))
+            # a server error (5xx): not «offline» but «could not load» with «Повторить»; the block stays
+            async def boom(route):
+                await route.fulfill(status=500, content_type='application/json', body='{"message":"boom"}')
+            await pg.route('**/rpc/corpus_rating_get', boom)
+            await pg.evaluate("RATE.res=null;go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox [data-act=rateRetry]', timeout=8000)
+            check('rating: a server error says «Не удалось загрузить рейтинг. Попробуй позже» with «Повторить»; the block stays and is not switched off',
+                  await pg.inner_text('#rateBox .rate-note') == 'Не удалось загрузить рейтинг. Попробуй позже' and await pg.evaluate("RATE.off===false&&RATE.err==='error'"))
+            for lg in ('en', 'et'):
+                await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
+                await pg.wait_for_selector('#rateBox [data-act=rateRetry]')
+                await rt_sweep(f'{lg} load error')
+            await pg.evaluate("setLang('ru',false);go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox [data-act=rateRetry]')
+            await pg.unroute('**/rpc/corpus_rating_get')
+            await pg.click('#rateBox [data-act=rateRetry]')
+            await pg.wait_for_selector('#rateBox .rate-r.me', timeout=8000)
+            check('rating: «Повторить» loads the table again', not await pg.query_selector('#rateBox [data-act=rateRetry]'))
+            # a bare 404 (a proxy / CDN, not PostgREST's «no such function») is a temporary error, not «the functions are missing»
+            async def bare404(route):
+                await route.fulfill(status=404, content_type='text/plain', body='Not Found')
+            await pg.route('**/rpc/corpus_rating_get', bare404)
+            await pg.evaluate("RATE.res=null;go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox [data-act=rateRetry]', timeout=8000)
+            check('rating: a bare 404 does not hide the block for the session (error text + «Повторить», RATE.off stays false)', await pg.evaluate("RATE.off===false&&RATE.err==='error'&&!!document.querySelector('#rateBox')"))
+            await pg.unroute('**/rpc/corpus_rating_get')
 
             # --- the functions are not in the database (supabase/rating.sql not run): no block, no console errors, no more calls ---
             rt_api('?mode=missing')
@@ -5328,6 +5409,26 @@ async def main():
             check('rating: …and nothing is called again in this session', rq == [] and not await pg.query_selector('#rateBox'), json.dumps(rq))
             check('rating: …without errors in the console', errs_t[n_err:] == [], '; '.join(errs_t[n_err:])[:300])
             rt_api('?mode=')
+            # --- the real branch: without the test switches the first-visit question appears on Statistics (asked=false) ---
+            import base64 as _b64
+            tok_p = signup_token('prod@test.ee')
+            uid_p = json.loads(_b64.urlsafe_b64decode(tok_p.split('.')[1] + '=='))['sub']
+            urllib.request.urlopen(urllib.request.Request(API + '/rest/v1/docs', json.dumps([{'owner': uid_p, 'coll': 'meta', 'id': 'settings', 'data': {'tourSeen': True}}]).encode(),
+                                                          {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok_p, 'apikey': 'test-publishable-key'}, method='POST'))   # the tour would cover the screen
+            ctx_t, pg, errs_t = await open_ctx()
+            await ctx_t.add_init_script('window.__TEST__=false;window.__RATE_TEST__=false;')   # later than open_ctx's script: the app runs as for a reader
+            await pg.goto(SITE)
+            await pg.wait_for_selector('.cw-auth input[name=email]')
+            await pg.fill('input[name=email]', 'prod@test.ee')
+            await pg.fill('input[name=password]', 'kolju2026')
+            await pg.click('.cw-go')
+            await pg.wait_for_function('document.querySelector("#app .tabbar")', timeout=20000)
+            check('rating (real branch): the page runs without the test switches', await pg.evaluate('window.__TEST__===false&&typeof window.go==="undefined"'))
+            await pg.click('.tabbar [data-v=globalStats]')
+            await pg.wait_for_selector('#layer .dlg .rate-ch', timeout=10000)
+            check('rating (real branch): Statistics asks «Как показывать тебя в рейтинге?» for a person who was not asked', (await pg.inner_text('#layer .dlg h3')) == 'Kuidas sind edetabelis näidata?' and await pg.evaluate("!!document.querySelector('#rateBox')"))
+            await ctx_t.close()
+
             # --- a guest sees no block ---
             check('rating: no script errors on the way', errs_t == [], '; '.join(errs_t)[:400])
             await ctx_t.close()

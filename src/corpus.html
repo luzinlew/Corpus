@@ -1212,6 +1212,7 @@ const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
 I18N_DICT.push(["Активность", "Activity", "Aktiivsus"]);
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
 I18N_DICT.push(["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"],["Больше не предлагать","Don’t suggest again","Ära paku enam"],["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]);
+I18N_DICT.push(["Не удалось загрузить рейтинг. Попробуй позже","Couldn’t load the ranking. Try again later","Edetabelit ei õnnestunud laadida. Proovi hiljem"],["Повторить","Try again","Proovi uuesti"]);
 I18N_DICT.push(["Рейтинг недели","Weekly ranking","Nädala edetabel"],["Верные","Correct","Õiged"],["Подготовлен","Prepared","Ettevalmistatud"],["Меньше ошибок","Fewer mistakes","Vähem vigu"],["Ответь на карточки, и ты появишься в таблице","Answer some cards and you will appear in the table","Vasta kaartidele ja ilmud tabelisse"],["Загрузка…","Loading…","Laadin…"],["Нет связи","No connection","Ühendust pole"],["Пока в таблице никого нет","Nobody is in the table yet","Tabelis pole veel kedagi"],["Ты скрыт из рейтинга","You are hidden from the ranking","Sa oled edetabelist peidetud"],["Вернуться в рейтинг","Back to the ranking","Tagasi edetabelisse"],["Как показывать тебя в рейтинге?","How should we show you in the ranking?","Kuidas sind edetabelis näidata?"],["Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.","Until you choose, others see you as “Student”. You can switch the ranking off at any time.","Kuni sa ei vali, näevad teised sind kui „Üliõpilast“. Edetabeli saab igal ajal välja lülitada."],["По имени из почты","By my email name","E-posti nime järgi"],["Придумать псевдоним…","Choose a nickname…","Mõtle välja hüüdnimi…"],["Скрыть меня","Hide me","Peida mind"],["Показывать по имени из почты","Show me by my email name","Näita mind e-posti nime järgi"],["Псевдоним…","Nickname…","Hüüdnimi…"],["Удалить мои данные рейтинга","Delete my ranking data","Kustuta minu edetabeli andmed"],["Удалить мои данные рейтинга?","Delete my ranking data?","Kas kustutada minu edetabeli andmed?"],["Результаты этой недели будут удалены, а тебя не будет в таблицах, пока ты снова не выберешь, как показываться.","This week’s results will be deleted and you will stay out of the tables until you choose how to be shown again.","Selle nädala tulemused kustutatakse ja sind pole tabelites, kuni valid uuesti, kuidas end näidata."],["Псевдоним","Nickname","Hüüdnimi"],["2–20 символов: буквы, цифры, пробел . _ -","2–20 characters: letters, digits, space . _ -","2–20 märki: tähed, numbrid, tühik . _ -"]);
 I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
 I18N_DICT.push(
@@ -2016,24 +2017,29 @@ SCREENS.library={
   mount(){mountImgFallbacks();mountFolderSwipes();}
 };
 /* ---------- weekly rating (CORPUS_WEB.rating ↔ supabase/rating.sql). Only on the site and not for guests: in the claude.ai artifact CORPUS_WEB is absent and none of this does anything ---------- */
-const RATE={metric:'points',res:null,err:'',seq:0,off:false,asked:false,sent:0};
+const RATE={metric:'points',res:null,err:'',seq:0,off:false,asked:false,sent:0,t:0};
+/* Known and accepted: the week is cut by the device's local date, the server's by Tallinn time, so outside Estonia the first hours of Monday can lose a few answers;
+   and a person who has not answered «how to show me» yet is sent too (everybody takes part by default, others see them as «Студент» until they choose). */
 function rateApi(){const W=window.CORPUS_WEB;return W&&W.rating&&!W.guest&&!crGuest()?W.rating:null;}
 function rateWeekDays(){   // only the current week (Monday to today), {'YYYY-MM-DD':{n,ok}}
   const all=dayStats(S.decks.map(d=>d.id)),mon=dayKey(addDays(Date.now(),-((new Date().getDay()+6)%7))),td=dayKey(),out={};
   for(const k in all){if(/^\d{4}-\d{2}-\d{2}$/.test(k)&&k>=mon&&k<=td&&(all[k].n|0)>0)out[k]={n:all[k].n|0,ok:Math.min(all[k].ok|0,all[k].n|0)};}
   return out;
 }
-/* fire and forget: at most once in 10 minutes, never for a hidden person, silent on errors; "unavailable" (no functions in the database) stops it for the session */
+/* fire and forget: at most once in 10 minutes, never for a hidden person, silent on errors; "unavailable" (no functions in the database) stops it for the session.
+   A call that comes too early is not lost: ONE timer is set for the rest of the window (more early calls add no timers), and leaving the tab tries once more. Returns a promise when it sends. */
 function rateSubmit(){
-  const a=rateApi();if(!a||RATE.off||!S.ready||S.loadErr||META.ratingMode==='hidden')return;
+  const a=rateApi();if(!a||RATE.off||!S.ready||S.loadErr||META.ratingMode==='hidden')return null;
   const key='corpus.ratingAt.'+String(window.CORPUS_WEB.uid||'');let last=RATE.sent;   // the time of the last send lives in localStorage (in memory only when it is blocked)
   try{last=+localStorage.getItem(key)||0;}catch(e){}
-  const now=Date.now();if(now>=last&&now-last<600000)return;
-  const days=rateWeekDays();if(!Object.keys(days).length)return;
+  const days=rateWeekDays();if(!Object.keys(days).length)return null;
+  const now=Date.now();
+  if(now>=last&&now-last<600000){if(!RATE.t)RATE.t=setTimeout(()=>{RATE.t=0;rateSubmit();},600000-(now-last)+500);return null;}
   RATE.sent=now;try{localStorage.setItem(key,String(now));}catch(e){}
   const undo=()=>{RATE.sent=0;try{if(last)localStorage.setItem(key,String(last));else localStorage.removeItem(key);}catch(e){}};
-  try{a.submit(days).catch(e=>{if(e&&e.code==='unavailable')RATE.off=true;else undo();});}catch(e){undo();}
+  try{return a.submit(days).then(()=>{if(view.name==='globalStats'&&$('#rateBox'))rateLoad();},e=>{if(e&&e.code==='unavailable')RATE.off=true;else undo();});}catch(e){undo();return null;}
 }
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')rateSubmit();});
 function rateNum(v,pct){
   const x=Number(v);if(!isFinite(x))return '—';
   if(!pct)return String(Math.round(x));
@@ -2064,7 +2070,7 @@ function rateInner(){
   if(hidden)return head+'<p class="rate-me">Ты скрыт из рейтинга</p><button type="button" class="btn line" data-act="rateBack">Вернуться в рейтинг</button>';
   const names={points:T3('Верные за неделю','Correct this week','Õiged sel nädalal'),accuracy:T3('Подготовлен — доля верных ответов','Prepared — share of correct answers','Ettevalmistatud — õigete vastuste osakaal'),errors:T3('Меньше ошибок — доля ошибок, меньше лучше','Fewer mistakes — share of mistakes, lower is better','Vähem vigu — vigade osakaal, väiksem on parem')};
   const chips='<div class="rate-chips" role="group" aria-label="'+T3('Таблица','Table','Tabel')+'">'+[['points','Верные'],['accuracy','Подготовлен'],['errors','Меньше ошибок']].map(c=>'<button type="button" class="rate-chip'+(c[0]===RATE.metric?' on':'')+'" data-act="rateMetric" data-v="'+c[0]+'" aria-pressed="'+(c[0]===RATE.metric)+'" aria-label="'+esc(names[c[0]])+'">'+c[1]+'</button>').join('')+'</div>';
-  return head+chips+(RATE.err?'<p class="muted sm rate-note">Нет связи</p>':!r?'<div class="rate-sk" role="status" aria-busy="true">Загрузка…</div>':rateBodyHtml(r));
+  return head+chips+(RATE.err==='offline'?'<p class="muted sm rate-note">Нет связи</p>':RATE.err?'<p class="muted sm rate-note">Не удалось загрузить рейтинг. Попробуй позже</p><button type="button" class="btn line" data-act="rateRetry">Повторить</button>':!r?'<div class="rate-sk" role="status" aria-busy="true">Загрузка…</div>':rateBodyHtml(r));
 }
 function rateBoxHtml(){return rateApi()&&!RATE.off?'<section class="sbox" id="rateBox">'+rateInner()+'</section>':'';}
 function ratePaint(){
@@ -2084,7 +2090,7 @@ function rateLoad(){
   },e=>{
     if(seq!==RATE.seq)return;
     if(e&&e.code==='unavailable'){RATE.off=true;const b=$('#rateBox');if(b)b.remove();return;}
-    RATE.err='offline';RATE.res=null;ratePaint();
+    RATE.err=e&&e.code==='offline'?'offline':'error';RATE.res=null;ratePaint();
   });
 }
 function rateMaybeAsk(r){   // the first visit: ask once per session how to show the person (the tests switch it off unless __RATE_TEST__)
@@ -2144,7 +2150,7 @@ SCREENS.globalStats={
       (ids.length?statsHtml(ids):'<div class="empty"><p>Статистика появится, когда вы создадите колоду и начнёте заучивать карточки.</p></div>')+
       '</div>';
   },
-  mount(){rateLoad();}
+  mount(){rateSubmit();rateLoad();}
 };
 
 /* ---------- deck ---------- */
@@ -9796,6 +9802,7 @@ const A={
   goCal:()=>{CAL.y=null;go({name:'calendar'});},
   rateMetric:el=>{const v=el.dataset.v;if(!['points','accuracy','errors'].includes(v)||v===RATE.metric&&RATE.res)return;RATE.metric=v;RATE.res=null;RATE.err='';ratePaint();rateLoad();},
   rateGear:()=>{rateGear();},
+  rateRetry:()=>{RATE.err='';RATE.res=null;ratePaint();rateLoad();},
   rateBack:()=>{rateAsk();},
   calNav:el=>{const d=+el.dataset.d;let m=CAL.m+d,y=CAL.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}CAL.m=m;CAL.y=y;render();},
   calToday:()=>{const t=new Date();CAL.y=t.getFullYear();CAL.m=t.getMonth();CAL.sel=dayKey();render();},

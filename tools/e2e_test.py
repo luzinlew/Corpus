@@ -350,6 +350,48 @@ def knowledge_files(d):
         pdf_file(d / name, [[(True, 24, 50, 780, h), (False, 12, 50, 740, a), (False, 12, 50, 722, b)] for h, a, b in pages])
 
 
+def ku_total(docs):
+    """The registry documents of one material (one per outline request since T-039 may be several) as one: (extracted units, 'processed' only if every document is, the issues with the outline_truncated_partial:N codes added up)."""
+    iss, tot = set(), 0
+    for dc in docs:
+        for x in dc['issues']:
+            if x.startswith('outline_truncated_partial:'):
+                tot += int(x.split(':')[1])
+            else:
+                iss.add(x)
+    if tot:
+        iss.add('outline_truncated_partial:%d' % tot)
+    return len([u for dc in docs for u in dc['units'] if u['extractionStatus'] == 'extracted']), ('processed' if all(dc['outlineStatus'] == 'processed' for dc in docs) else 'incomplete'), iss
+
+
+def chunk_files(d):
+    """Materials for T-039: «Long pages» — 4 pages of ~1300 characters (a bold heading and 12 long lines: expected reply 2000+ tokens, so one outline request a page) and the «Extra reading» of
+    knowledge_files (3 short pages: one request); «Huge chunks» — 81 such long pages (81 requests: over the limit of 80 for one material)."""
+    d = pathlib.Path(d); d.mkdir(exist_ok=True)
+    def long_page(n):
+        return [(True, 24, 50, 800, 'Topic %d: heat in system %d' % (n, n))] + [(False, 12, 50, 770 - 14 * k, 'Detail %d.%d: the transfer of energy in system number %d is described here at some length for line %d.' % (n, k, n, k)) for k in range(1, 13)]
+    pdf_file(d / 'Long pages.pdf', [long_page(n) for n in range(1, 5)])
+    pdf_file(d / 'Huge chunks.pdf', [long_page(n) for n in range(1, 82)])
+    pdf_file(d / 'Edge chunks.pdf', [long_page(n) for n in range(1, 81)])
+    knowledge_files(d / 'x')
+    (d / 'x' / 'Extra reading.pdf').replace(d / 'Extra reading.pdf')
+    (d / 'x' / 'Heat notes.pdf').replace(d / 'Heat notes.pdf')
+
+
+def big_knowledge_files(d, pages=100):
+    """Materials for the plan by groups (T-037): a «Core» PDF of `pages` pages and the small «Extra» PDF of knowledge_files. A page is a bold heading (a term) and one paragraph (a statement, about 800
+    characters, so that by the density rule of T-039 two pages make one outline request: 50 requests, 4 units each): 2 units a page, 200 + 6 units in all, more than the 146 units a per-unit plan request holds."""
+    d = pathlib.Path(d); d.mkdir(exist_ok=True)
+    core = []
+    for n in range(1, pages + 1):
+        items = [(True, 24, 50, 800, 'Topic %d: heat in system %d' % (n, n)), (False, 12, 50, 770, 'Statement %d: heat flows in system number %d from the hotter body to the colder body.' % (n, n))]
+        items += [(False, 10, 50, 756 - 13 * k, 'Detail %d.%d: the transfer of energy in system %d is described here at some length for the line %d.' % (n, k, n, k)) for k in range(1, 8)]
+        core.append(items)
+    pdf_file(d / 'Heat notes.pdf', core)
+    knowledge_files(d / 'x')
+    (d / 'x' / 'Extra reading.pdf').replace(d / 'Extra reading.pdf')
+
+
 def plan_files(d):
     """Materials for «the plan» (T-018): a lecture (Core: 3 pages, bold headings and one bold term), an extra reading, a list of 2 exam questions and a picture with three printed Latin labels
     (black text on white, so that the on-device recognition finds something). The Latin names are written as «Capital lower» pairs: the fake model finds terms by that shape."""
@@ -442,7 +484,7 @@ async def main():
                 """legacy=True (default): the page plans from the old v1 inputs, like a draft made before the registry (the plan v1 and lessons v1 stay supported for such drafts);
                 legacy=False: the real app, a new outline writes the registry and the plan is the knowledge plan (v2)."""
                 ctx = await b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True, **kw)
-                await ctx.add_init_script('window.__TEST__=true;')
+                await ctx.add_init_script('window.__TEST__=true;window.__TEST_COURSES__=true;')   # the Courses tab is closed to everyone but the admin: the scenarios below open it, «courses are closed» checks it
                 if legacy:
                     await ctx.add_init_script("try{window.__TEST_LEGACY_PLAN__=!sessionStorage.getItem('t032.real');}catch(e){window.__TEST_LEGACY_PLAN__=true;}")   # src/corpus.html, the __TEST__ block; sessionStorage t032.real=1 + a reload gives the real app on the same device
                 pg = await ctx.new_page()
@@ -599,6 +641,32 @@ async def main():
             await pg.click('[data-act=folderOn]')
             check('folder switched back on', (await pg.evaluate('(()=>{const c=globalCounts();return c.new+c.learn+c.review;})()')) == n_on and not await pg.evaluate('!!S.folders[0].off'))
 
+            # folder swipe: the delete button grows with the finger (no red showing through the glass at rest), follows it 1:1 from where the drag starts, and snaps open or shut
+            await pg.evaluate("go({name:'library'})")
+            await pg.wait_for_selector('.folder-swipe .deck')
+            sw = """async (steps) => {
+              const row = document.querySelector('.folder-swipe'), main = row.querySelector('.deck'), r = main.getBoundingClientRect();
+              const y = r.y + r.height / 2, x0 = r.x + r.width - 60, out = [];
+              const fire = (type, x, t) => { const e = new Event(type, {bubbles: true, cancelable: true}); const pt = {clientX: x, clientY: y, identifier: 1};
+                Object.defineProperty(e, 'touches', {value: type === 'touchend' ? [] : [pt]}); Object.defineProperty(e, 'timeStamp', {value: t}); main.dispatchEvent(e); };
+              let t = 1000; fire('touchstart', x0, t);
+              for (const dx of steps) { t += 16; fire('touchmove', x0 + dx, t);
+                out.push([main.style.transform, getComputedStyle(row.querySelector('.folder-trash')).width]); }
+              t += 16; fire('touchend', 0, t);
+              await new Promise(r => setTimeout(r, 450));
+              return {out, open: main.getAttribute('aria-expanded') === 'true', tx: new DOMMatrix(getComputedStyle(main).transform).m41, tw: row.querySelector('.folder-trash').getBoundingClientRect().width};
+            }"""
+            rest = await pg.evaluate("getComputedStyle(document.querySelector('.folder-trash')).width")
+            check('folder swipe: at rest the delete button has no width (nothing red under the card)', rest == '0px', rest)
+            r1 = await pg.evaluate(sw, [-4, -12, -24, -36, -48, -60])
+            check('folder swipe: the card follows the finger from where the drag starts (no jump)', r1['out'][0][0] == '' and r1['out'][2][0] == 'translate3d(-12px, 0px, 0px)', json.dumps(r1['out']))
+            check('folder swipe: past half way it snaps open, the button is a full pill', r1['open'] and r1['tx'] == -80 and abs(r1['tw'] - 72) < 1, json.dumps(r1))
+            await pg.evaluate("document.querySelector('.folder-swipe').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
+            await pg.wait_for_timeout(450)
+            r2 = await pg.evaluate(sw, [-4, -12, -20, -24, -26, -28])
+            check('folder swipe: a short slow drag springs back shut', not r2['open'] and r2['tx'] == 0 and r2['tw'] == 0, json.dumps(r2))
+            await pg.evaluate("go({name:'home'})")
+
             # grading: the drag ring goes with touch gestures; with gestures off the plain buttons are back
             await pg.evaluate("go({name:'home'})")
             await pg.evaluate('startGlobalStudy()')
@@ -608,6 +676,25 @@ async def main():
             plain = await pg.evaluate("!document.querySelector('#panel .ring')&&!!document.querySelector('#panel .btn[data-act=reveal]')")
             check('gestures on: grade ring; off: plain buttons', ring and plain)
             await pg.evaluate("META.swipe=true;go({name:'home'})")
+            # wrong typed answer in a near-square window (split view): the grade ring shrinks so the panel keeps to about half the height
+            await pg.set_viewport_size({'width': 820, 'height': 640})
+            await pg.evaluate("go({name:'home'})")
+            await pg.evaluate('startGlobalStudy()')
+            await pg.wait_for_selector('#panel .ring')
+            await pg.evaluate("SS.cm='type';SS.phase='answer';SS.result='wrong';SS.typed='margo superior petrosae';updStudy()")
+            sq = await pg.evaluate("(()=>{const p=document.querySelector('#panel'),r=document.querySelector('#panel .ring');return {ph:p.offsetHeight,H:app.clientHeight,z:parseFloat(r.dataset.k)||1,wide:app.classList.contains('wide')};})()")
+            check('square window: the answer panel takes at most half the height, the ring is smaller than usual', not sq['wide'] and sq['ph'] <= sq['H'] * 0.5 and sq['z'] < 1, json.dumps(sq))
+            if os.environ.get('CORPUS_SHOT'):
+                await asyncio.sleep(1.2)
+                await pg.screenshot(path=os.environ['CORPUS_SHOT'])
+            await pg.set_viewport_size({'width': 390, 'height': 844})
+            # typed answer: words stay apart, only the wrong part of a word is marked, a missing word is one plate
+            dw = await pg.evaluate("[diffHtml('margo superior petrosae','Margo superior partis petrosae'),diffHtml('processus styloideus','Proc. styloideus'),diffHtml('proc.styloideus','Proc. styloideus'),diffHtml('foo','Margo')]")
+            check('typed diff: a missing word is one plate between the words, letters are not scattered',
+                  dw[0].count('class="gap wd"') == 1 and dw[0].startswith('margo superior <mark class="gap wd"') and dw[0].endswith('</mark> petrosae'), dw[0])
+            check('typed diff: «processus» against «Proc.» marks the tail of the word only, a missing space is a single gap',
+                  dw[1].startswith('proc<s>essus</s><mark>.</mark> styloideus') and dw[2].count('class="gap"') == 1 and '<s>' not in dw[2], json.dumps(dw[1:3]))
+            check('typed diff: an unrelated word is struck out whole and the right one is shown as a plate', dw[3].startswith('<s>foo</s> <mark class="gap wd"'), dw[3])
 
             # strict mode: no Kostik and no fact of the day
             await pg.evaluate("META.calm=true;applyLook();go({name:'home'})")
@@ -1524,6 +1611,55 @@ async def main():
             await pg.evaluate("go({name:'settings'})")
             await pg.wait_for_timeout(800)
             check('a friend does not see site statistics', await pg.evaluate("!document.querySelector('#siteStats')"))
+            # the Courses tab is «in development» for everyone but the admin, in all three languages; no «Kolju» offer anywhere
+            await pg.evaluate("window.__TEST_COURSES__=false;0")
+            for lang, txt in (('et', 'Funktsioon on arenduses'), ('en', 'This feature is in development'), ('ru', 'Функция в разработке')):
+                await ui_lang(pg, lang)
+                await pg.evaluate("go({name:'courses'})")
+                soon = await pg.inner_text('#crSoon')
+                check(f'courses closed for a friend ({lang}): «in development» screen, no import / new-course buttons', txt in soon and await pg.evaluate("!document.querySelector('.crs [data-act=importPick],.crs [data-act=starter],.cnnew')"), soon.replace('\n', ' | ')[:120])
+            # T-038: «Request beta access» is a plain mailto: link with the account e-mail and a fixed text
+            from urllib.parse import unquote
+            await pg.evaluate("localStorage.removeItem('corpus.create');META.create=false;0")
+            my_mail = await pg.evaluate('CORPUS_WEB.email')
+            await pg.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+            for lang, btn, subj, hello, mline in (('et', 'Taotle beetajuurdepääsu', 'Corpus: kursuste beetatesti taotlus', 'Tere!', 'Minu e-post Corpuses: '),
+                                                  ('en', 'Request beta access', 'Corpus: request for the courses beta', 'Hello!', 'My e-mail in Corpus: '),
+                                                  ('ru', 'Запросить бета-тест', 'Corpus: запрос на бета-тест курсов', 'Здравствуйте!', 'Моя почта в Corpus: ')):
+                await ui_lang(pg, lang)
+                await pg.evaluate("go({name:'courses'})")
+                lk = await pg.evaluate("(()=>{const a=document.querySelector('#crSoon a.btn.primary');return a?{h:a.getAttribute('href'),t:a.textContent.trim()}:null})()")
+                ok = bool(lk) and lk['h'].startswith('mailto:contact@corpusapp.ee?') and btn in lk['t']
+                if ok:
+                    q = lk['h'].split('?', 1)[1]
+                    parts = dict(p.split('=', 1) for p in q.split('&'))
+                    sj, bd = unquote(parts['subject']), unquote(parts['body'])
+                    ok = sj == subj and hello in bd and (mline + my_mail + '\n') in bd and 'undefined' not in lk['h'] and \
+                        not any(w in bd for w in ('.png', '.jpg', '.pdf', 'Deck', 'deck'))
+                check(f'beta request ({lang}): mailto link with the account e-mail and the fixed text', ok, json.dumps(lk, ensure_ascii=False)[:300])
+            await ui_lang(pg, 'et')
+            await pg.evaluate("go({name:'courses'})")
+            await pg.click('#crSoon [data-act=crCopyMail]')
+            await pg.wait_for_function("Array.from(document.querySelectorAll('.toast')).some(t=>/Aadress kopeeritud/.test(t.textContent))", timeout=5000)
+            check('beta request: «copy address» puts contact@corpusapp.ee in the clipboard and shows a toast', await pg.evaluate('navigator.clipboard.readText()') == 'contact@corpusapp.ee')
+            check('beta request: no «new course» button without the flag', await pg.evaluate("!document.querySelector('.cnnew,[data-act=cnNew]')") and await pg.evaluate("!cnOn()"))
+            # no e-mail (guest-like) → the link is not broken
+            gh = await pg.evaluate("(()=>{const W=window.CORPUS_WEB,e=W.email;W.email='';const h=crBetaHref();W.email=e;return h})()")
+            check('beta request: without an e-mail the link has no «undefined» and no e-mail line', gh.startswith('mailto:contact@corpusapp.ee?') and 'undefined' not in gh and 'Minu%20e-post' not in gh, gh[:200])
+            # with the flag the tab opens, without a reload
+            await pg.evaluate("localStorage.setItem('corpus.create','1');go({name:'courses'})")
+            check('beta request: with the ?create=1 flag the «in development» screen is gone and «new course» is there',
+                  await pg.evaluate("!document.querySelector('#crSoon')") and await pg.evaluate("!!document.querySelector('.cnnew')"))
+            await pg.evaluate("localStorage.removeItem('corpus.create');META.create=false;go({name:'courses'})")
+            check('beta request: flag removed → closed again', await pg.evaluate("!!document.querySelector('#crSoon')"))
+            await ui_lang(pg, 'et')
+            await pg.evaluate("window.__TEST_COURSES__=true;go({name:'courses'})")
+            check('courses open again when the flag is set (the admin case)', await pg.evaluate("!document.querySelector('#crSoon')"))
+            # the admin never sees the «in development» screen
+            await pg.evaluate("window.__TEST_COURSES__=false;CORPUS_WEB.admin=true;go({name:'courses'})")
+            check('beta request: the admin does not see «in development»', await pg.evaluate("!document.querySelector('#crSoon')"))
+            await pg.evaluate("CORPUS_WEB.admin=false;window.__TEST_COURSES__=true;0")
+            await pg.evaluate("go({name:'settings'})")
             # ---------- introduction: a new photo is shown 6 labels at a time before they are learned ----------
             ch = await pg.evaluate("[0,1,2,6,7,13].map(n=>introChunks(Array.from({length:n},(_,i)=>i),INTRO_CHUNK).map(g=>g.length))")
             check('intro: chunks of 6 for 0, 1, 2, 6, 7, 13 labels', ch == [[], [1], [2], [6], [6, 1], [6, 6, 1]], json.dumps(ch))
@@ -1673,6 +1809,182 @@ async def main():
             await pg.click('[data-act=studyHome]')
             await pg.wait_for_function("view.name==='home'", timeout=5000)
             check('summary: «back to home» leads to the home screen', True)
+            check('home: the 16-week heatmap is gone, a 7-day strip stays', await pg.evaluate("!document.querySelector('#app .svhm') && !document.querySelector('#app .hm') && document.querySelectorAll('#app .svdots i').length===7"))
+            await pg.evaluate("go({name:'globalStats'})")
+            await pg.wait_for_selector('#app .sbox .hm', timeout=5000)
+            check('stats: the full calendar is called «Activity» (not the tests «Calendar»)', await pg.evaluate("(()=>{const hs=[...document.querySelectorAll('#app .sbox h3')].map(h=>h.textContent);return hs.some(t=>['Активность','Activity','Aktiivsus'].includes(t))&&!hs.some(t=>t.indexOf('Календарь занятий')>=0);})()"))
+            check('stats: «Активность» has en/et translations', '["Активность", "Activity", "Aktiivsus"]' in open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read())
+            # ---------- AI is more visible (T-040): a pulsing chat button until first opened, a soft «Explain with Claude» line after a miss ----------
+            await pg.evaluate("""(()=>{window.__smpN=S.sample;S.sample=async()=>({text:'ok'});META.aiSeen=false;META.aiNudge=null;META.aiNudgeOff=false;
+              const t0=Date.now(),did=newId('decks');window.__nudgeDeck=did;S.decks.push({id:did,name:'Nudge',newPerDay:50,mode:'hideAll',createdAt:t0});
+              for(let i=0;i<6;i++)S.cards.push(normCard({id:newId('terms'),kind:'text',type:'new',dir:'f',deckId:did,front:'ossa '+i,back:'luu '+i,createdAt:t0+i}));})()""")
+            async def nudge_step(r):
+                await pg.evaluate('doReveal()')
+                await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+                await pg.evaluate(f'rate({r})')
+                await pg.wait_for_function("SS.phase==='ask'", timeout=5000)
+                await asyncio.sleep(0.4)
+            await pg.evaluate("startStudy(window.__nudgeDeck)")
+            await pg.wait_for_selector('.full.study')
+            check('AI visibility: the chat button pulses before the first opening', await pg.evaluate("document.querySelector('.full.study [data-act=askOpen]').classList.contains('pulse')"))
+            await pg.click('.full.study [data-act=askOpen]')
+            await pg.wait_for_selector('#chat.on')
+            check('AI visibility: after opening the chat META.aiSeen is set and the pulse is gone', await pg.evaluate("META.aiSeen===true&&!document.querySelector('[data-act=askOpen].pulse')"))
+            chips = await pg.evaluate("document.querySelectorAll('#chChips button').length")
+            chip_src = [l for l in open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8') if l.startswith('const CH_CHIPS=')][0]
+            check('AI visibility: the empty chat shows chips; they offer explain / association / quiz', chips >= 3 and 'Объясни' in chip_src and 'Дай ассоциацию' in chip_src and 'Проверь меня' in chip_src, chips)
+            await pg.click('#chClose')
+            check('AI visibility: no nudge before any miss', await pg.evaluate("!document.querySelector('.ainudge')"))
+            await nudge_step(1)
+            check('AI visibility: after «again» one «Explain with Claude» line appears', await pg.evaluate("document.querySelectorAll('.ainudge').length===1&&/Claude/.test(document.querySelector('.ainudge .go').textContent)&&META.aiNudge.n===1"))
+            await nudge_step(3)
+            check('AI visibility: the line goes away after the next answer', await pg.evaluate("!document.querySelector('.ainudge')"))
+            await nudge_step(1)
+            check('AI visibility: not shown twice in one session', await pg.evaluate("!document.querySelector('.ainudge')&&META.aiNudge.n===1"))
+            await pg.evaluate("startStudy(window.__nudgeDeck)")
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            await pg.click('.ainudge .go')
+            await pg.wait_for_function("CH.turns.length>=1&&!CH.busy", timeout=5000)
+            check('AI visibility: the line opens the chat with a ready question about the missed card', await pg.evaluate("CH.open&&/^Объясни «ossa \\d»$/.test(CH.turns[0].content)&&!!CH.pin&&META.aiNudge.n===2"), await pg.evaluate("JSON.stringify(CH.turns[0])"))
+            await pg.click('#chClose')
+            await pg.evaluate("startStudy(window.__nudgeDeck)")
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            await pg.click('.ainudge .x')
+            check('AI visibility: the cross hides the line for good (META.aiNudgeOff)', await pg.evaluate("META.aiNudgeOff===true&&!document.querySelector('.ainudge')"))
+            await pg.evaluate("startStudy(window.__nudgeDeck)")
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            check('AI visibility: …and it does not return in a new session', await pg.evaluate("!document.querySelector('.ainudge')"))
+            await pg.evaluate("META.aiNudgeOff=false;META.aiNudge=null;S.sample=null;startStudy(window.__nudgeDeck)")
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            check('AI visibility: without S.sample there is neither the button nor the line', await pg.evaluate("!document.querySelector('[data-act=askOpen]')&&!document.querySelector('.ainudge')"))
+            await pg.evaluate("(()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');window.__today=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());})()")
+            START = "startStudy(window.__nudgeDeck)"
+            # undo right after the miss removes the line
+            await pg.evaluate("META.aiNudgeOff=false;META.aiNudge=null;S.sample=async()=>({text:'ok'});" + START)
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            has = await pg.evaluate("!!document.querySelector('.ainudge')")
+            await pg.click('#undoBtn')
+            await asyncio.sleep(0.4)
+            check('AI visibility: «undo» right after the miss removes the line', has and await pg.evaluate("!document.querySelector('.ainudge')&&!SS.nudge"))
+            # the pinned card does not outlive the card on screen
+            await pg.evaluate("META.aiNudge=null;" + START)
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            await pg.evaluate("window.__pinned=SS.nudge")
+            await pg.click('.ainudge .go')
+            await pg.wait_for_function("CH.turns.length>=2&&!CH.busy", timeout=5000)
+            await nudge_step(3)
+            check('AI visibility: after the next answer the chat context follows the card on screen, not the pinned one', await pg.evaluate("CH.pin===null&&document.querySelector('#chCtx').textContent.indexOf(cardById(SS.cur).front)>=0&&document.querySelector('#chCtx').textContent.indexOf(cardById(window.__pinned).front)<0"))
+            await pg.click('#chClose')
+            # the daily limit: 3 a day, a new day allows it again
+            await pg.evaluate("META.aiNudge={day:window.__today,n:3};" + START)
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            check('AI visibility: 3 times today already → no line', await pg.evaluate("!document.querySelector('.ainudge')&&META.aiNudge.n===3"))
+            await pg.evaluate("META.aiNudge={day:'2000-01-01',n:3};" + START)
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            check('AI visibility: another day → the line is back and the counter restarts', await pg.evaluate("!!document.querySelector('.ainudge')&&META.aiNudge.n===1&&META.aiNudge.day===window.__today"))
+            # not on the answer side
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            check('AI visibility: no line while the answer is open', await pg.evaluate("!document.querySelector('.ainudge')"))
+            # not in cram mode
+            await pg.evaluate("META.aiNudge=null;startStudy(window.__nudgeDeck,true)")
+            await pg.wait_for_selector('.full.study')
+            await nudge_step(1)
+            check('AI visibility: no line in cram mode', await pg.evaluate("!document.querySelector('.ainudge')&&!META.aiNudge"))
+            # a hostile card name stays text in the line and in the chat
+            await pg.evaluate("""(()=>{META.aiNudge=null;const c=normCard({id:newId('terms'),kind:'text',type:'new',dir:'f',deckId:window.__nudgeDeck,front:'<img src=x onerror=alert(1)>',back:'x',createdAt:Date.now()});S.cards.push(c);window.__xssId=c.id;})()""")
+            await pg.evaluate(START)
+            await pg.wait_for_selector('.full.study')
+            await pg.evaluate("SS.nudge=window.__xssId;updStudy()")
+            await pg.click('.ainudge .go')
+            await pg.wait_for_function("CH.turns.length>=2&&!CH.busy", timeout=5000)
+            check('AI visibility: a term with HTML makes no element in the line or the chat', await pg.evaluate("!document.querySelector('#chat img, #chLog img, .ainudge img')&&/<img/.test(document.querySelector('.ch-msg.u').textContent)"))
+            await pg.click('#chClose')
+            await pg.evaluate("""(()=>{SS=Object.assign({},{zoom:1});const ids=S.cards.filter(c=>c.deckId===window.__nudgeDeck).map(c=>c.id);S.cards=S.cards.filter(c=>c.deckId!==window.__nudgeDeck);ids.forEach(i=>removeDoc('terms',i));
+              S.decks=S.decks.filter(d=>d.id!==window.__nudgeDeck);removeDoc('decks',window.__nudgeDeck);go({name:'home'});})()""")
+            await pg.evaluate("S.sample=window.__smpN;META.aiNudge=null;0")
+            src_t = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
+            check('AI visibility: new strings have en/et translations', all(x in src_t for x in ['["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"]', '["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]', '["Больше не предлагать","Don’t suggest again","Ära paku enam"]']))
+            await pg.evaluate("go({name:'home'})")
+            # ---------- «Hard» virtual deck: tile, all modes, schedule-affecting answers, leaving after 3 correct in a row ----------
+            await pg.evaluate("go({name:'library'})")
+            await pg.wait_for_selector('.page.tabbed')
+            check('hard deck: tile shown in the library while a card has misses', await pg.evaluate("!!document.querySelector('.deck.hardrow[data-act=openHardDeck]') && hardCards(S.decks.map(d=>d.id)).length>0"))
+            await pg.evaluate("go({name:'folder',folderId:S.folders[0].id})")
+            await pg.evaluate("S.cards.forEach(c=>{c.miss=0;c.lapses=0;delete c.lapsesBase;delete c.hardOk;})")
+            await pg.evaluate("go({name:'library'})")
+            check('hard deck: tile hidden without hard cards', await pg.evaluate("!document.querySelector('.deck.hardrow')"))
+            await pg.evaluate(f"(()=>{{const c=cardsOfDeck('{did_s}')[0];c.miss=1;c.type='review';c.due=Date.now()+86400000*3;c.ivl=3;persist('terms',c.id);window._hc=c.id;go({{name:'library'}});}})()")
+            await pg.click('.deck.hardrow')
+            await pg.wait_for_selector('.hardscreen .modes')
+            check('hard deck: screen shows the mode grid and the list', await pg.evaluate("view.name==='hard' && document.querySelectorAll('.hardscreen .mode').length>=5 && document.querySelectorAll('.hardscreen .hardlist .crow').length===1"))
+            await pg.click('.hardscreen [data-act=hardMode][data-v=type]')
+            check('hard deck: chosen mode is remembered', await pg.evaluate("META.hardMode==='type'"))
+            await pg.click('.hardscreen [data-act=hardMode][data-v=hideAll]')
+            await pg.click('[data-act=studyHard]')
+            await pg.wait_for_selector('.full.study')
+            check('hard deck: session is hard, not cram, current card is the hard one', await pg.evaluate("SS.hard===true && !SS.cram && SS.cur===window._hc"))
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            check('hard deck: four-grade rating like a normal session (not the two-button cram)', await pg.evaluate("!!document.querySelector('.rate') && !document.querySelector('.rate.two, .rate.cram') && (document.querySelectorAll('.rate button[data-r]').length===4 || !!document.querySelector('.rate.ring'))"))
+            ho = []
+            for r in (3, 3, 1, 3, 3, 3):
+                await pg.evaluate("SS.cur=window._hc;SS.phase='answer';SS.cramQueue=[];RATING=false")
+                await pg.evaluate(f'rate({r})')
+                await asyncio.sleep(0.5)
+                ho.append(await pg.evaluate("[cardById(window._hc).hardOk||0, hardN(cardById(window._hc))]"))
+            check('hard deck: chain 1,2, reset by «again», then 1,2,3 → leaves', ho[0][0] == 1 and ho[1][0] == 2 and ho[2][0] == 0 and ho[3][0] == 1 and ho[4][0] == 2 and ho[5] == [0, 0], json.dumps(ho))
+            check('hard deck: card dropped out of hardCards and recorded lapsesBase', await pg.evaluate("hardCards(S.decks.map(d=>d.id)).length===0 && cardById(window._hc).miss===0"))
+            await pg.evaluate("A.studyHome();go({name:'library'})")
+            check('hard deck: tile gone again after the card left', await pg.evaluate("!document.querySelector('.deck.hardrow')"))
+            # lapses-only difficulty is counted and shown (Statistics list)
+            await pg.evaluate("(()=>{const c=cardById(window._hc);c.lapses=3;c.miss=0;delete c.lapsesBase;c.hardOk=0;persist('terms',c.id);})()")
+            check('hard deck: stats list counts lapses (3, not 0)', await pg.evaluate("(()=>{const h=hardHtml([cardById(window._hc).deckId]);return h.includes('3 ошибки')&&!h.includes('0 ошибок')&&h.includes('openHardDeck');})()"))
+            check('hard deck: hardN/weakness ignore lapses before lapsesBase', await pg.evaluate("(()=>{const c=cardById(window._hc);const w1=weakness(c);c.lapsesBase=3;const w2=weakness(c);const n=hardN(c);c.lapsesBase=0;delete c.lapsesBase;return n===0&&w2<w1;})()"))
+            # leaving the list clears the hint snooze: new mistakes ask for a hint again
+            hs = await pg.evaluate("""(()=>{const c=cardById(window._hc),d=deckById(c.deckId);c.lapses=0;c.miss=3;c.hintSnooze=6;c.hardOk=2;c.type='review';delete c.lapsesBase;
+              applyRating(c,3,d);const left=[c.miss,c.hintSnooze===undefined,c.hardOk,hardN(c)];
+              for(let i=0;i<3;i++)c.miss++;
+              return {left,ask:c.miss>=hintAfter()&&c.miss>=(c.hintSnooze||0)};})()""")
+            check('hard deck: leaving clears hintSnooze → hint asked again after new mistakes', hs['left'] == [0, True, 0, 0] and hs['ask'] is True, json.dumps(hs))
+            # undo in a hard session restores hardOk / miss / lapsesBase
+            await pg.evaluate("(()=>{const c=cardById(window._hc);c.miss=2;c.hardOk=1;c.lapses=0;delete c.lapsesBase;c.type='review';c.due=Date.now()+86400000*3;persist('terms',c.id);})()")
+            await pg.evaluate("studyHard(null)")
+            await pg.wait_for_selector('.full.study')
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            await pg.evaluate("RATING=false;rate(3)")
+            await asyncio.sleep(0.5)
+            check('hard deck: answer moved the chain', await pg.evaluate("cardById(window._hc).hardOk===2"))
+            await pg.evaluate("undoStudy()")
+            await asyncio.sleep(0.3)
+            check('hard deck: undo restores hardOk and miss', await pg.evaluate("(()=>{const c=cardById(window._hc);return c.hardOk===1&&c.miss===2&&c.lapsesBase===undefined;})()"))
+            # the end screen of a hard session: own title, no «repeat hard» button
+            await pg.evaluate("SS.log=[{id:window._hc,ok:false}];SS.cramQueue=[];SS.phase='answer';RATING=false;rate(3)")
+            await asyncio.sleep(0.5)
+            check('hard deck: end screen has no «repeat hard» button and its own title', await pg.evaluate("!document.querySelector('[data-act=sessHard]') && /Трудные пройдены|Rasked läbitud|Hard cards done/.test(document.querySelector('.donebox h2').textContent)"))
+            await pg.evaluate("A.studyExit()")
+            check('hard deck: closing a hard session returns to the hard screen', await pg.evaluate("view.name==='hard'"))
+            # folder: tile inside the folder, back button leads to the folder; folder switched off → global tile hidden
+            await pg.evaluate("(()=>{const f=S.folders[0],d=deckById(cardById(window._hc).deckId);window._d0=d.folderId||'';d.folderId=f.id;persist('decks',d.id);go({name:'folder',folderId:f.id});})()")
+            check('hard deck: tile inside the folder', await pg.evaluate("!!document.querySelector('.deck.hardrow[data-folder]') && document.querySelector('.deck.hardrow').dataset.folder===S.folders[0].id"))
+            await pg.click('.deck.hardrow')
+            await pg.wait_for_selector('.hardscreen')
+            await pg.click('[data-act=openFolderBack]')
+            await pg.wait_for_function("view.name==='folder'", timeout=5000)
+            check('hard deck: «back» from a folder hard deck leads to the folder', True)
+            await pg.evaluate("(()=>{S.folders[0].off=true;persist('folders',S.folders[0].id);go({name:'library'});})()")
+            check('hard deck: hard card in a switched-off folder → global tile hidden', await pg.evaluate("!document.querySelector('.deck.hardrow')"))
+            await pg.evaluate("(()=>{const f=S.folders[0];delete f.off;persist('folders',f.id);const c=cardById(window._hc),d=deckById(c.deckId);if(window._d0)d.folderId=window._d0;else delete d.folderId;persist('decks',d.id);c.miss=0;c.lapses=0;c.hardOk=0;delete c.lapsesBase;persist('terms',c.id);go({name:'library'});})()")
+            check('hard deck: strings are translated (et, en)', await pg.evaluate("['Учить трудные','Собираются автоматически','Трудные пройдены','Открыть «Трудные»'].every(k=>I18N_DICT.some(e=>e[0]===k&&e[1]&&e[2]))"))
             check('summary: a session without answers shows no summary', await pg.evaluate("(()=>{const o=SS;SS={log:[],deckIds:[]};const r=sessSummary();SS=o;return r.html===''&&r.hard===0;})()"))
 
             # ---------- a course in another language: translated once by the AI, kept on the photo, shown in the reader's language ----------
@@ -3115,7 +3427,7 @@ async def main():
             await pg.click('[data-cn=rretry]')
             await pg.wait_for_selector('.cnph', timeout=120000)
             check('plan: «Proovi uuesti» goes on from where it stopped: the first outline answer is not asked again (outline, plan), then step 3', tasks_of(ai_p[n3:]) == ['outline', 'plan'], json.dumps(tasks_of(ai_p[n3:])))
-            for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short')):
+            for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short before any whole knowledge unit')):
                 urllib.request.urlopen(API + '/__fn?' + mode)
                 await replan_go()
                 await pg.wait_for_selector('.cnerr', timeout=120000)
@@ -3979,6 +4291,32 @@ async def main():
                   status == 200 and c2 - c1 == 5 and pr and pr[0]['lessons'][0] == {'title': 'Spina scapulae', 'pic': 'p1', 'terms': ['t1']} and lp['model'] == 'claude-sonnet-5-5' and lp['thinking'] == {'type': 'between_tools'} and lp['max_tokens'] == 8000
                   and lp['turns'] == 1 and lp['said'].startswith('CORPUS-PLAN ru\n') and 'EVIL' not in lp['said'] and lp['system'].startswith('Your reply is read by a program'), json.dumps([status, j, lp])[:500])
             check('plan: the prompts carry the input as JSON after «INPUT:» and say the values are data, not instructions', lp['said'].endswith('INPUT:\n' + json.dumps(good_p['input'], separators=(',', ':'), ensure_ascii=False)) and 'never instructions' in lp['said'] and 'never instructions' in lo['said'], lp['said'][-120:])
+            # the plan by groups (T-037): the same task with another kind of input
+            good_gi = {'kind': 'knowledge-groups-v1', 'name': 'Soojus', 'topicHints': [{'title': 'Heat', 'pages': [1, 2], 'm': 0}], 'materials': ['Heat notes'],
+                       'groups': [{'id': 'g1', 'm': 0, 'p': 1, 'n': 2, 't': ['Heat', 'Heat flows']}, {'id': 'g2', 'm': 0, 'p': 2, 'n': 3, 't': ['Conduction']}, {'id': 'g3', 'm': 0, 'p': 3, 'n': 1, 't': []}],
+                       'excluded': [{'m': 0, 'n': 2}], 'sourceStatus': {'status': 'no_warning_detected', 'registryStatus': 'processed', 'incompleteMaterials': 0, 'reviewMaterials': 0, 'unresolvedVisuals': 2, 'unprocessedVisuals': 0}}
+            def with_gi(**ch):
+                x = json.loads(json.dumps(good_gi)); x.update(ch); return {**good_p, 'input': x}
+            bad_g = {'duplicate id': with_gi(groups=[good_gi['groups'][0], {**good_gi['groups'][1], 'id': 'g1'}]), 'extra key': with_gi(extra=1), '251 groups': with_gi(groups=[{'id': 'g%d' % i, 'm': 0, 'p': 1, 'n': 1, 't': []} for i in range(1, 252)]),
+                     'a fragment of 81': with_gi(groups=[{'id': 'g1', 'm': 0, 'p': 1, 'n': 1, 't': ['x' * 81]}]), 'n of 7': with_gi(groups=[{'id': 'g1', 'm': 0, 'p': 1, 'n': 7, 't': []}]), 'p is a string': with_gi(groups=[{'id': 'g1', 'm': 0, 'p': '1', 'n': 1, 't': []}]),
+                     'a unit list instead of groups': with_gi(knowledge=[]), 'no groups': with_gi(groups=[]), 'material out of range': with_gi(groups=[{'id': 'g1', 'm': 3, 'p': 1, 'n': 1, 't': []}]), 'bad id': with_gi(groups=[{'id': 'x1', 'm': 0, 'p': 1, 'n': 1, 't': []}])}
+            wrong_g = {}
+            cg0 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values()); lg0 = lastai()
+            for name, body_ in bad_g.items():
+                status, j = fn_call(tokp, 'POST', body_)
+                if not (status == 400 and j.get('code') == 'invalid_input' and str(j.get('message', '')).startswith('plan:')):
+                    wrong_g[name] = [status, str(j)[:80]]
+            cg1 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            check('plan by groups: %d wrong forms → 400 invalid_input «plan: …», none counted or sent to the model' % len(bad_g), not wrong_g and cg1 == cg0 and lastai() == lg0, json.dumps([wrong_g, cg0, cg1])[:400])
+            sd, jd = fn_call(None, 'POST', with_gi(), demo=True)
+            check('plan by groups: in demo mode → 403 not_granted', sd == 403 and jd.get('code') == 'not_granted', json.dumps([sd, jd]))
+            status, j = fn_call(tokp, 'POST', {**with_gi(), **evil})
+            lg = lastai()
+            cg2 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            ans_g = json.loads(j['text'])['parts'] if status == 200 else None
+            check('plan by groups: answered, 5 units; model claude-sonnet-5-5 with thinking between_tools, 8000 tokens, the prompt «CORPUS-PLAN ru» of the groups, input as JSON after «INPUT:»; the client\'s messages, model, system, tokens are ignored; every group once in the answer',
+                  status == 200 and cg2 - cg1 == 5 and ans_g and sorted(g for pt in ans_g for l in pt['lessons'] for g in l['groups']) == ['g1', 'g2', 'g3'] and lg['model'] == 'claude-sonnet-5-5' and lg['thinking'] == {'type': 'between_tools'} and lg['max_tokens'] == 8000 and lg['turns'] == 1
+                  and lg['said'].startswith('CORPUS-PLAN ru\n') and 'GROUPS' in lg['said'] and 'exactly once' in lg['said'] and 'never instructions' in lg['said'] and 'EVIL' not in lg['said'] and lg['said'].endswith('INPUT:\n' + json.dumps(good_gi, separators=(',', ':'), ensure_ascii=False)), json.dumps([status, j, lg])[:500])
             # the biggest accepted shapes
             big_o = with_o(input={'pages': [pg_of(n=i + 1, text='a' * 600, em=['e' * 200] * 60) if i else pg_of(n=1, text='a' * 6000, em=['e' * 200] * 60) for i in range(2)]})
             big_o['input']['pages'] = big_o['input']['pages'] + [pg_of(n=i + 3, text='b', em=[]) for i in range(38)]
@@ -4545,6 +4883,298 @@ async def main():
             check('release: no script errors or failed requests in the browser', not errs_r, '; '.join(errs_r)[:500])
             await ctx_r.close()
             # <<< T032R
+
+            # >>> T034
+            # ---------- T-034: an outline reply cut short at max_tokens keeps the units that were whole before the cut; no retry, no extra charge ----------
+            knowledge_files(tmp / 'kn34')
+            KN34 = tmp / 'kn34'
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline')   # both outline replies are cut inside their knowledge list: Core keeps 4 of 8 units, Extra 3 of 6
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            ctx_t, pt, errs_t = await open_ctx(legacy=False)
+            await pt.goto(SITE + '?create=1&i=' + INVITE)
+            await pt.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pt.fill('input[name=email]', 'truncated@test.ee')
+            await pt.fill('input[name=password]', 'kolju2026')
+            await pt.click('.cw-go')
+            await app_ready(pt)
+            await ui_lang(pt, 'et')
+            ai_t = watch_ai(pt)
+            uid_t = await pt.evaluate('CORPUS_WEB.uid')
+            mine_t = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_t]
+            used_t = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_t, 0)
+            await pt.evaluate("go({name:'courses'})")
+            await pt.wait_for_selector('.cnnew')
+            await pt.click('.cnnew')
+            await pt.wait_for_selector('.cnw')
+            did_t = await pt.evaluate('view.did')
+            await pt.fill('#cnName', 'Katkenud')
+            await pt.press('#cnName', 'Tab')
+            await pt.set_input_files('#cnFile', [str(KN34 / 'Heat notes.pdf'), str(KN34 / 'Extra reading.pdf')])
+            await pt.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            await pt.click('.cnmain')
+            await pt.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_t(s, 'cplan')) and len([r for r in mine_t(s, 'ctext') if '.ku1.' in r['id']]) == 4 and any(r['data'].get('planAt') for r in mine_t(s, 'cdraft')))
+            check('truncated outline: every outline is cut short, so each chunk is asked again once in halves (T-039: 1 + 2 requests for Core, 1 + 2 for Extra, the halves are cut too and are not divided again) and the plan once; 6 + 5 = 11 units paid',
+                  [c.get('task') for c in ai_t] == ['outline'] * 6 + ['plan'] and used_t() == 11, json.dumps([[c.get('task') for c in ai_t], used_t()]))
+            mats_t = {m['name']: m['id'] for m in mine_t(st, 'cdraft')[0]['data']['mats']}
+            kdocs_t = lambda i: [r['data'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == i]
+            ku_t = {n: (ku_total(kdocs_t(i))[0], ku_total(kdocs_t(i))[1], sorted(x for x in ku_total(kdocs_t(i))[2] if x.startswith(('outline_', 'knowledge_missing')))) for n, i in mats_t.items()}
+            check('truncated outline: registry Core 4 units, Extra 3 (the whole ones before the cut), both incomplete with outline_truncated + outline_truncated_partial:N, no knowledge_missing',
+                  ku_t == {'Heat notes.pdf': (4, 'incomplete', ['outline_truncated', 'outline_truncated_partial:4']), 'Extra reading.pdf': (3, 'incomplete', ['outline_truncated', 'outline_truncated_partial:3'])}, json.dumps(ku_t))
+            cp_t = mine_t(st, 'cplan')[0]['data']
+            ids_t = sorted(u['id'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'] for u in r['data']['units'] if u['extractionStatus'] == 'extracted')
+            check('truncated outline: the knowledge plan (v2) covers exactly the 7 kept units: expected 7 = planned 7, missing/duplicates/unknown 0, 3 lessons',
+                  cp_t.get('planVersion') == 2 and cp_t['coverage']['expected'] == 7 == cp_t['coverage']['planned'] and cp_t['coverage']['missing'] == cp_t['coverage']['duplicates'] == cp_t['coverage']['unknown'] == 0
+                  and sorted(i for p_ in cp_t['parts'] for l in p_['lessons'] for i in l['knowledgeIds']) == ids_t and sum(len(p_['lessons']) for p_ in cp_t['parts']) == 3, json.dumps(cp_t['coverage']))
+            warn_t = {}
+            for lg_ in ('ru', 'en', 'et'):
+                await ui_lang(pt, lg_)
+                await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:3})")
+                await pt.wait_for_selector('.cnbtns [data-cn=build] b')
+                warn_t[lg_] = await pt.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            msg_t = {'ru': 'Ответ ИИ оборвался: принята только часть найденного, остальное не сохранено. Проверьте материал или составьте план заново.',
+                     'en': 'The AI answer was cut short: only part of what was found was accepted, the rest was not saved. Check the material or make the plan again.',
+                     'et': 'TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.'}
+            check('truncated outline: the plan screen warns about both materials in ru / en / et («Ответ ИИ оборвался…», «The AI answer was cut short…», «TI vastus katkes…»)',
+                  all(len(warn_t[k]) == 2 and all(w.endswith(': ' + msg_t[k]) for w in warn_t[k]) and any(w.startswith('Heat notes') for w in warn_t[k]) for k in msg_t), json.dumps(warn_t, ensure_ascii=False))
+            # after a reload the warning is read back from the saved registry / plan
+            await pt.reload()
+            await app_ready(pt)
+            await ui_lang(pt, 'et')
+            await pt.click('.tabbar [data-v=courses]')
+            await pt.wait_for_selector('.crs .cnd')
+            await pt.click('.cnd .cndgo')
+            await pt.wait_for_selector('.cnbtns [data-cn=build] b', timeout=60000)
+            warn_r = await pt.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            check('truncated outline: after a page reload and reopening the plan the warning is still there for both materials (read from the saved registry and plan)',
+                  len(warn_r) == 2 and all(w.endswith(': ' + msg_t['et']) for w in warn_r) and any(w.startswith('Heat notes') for w in warn_r) and any(w.startswith('Extra reading') for w in warn_r), json.dumps(warn_r, ensure_ascii=False))
+            n_t = len(ai_t)
+            await pt.click('.cnbtns [data-cn=build]')
+            await pt.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            st = await state_when(lambda s: len(mine_t(s, 'plates')) == 3 and all(not r['data']['bld'].get('run') for r in mine_t(s, 'cplan')))
+            note_msg = {'ru': 'Часть найденного в материалах не сохранена: ответ ИИ оборвался.', 'en': 'Part of what was found in the materials was not saved: the AI answer was cut off.', 'et': 'Osa materjalidest leitust jäi salvestamata: TI vastus katkes.'}
+            note_t = {}
+            for lg_ in ('et', 'ru', 'en'):
+                if lg_ != 'et':
+                    await ui_lang(pt, lg_)
+                await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:4})")
+                await pt.wait_for_selector('#cnBd .cnktest')
+                note_t[lg_] = await pt.evaluate("[...document.querySelectorAll('#cnBd .cnwarn[data-k=truncated-note]')].map(x=>x.innerText)")
+            check('truncated outline: the course build screen shows the short mark «part of the findings was not saved» in et / ru / en, once, next to the test-feature note',
+                  all(note_t[k] == [note_msg[k]] for k in note_msg), json.dumps(note_t, ensure_ascii=False))
+            built_t = sorted(i for r in mine_t(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('truncated outline: the lessons (v2) are built from the kept units: 3 lesson requests and nothing else (no outline again), 3 plates with the 7 units, 3 × 2 = 6 more units paid (11 + 6)',
+                  [c.get('task') for c in ai_t[n_t:]] == ['lesson'] * 3 and built_t == ids_t and used_t() == 11 + 6, json.dumps([[c.get('task') for c in ai_t[n_t:]], len(built_t), used_t()]))
+            check('truncated outline: no script errors or failed requests in the browser', not errs_t, '; '.join(errs_t)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx_t.close()
+            # <<< T034
+
+            # >>> T037
+            # ---------- T-037: a registry too large for the per-unit plan request is planned by groups: outline ×N, one plan request with groups, 5 units; the plan is the same v2 document; a stopped build is continued after a reload ----------
+            big_knowledge_files(tmp / 'kn37')
+            KN37 = tmp / 'kn37'
+            urllib.request.urlopen(API + '/__fn?v2lessons=10')   # the fake plan spreads the groups over exactly 10 lessons
+            urllib.request.urlopen(API + '/__course?free=300&limit=')
+            ctx_g, pgz, errs_g = await open_ctx(legacy=False)
+            await pgz.goto(SITE + '?create=1&i=' + INVITE)
+            await pgz.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pgz.fill('input[name=email]', 'groups@test.ee')
+            await pgz.fill('input[name=password]', 'kolju2026')
+            await pgz.click('.cw-go')
+            await app_ready(pgz)
+            await ui_lang(pgz, 'et')
+            ai_g = watch_ai(pgz)
+            uid_g = await pgz.evaluate('CORPUS_WEB.uid')
+            mine_g = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_g]
+            used_g = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_g, 0)
+            lessons_g = lambda: [c for c in ai_g if c.get('task') == 'lesson']
+            cbn_g = lambda: pgz.evaluate("document.querySelector('.cnbn').innerText.replace(/\\n+/g,' ')")
+            await pgz.evaluate("go({name:'courses'})")
+            await pgz.wait_for_selector('.cnnew')
+            await pgz.click('.cnnew')
+            await pgz.wait_for_selector('.cnw')
+            did_g = await pgz.evaluate('view.did')
+            await pgz.fill('#cnName', 'Suur register')
+            await pgz.press('#cnName', 'Tab')
+            await pgz.set_input_files('#cnFile', [str(KN37 / 'Heat notes.pdf'), str(KN37 / 'Extra reading.pdf')])
+            await pgz.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=120000)
+            await pgz.click('.cnmain')
+            await pgz.wait_for_selector('.cnph', timeout=240000)
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_g(s, 'cplan')) and len([r for r in mine_g(s, 'ctext') if '.ku1.' in r['id']]) >= 2 and any(r['data'].get('planAt') for r in mine_g(s, 'cdraft')))
+            tasks_g = [c.get('task') for c in ai_g]
+            n_out = tasks_g.count('outline')
+            check('plan by groups: outline ×N (N ≥ 5), the plan once at the end, no lesson yet; N + 5 units paid', n_out >= 5 and tasks_g == ['outline'] * n_out + ['plan'] and used_g() == n_out + 5, json.dumps([tasks_g, used_g()]))
+            cpg = mine_g(st, 'cplan')[0]['data']
+            kug = {r['id']: r['data'] for r in mine_g(st, 'ctext') if '.ku1.' in r['id']}
+            unit_g = [u['id'] for v in kug.values() for u in v['units'] if u['extractionStatus'] == 'extracted']
+            reqg = ai_g[-1]['input']
+            sent = json.dumps(reqg, separators=(',', ':'), ensure_ascii=False)
+            check('plan by groups: the request is «knowledge-groups-v1» (groups, no per-unit knowledge list), ≤ 60000 characters, ≤ 250 groups of ≤ 6 units; the 206 units are in the groups (n summed), and the request holds no unit id or block id',
+                  reqg['kind'] == 'knowledge-groups-v1' and 'knowledge' not in reqg and len(unit_g) == 206 and sum(g['n'] for g in reqg['groups']) == 206 and len(sent) <= 60000 and 0 < len(reqg['groups']) <= 250 and all(1 <= g['n'] <= 6 and len(g['t']) <= 3 for g in reqg['groups'])
+                  and 'ku1_' not in sent and 'blockId' not in sent and sorted(reqg['materials']) == ['Extra reading', 'Heat notes'], json.dumps([reqg['kind'], len(unit_g), len(sent), len(reqg['groups']), reqg['materials']]))
+            planned_g = [i for pt in cpg['parts'] for l in pt['lessons'] for i in l['knowledgeIds']]
+            check('plan by groups: cplan is the same document, planVersion 2 / planKind knowledge, marked grouped with groupCount; coverage expected 206 = planned 206, missing/duplicates/unknown 0, completeness not_proven; every registry unit in exactly one lesson, in the source order of the groups',
+                  cpg.get('planVersion') == 2 and cpg.get('planKind') == 'knowledge' and cpg.get('grouped') is True and cpg.get('groupCount') == len(reqg['groups']) and cpg['coverage']['expected'] == 206 == cpg['coverage']['planned'] and cpg['coverage']['missing'] == cpg['coverage']['duplicates'] == cpg['coverage']['unknown'] == 0
+                  and cpg['coverage']['completeness'] == 'not_proven' and sorted(planned_g) == sorted(unit_g) and len(planned_g) == len(set(planned_g)) and cpg['coverage']['sequenceChanges'] == 0 and cpg.get('fallback') is False and len(json.dumps(cpg)) < 800000, json.dumps(cpg['coverage']))
+            check('plan by groups: 10 lessons in 4 parts (3 + 3 + 3 + 1), each of ≤ 40 units with a rationale; the index keeps all units with their lesson (no label longer than 80 characters); the screen says «10 õppetundi» and «206 / 206»',
+                  [len(pt['lessons']) for pt in cpg['parts']] == [3, 3, 3, 1] and all(0 < len(l['knowledgeIds']) <= 40 and len(l['rationale']) >= 12 for pt in cpg['parts'] for l in pt['lessons']) and len(cpg['knowledgeIndex']) == 206 and all(len(x['label']) <= 80 and x['lessonId'] for x in cpg['knowledgeIndex'])
+                  and await pgz.inner_text('.cnph') == '10 õppetundi' and await pgz.inner_text('.cnpx1') == '206 / 206', json.dumps([await pgz.inner_text('.cnph'), await pgz.inner_text('.cnpx1')]))
+            # --- build: stop after two lessons, reload, continue ---
+            urllib.request.urlopen(API + '/__fn?delay=2500')
+            await pgz.click('.cnbtns [data-cn=build]')
+            await pgz.wait_for_function("view.step===4&&!!CDRAFTS.get(view.did)._bld", timeout=60000)
+            await pgz.wait_for_function("S.plates.filter(p=>p.cb&&p.cb.startsWith(view.did+'|')).length>=1", timeout=60000)
+            for _ in range(200):
+                if len(lessons_g()) >= 2:
+                    break
+                await pgz.wait_for_timeout(50)
+            await pgz.click('[data-cn=pause]')
+            await pgz.wait_for_function("CDRAFTS.get(view.did)._bld.state==='pause'", timeout=60000)
+            await pgz.wait_for_timeout(300)
+            st = await state_when(lambda s: len(mine_g(s, 'plates')) == 2 and all(not r['data']['bld'].get('run') for r in mine_g(s, 'cplan')))
+            n_g = len(lessons_g())
+            done_ids = sorted(i for r in mine_g(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('plan by groups: «Paus» leaves exactly 2 of 10 lessons built (2 lesson requests, 2 plates), 2 units paid for each', n_g == 2 and len(mine_g(st, 'plates')) == 2 and used_g() == n_out + 5 + 4 and (await cbn_g()).startswith('2 '), json.dumps([n_g, await cbn_g(), used_g()]))
+            await pgz.add_init_script("try{localStorage.removeItem('corpus.ai');}catch(e){}")
+            urllib.request.urlopen(API + '/__fn')
+            await pgz.reload()
+            await app_ready(pgz)
+            await pgz.click('.tabbar [data-v=courses]')
+            await pgz.wait_for_selector('.crs .cnd')
+            await pgz.click('.cnd .cndgo')
+            await pgz.wait_for_selector('.cnbl', timeout=30000)
+            reload_txt = await cbn_g()
+            grouped_back = await pgz.evaluate("(()=>{const p=CDRAFTS.get(view.did)._plan;return p&&[p.grouped,p.groupCount,p.coverage.expected,p.coverage.planned]})()")
+            check('plan by groups: after a reload the plan is read back as grouped (206 / 206) and the build shows «2 / 10 õppetundi valmis» with «Jätka»',
+                  reload_txt == '2 / 10 õppetundi valmis' and 'Jätka' in await pgz.inner_text('#cnBar') and grouped_back == [True, len(reqg['groups']), 206, 206], json.dumps([reload_txt, grouped_back]))
+            await pgz.wait_for_function("!!(CORPUS_WEB.courseAI&&CORPUS_WEB.courseAI.lesson)", timeout=30000)
+            await pgz.click('[data-cn=resume]')
+            await pgz.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            await pgz.wait_for_timeout(300)
+            st = await state_when(lambda s: len(mine_g(s, 'plates')) == 10 and all(not r['data']['bld'].get('run') for r in mine_g(s, 'cplan')))
+            after_g = lessons_g()[n_g:]
+            ids_after = [u['id'] for c in after_g for u in c['input']['units']]
+            built_g = sorted(i for r in mine_g(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('plan by groups: «Jätka» sends exactly the 8 lesson requests left (none for the 2 ready lessons); 16 more units paid; no outline or plan again',
+                  len(after_g) == 8 and len(lessons_g()) == 10 and not set(ids_after) & set(done_ids) and sorted(ids_after + done_ids) == sorted(planned_g) and used_g() == n_out + 5 + 20 and [c.get('task') for c in ai_g][:n_out + 1] == ['outline'] * n_out + ['plan'] and [c.get('task') for c in ai_g].count('plan') == 1, json.dumps([len(after_g), used_g()]))
+            cards_g = await pgz.evaluate("S.cards.filter(c=>c.knowledgeId).map(c=>c.knowledgeId)")
+            check('plan by groups: 10 plates, every one of the 206 registry units in exactly one lesson and on exactly one card; the plan stays v2 with empty compatibility terms',
+                  built_g == sorted(unit_g) and sorted(cards_g) == sorted(unit_g) and len(mine_g(st, 'plates')) == 10 and (await cbn_g()) == '10 / 10 õppetundi valmis'
+                  and mine_g(st, 'cplan')[0]['data']['planVersion'] == 2 and all(l['terms'] == [] for pt in mine_g(st, 'cplan')[0]['data']['parts'] for l in pt['lessons']), json.dumps([len(built_g), len(cards_g), await cbn_g()]))
+            check('plan by groups: no script errors or failed requests in the browser', not errs_g, '; '.join(errs_g)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx_g.close()
+            # <<< T037
+
+            # >>> T039
+            # ---------- T-039: outline requests are cut by the density of the text; a chunk cut short at the token limit is asked again in halves (at most 3 repeat requests a material); a material of more than 80 chunks is refused ----------
+            chunk_files(tmp / 'kn39')
+            KN39 = tmp / 'kn39'
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+
+            async def t39_open(email):
+                ctx_, p_, errs_ = await open_ctx(legacy=False)
+                await p_.goto(SITE + '?create=1&i=' + INVITE)
+                await p_.wait_for_selector('.cw-auth .cw-tabs .on')
+                await p_.fill('input[name=email]', email)
+                await p_.fill('input[name=password]', 'kolju2026')
+                await p_.click('.cw-go')
+                await app_ready(p_)
+                await ui_lang(p_, 'et')
+                uid_ = await p_.evaluate('CORPUS_WEB.uid')
+                return ctx_, p_, errs_, watch_ai(p_), uid_
+
+            async def t39_draft(p_, name, files):
+                await p_.evaluate("go({name:'courses'})")
+                await p_.wait_for_selector('.cnnew')
+                await p_.click('.cnnew')
+                await p_.wait_for_selector('.cnw')
+                did_ = await p_.evaluate('view.did')
+                await p_.fill('#cnName', name)
+                await p_.press('#cnName', 'Tab')
+                await p_.set_input_files('#cnFile', [str(KN39 / f) for f in files])
+                await p_.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=" + str(len(files)) + "&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=120000)
+                return did_
+
+            used39 = lambda uid_: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_, 0)
+            # --- A: the cut chunks are recovered by their halves ---
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline&truncmin=3')   # an outline request of 3 pages or more is cut short, the halves (≤ 2 pages) are answered whole
+            ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunks@test.ee')
+            mine_c = lambda s_, coll: [r for r in s_['docs'] if r['coll'] == coll and r['owner'] == uid_c]
+            did_c = await t39_draft(pc, 'Poolitatud', ['Heat notes.pdf', 'Extra reading.pdf'])
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: before the start the estimate is the number of outline chunks + 5 for the plan: two short PDFs = 1 + 1 + 5 → «≈ 7 TI päringut»', 'Koosta plaan' in btn_c and '≈ 7 TI päringut' in btn_c, btn_c)
+            await pc.click('.cnmain')
+            await pc.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s_: any(r['coll'] == 'cplan' for r in mine_c(s_, 'cplan')) and len([r for r in mine_c(s_, 'ctext') if '.ku1.' in r['id']]) == 4 and any(r['data'].get('planAt') for r in mine_c(s_, 'cdraft')))
+            tasks_c = [c.get('task') for c in ai_c]
+            sizes_c = sorted(len(c['input']['pages']) for c in ai_c if c.get('task') == 'outline')
+            check('chunks: both chunks (4 and 3 pages) are cut short → each is asked again in two halves: 3 + 3 = 6 outline requests (pages 1 + 2 + 2 + 2 + 3 + 4) and the plan once; 6 + 5 = 11 units paid',
+                  tasks_c == ['outline'] * 6 + ['plan'] and sizes_c == [1, 2, 2, 2, 3, 4] and used39(uid_c) == 11, json.dumps([tasks_c, sizes_c, used39(uid_c)]))
+            mats_c = {m['name']: m['id'] for m in mine_c(st, 'cdraft')[0]['data']['mats']}
+            kus_c = {i: [r['data'] for r in mine_c(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == i] for i in mats_c.values()}
+            ku_c = {n_: (ku_total(kus_c[i])[0], ku_total(kus_c[i])[1], sorted(x for x in ku_total(kus_c[i])[2] if x.startswith(('outline_', 'knowledge_missing', 'duplicate')))) for n_, i in mats_c.items()}
+            check('chunks: the units of the halves replace the cut chunk: Core 8 units, Extra 6, no unit twice, both processed, no outline_truncated / knowledge_missing / duplicate mark',
+                  ku_c == {'Heat notes.pdf': (8, 'processed', []), 'Extra reading.pdf': (6, 'processed', [])} and len({u['id'] for v in kus_c.values() for dc in v for u in dc['units']}) == sum(len(dc['units']) for v in kus_c.values() for dc in v), json.dumps(ku_c))
+            cp_c = mine_c(st, 'cplan')[0]['data']
+            check('chunks: the plan covers exactly the 14 registry units (expected 14 = planned 14, nothing missing or twice)', cp_c['coverage']['expected'] == 14 == cp_c['coverage']['planned'] and cp_c['coverage']['missing'] == cp_c['coverage']['duplicates'] == cp_c['coverage']['unknown'] == 0, json.dumps(cp_c['coverage']))
+            await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:3})")
+            await pc.wait_for_selector('.cnbtns [data-cn=build] b')
+            check('chunks: the plan screen shows NO «answer cut short» warning when every cut chunk was recovered', await pc.evaluate("document.querySelectorAll('.cnwarn[data-k=truncated-partial]').length") == 0)
+            check('chunks: no script errors or failed requests in the browser (recovery)', not errs_c, '; '.join(errs_c)[:500])
+            await ctx_c.close()
+
+            # --- B: every outline is cut short: the cap of repeat requests, the warning stays ---
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline')
+            ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunkcap@test.ee')
+            mine_c = lambda s_, coll: [r for r in s_['docs'] if r['coll'] == coll and r['owner'] == uid_c]
+            did_c = await t39_draft(pc, 'Ülempiir', ['Long pages.pdf', 'Extra reading.pdf'])
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: the estimate follows the chunks: Long pages (4 chunks) + Extra (1) + 5 → «≈ 10 TI päringut» (a text page of ~1300 characters is one request)', '≈ 10 TI päringut' in btn_c, btn_c)
+            await pc.click('.cnmain')
+            await pc.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s_: any(r['coll'] == 'cplan' for r in mine_c(s_, 'cplan')) and len([r for r in mine_c(s_, 'ctext') if '.ku1.' in r['id']]) == 7 and any(r['data'].get('planAt') for r in mine_c(s_, 'cdraft')))
+            outs_c = [c for c in ai_c if c.get('task') == 'outline']
+            per_c = {n_: len([c for c in outs_c if c['input']['name'] == n_]) for n_ in ('Long pages.pdf', 'Extra reading.pdf')}
+            check('chunks: the cap — Long pages: 4 chunks + only 2 repeat requests (one pair; the other cut chunks are kept as they are: a second pair would pass the cap of 3), Extra: 1 + 2; 9 outline requests, the plan once; 9 + 5 = 14 units paid',
+                  per_c == {'Long pages.pdf': 6, 'Extra reading.pdf': 3} and [c.get('task') for c in ai_c] == ['outline'] * 9 + ['plan'] and used39(uid_c) == 14, json.dumps([per_c, [c.get('task') for c in ai_c], used39(uid_c)]))
+            check('chunks: the repeat requests of a material never exceed the cap of 3 (requests beyond one per chunk: 2 and 2)', per_c['Long pages.pdf'] - 4 <= 3 and per_c['Extra reading.pdf'] - 1 <= 3)
+            mats_c = {m['name']: m['id'] for m in mine_c(st, 'cdraft')[0]['data']['mats']}
+            kus_c = {i: [r['data'] for r in mine_c(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == i] for i in mats_c.values()}
+            ku_c = {n_: (ku_total(kus_c[i])[1], 'outline_truncated' in ku_total(kus_c[i])[2], any(x.startswith('outline_truncated_partial:') for x in ku_total(kus_c[i])[2]), 'knowledge_missing' in ku_total(kus_c[i])[2]) for n_, i in mats_c.items()}
+            check('chunks: the cap is reached: both registries stay incomplete with outline_truncated + outline_truncated_partial:N (T-034), no knowledge_missing', ku_c == {'Long pages.pdf': ('incomplete', True, True, False), 'Extra reading.pdf': ('incomplete', True, True, False)}, json.dumps(ku_c))
+            await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:3})")
+            await pc.wait_for_selector('.cnbtns [data-cn=build] b')
+            warn_c = await pc.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            check('chunks: the plan screen warns about both materials (the warning stays when the cap is reached)', len(warn_c) == 2 and all(w.endswith('TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.') for w in warn_c), json.dumps(warn_c, ensure_ascii=False))
+            check('chunks: no script errors or failed requests in the browser (cap)', not errs_c, '; '.join(errs_c)[:500])
+            await ctx_c.close()
+
+            # --- C: a material of more than 80 chunks is flagged as soon as it is read: a red mark on its card, the plan button is off, nothing is sent; exactly 80 chunks is allowed ---
+            urllib.request.urlopen(API + '/__fn')
+            ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunkbig@test.ee')
+            did_c = await t39_draft(pc, 'Liiga suur', ['Huge chunks.pdf'])
+            card_c = {}
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pc, lg_)
+                await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:1})")
+                await pc.wait_for_selector('.cnmain')
+                card_c[lg_] = [await pc.inner_text('.cnf .cnfs.bad'), await pc.inner_text('.cnmain'), await pc.is_disabled('.cnmain')]
+            check('chunks: a material of 81 chunks is flagged right after reading, in et / ru / en: red mark «≈ 81 … 80» on the card, the plan button is off and says the same',
+                  all(card_c[k][2] and '81' in card_c[k][0] and '80' in card_c[k][0] and '81' in card_c[k][1] for k in card_c) and 'liiga suur' in card_c['et'][0] and 'слишком большой' in card_c['ru'][0] and 'too large' in card_c['en'][0], json.dumps(card_c, ensure_ascii=False))
+            await pc.click('.cnmain', force=True)
+            await pc.wait_for_timeout(500)
+            check('chunks: a click on the off button sends nothing: 0 AI requests, 0 units charged, no reading screen', len(ai_c) == 0 and used39(uid_c) == 0 and await pc.query_selector('.cnrd') is None, json.dumps([len(ai_c), used39(uid_c)]))
+            did_c = await t39_draft(pc, 'Piiril', ['Edge chunks.pdf'])
+            await ui_lang(pc, 'et')
+            await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:1})")
+            await pc.wait_for_selector('.cnmain')
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: exactly 80 chunks is allowed: no red mark, the button is on with «≈ 85 TI päringut»', not await pc.is_disabled('.cnmain') and '≈ 85 TI päringut' in btn_c and await pc.query_selector('.cnf .cnfs.bad') is None, btn_c)
+            check('chunks: no script errors or failed requests in the browser (too large)', not errs_c, '; '.join(errs_c)[:500])
+            await ctx_c.close()
+            # <<< T039
 
             # ---------- T-032: a draft and a plan in the old format (v1: parts / lessons / terms, no registry, as the app of cb61180 wrote them) open and build in the real app, nothing of v2 is written ----------
             # >>> T032C

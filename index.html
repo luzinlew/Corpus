@@ -4945,6 +4945,39 @@ function cnKnowledgeClean(raw,blocks,m,options){
   if(unlinked)issue('source_blocks_without_units:'+unlinked);   // review signal, not proof that these blocks contain missing knowledge
   return {status:issues.length?'incomplete':'processed',completeness:'not_proven',units:units,issues:issues.slice(0,100),rejected:rejected,mergedDuplicates:mergedDuplicates};
 }
+/* A cut-short outline reply (stop_reason max_tokens) is not JSON. Read only the whole objects of its top-level "knowledge" array: the unfinished last one is dropped,
+   nothing is repaired or guessed. {knowledge:[…], closed: the array ended} or null. */
+function cnKnowledgeSalvage(text){
+  if(typeof text!=='string'||text.length>200000)return null;
+  const out=[];let depth=0,str=false,esc=false,key='',tok=-1,last='',inArr=false,start=-1;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(str){if(esc)esc=false;else if(c==='\\')esc=true;else if(c==='"'){str=false;if(depth===1&&!inArr)last=text.slice(tok,i);}continue;}
+    if(c==='"'){str=true;tok=i+1;continue;}
+    if(c==='{'||c==='['){
+      if(inArr&&depth===2){if(c!=='{')return {knowledge:out,closed:false};start=i;}
+      if(c==='['&&depth===1&&key==='knowledge'){inArr=true;depth++;continue;}
+      depth++;continue;
+    }
+    if(c==='}'||c===']'){
+      depth--;
+      if(inArr&&depth===2&&start>=0){try{out.push(JSON.parse(text.slice(start,i+1)));}catch(e){return {knowledge:out,closed:false};}start=-1;}
+      else if(inArr&&depth===1)return {knowledge:out,closed:true};
+      if(depth<0)return null;
+      continue;
+    }
+    if(depth===1&&!inArr){if(c===':')key=last;else if(c===','){key='';last='';}}
+  }
+  return inArr?{knowledge:out,closed:false}:null;
+}
+/* The whole units of a cut-short outline reply go through the same cnKnowledgeClean; the registry stays incomplete and says how many units were kept.
+   null (the old path: knowledge_missing) when the reply is not an invalid_json one or no unit passes validation. */
+function cnKnowledgePartial(e,blocks,m){
+  if(!e||e.code!=='invalid_json')return null;
+  const s=cnKnowledgeSalvage(e.text);if(!s||!s.knowledge.length)return null;
+  const ku=cnKnowledgeClean({knowledge:s.knowledge},blocks,m,{truncated:true});if(!ku.units.length)return null;
+  ku.status='incomplete';ku.issues.push('outline_truncated_partial:'+ku.units.length);return ku;
+}
 function cnKnowledgeVisuals(m,pages,photoCount){
   const out=[],add=(page,pageIndex,photoIndex)=>{
     const loc=photoIndex===undefined?'page:'+page:'photo:'+photoIndex,id='ku'+CN_KNOWLEDGE_VERSION+'_'+cnKnowledgeHash(m.id+'\0visual\0'+loc);
@@ -5119,9 +5152,16 @@ async function cnStepOutline(d,r){
           out=cnOutRequireEmphasis(cnOutClean(raw,j.items),j.items);r.cache.outl.set(j.key,out);res[i].topics=out;r.spent++;
         }catch(e){
           cnUsageAdd(r,e);if(e&&e.courseAI&&e.courseAI.charged||e&&['invalid_json','timeout','rate_limited','empty_completion'].includes(e.code))r.spent++;
-          if(res[i]){res[i].outlineValid=false;res[i].knowledge.status='incomplete';res[i].knowledge.issues.push('outline_shape_invalid');}
+          const part=!res[i]&&cnKnowledgePartial(e,j.blocks,j.m);
+          if(part){   // a cut-short reply with whole units: they go into the registry, the step goes on; the answer is kept, so nothing is asked again
+            const meta=e.courseAI||{};knowledge=part;out=cnOutRequireEmphasis([],j.items);
+            cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:String(e.text||'').length};
+            r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);r.cache.outl.set(j.key,out);
+            res[i]={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens};
+          }
+          else if(res[i]){res[i].outlineValid=false;res[i].knowledge.status='incomplete';res[i].knowledge.issues.push('outline_shape_invalid');}
           else{const input=cnKnowledgeOutlineInput(j.m,j),meta=e&&e.courseAI||{};knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:e&&e.code||'failed',truncated:e&&e.code==='invalid_json'});cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(input).length,outputChars:String(e&&e.text||'').length};r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);res[i]={topics:null,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens,outlineValid:false};}
-          failed=failed||e;return;
+          if(!part){failed=failed||e;return;}
         }
       }
       if(!res[i])res[i]={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars||JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:cacheMeta.outputChars||0,model:cacheMeta.model||'',inputTokens:cacheMeta.inputTokens||0,outputTokens:cacheMeta.outputTokens||0};done++;
@@ -5599,6 +5639,7 @@ function cnKnowledgePlanInner(d,doc){
   (state.materials||[]).forEach(m=>{
     if((m.issues||[]).includes('unit_content_limit'))h+='<div class="cnwarn sm">'+esc(m.name)+': '+T3('Часть единиц не принята: их содержимое длиннее допустимого для плана (формула — выражение до 400 знаков, до 20 переменных, символ до 40). В реестре их нет.','Some units were not accepted: their content is longer than a plan allows (formula: expression up to 400 characters, up to 20 variables, symbol up to 40). They are not in the registry.','Osa üksusi ei võetud vastu: nende sisu on pikem, kui plaan lubab (valem: avaldis kuni 400 märki, kuni 20 muutujat, sümbol kuni 40). Registris neid pole.')+'</div>';
     if((m.issues||[]).some(x=>x==='unit_limit'||x==='model_limit_reported'))h+='<div class="cnwarn sm">'+esc(m.name)+': '+T3('Достигнут лимит поиска знаний; часть единиц могла не попасть в реестр.','The knowledge-discovery limit was reached; some units may be missing from the registry.','Teadmiste tuvastamise piirang sai täis; osa üksusi võib registrist puududa.')+'</div>';
+    if((m.issues||[]).some(x=>x.startsWith('outline_truncated_partial:')))h+='<div class="cnwarn sm" data-k="truncated-partial">'+esc(m.name)+': '+T3('Ответ ИИ оборвался: принята только часть найденного, остальное не сохранено. Проверьте материал или составьте план заново.','The AI answer was cut short: only part of what was found was accepted, the rest was not saved. Check the material or make the plan again.','TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.')+'</div>';
     if((m.issues||[]).includes('duplicate_not_merged_source_limit'))h+='<div class="cnwarn sm">'+esc(m.name)+': '+T3('Одна и та же единица найдена более чем в 8 местах: источники разделены между несколькими единицами, ни один источник не потерян.','The same unit was found in more than 8 places: its sources are split between several units, no source is lost.','Sama üksus leiti rohkem kui 8 kohast: allikad on jaotatud mitme üksuse vahel, ühtegi allikat pole kaotatud.')+'</div>';
     if((m.issues||[]).some(x=>x==='empty_knowledge_for_text'||x.startsWith('source_blocks_without_units:')))h+='<div class="cnwarn sm">'+esc(m.name)+': '+T3('Обнаружение знаний требует проверки: реестр пуст или у части текстовых блоков нет связи с единицами. Это сигнал возможного пропуска, а не доказательство неполноты.','Knowledge discovery needs review: the registry is empty or some text blocks have no unit link. This signals a possible omission, not proven incompleteness.','Teadmiste tuvastamine vajab kontrolli: register on tühi või osal tekstiplokkidest puudub seos üksustega. See viitab võimalikule puudujäägile, mitte tõestatud ebatäielikkusele.')+'</div>';
   });

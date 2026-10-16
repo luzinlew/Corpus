@@ -2888,7 +2888,7 @@ async def main():
             await pg.click('[data-cn=rretry]')
             await pg.wait_for_selector('.cnph', timeout=120000)
             check('plan: «Proovi uuesti» goes on from where it stopped: the first outline answer is not asked again (outline, plan), then step 3', tasks_of(ai_p[n3:]) == ['outline', 'plan'], json.dumps(tasks_of(ai_p[n3:])))
-            for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short')):
+            for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short before any whole knowledge unit')):
                 urllib.request.urlopen(API + '/__fn?' + mode)
                 await replan_go()
                 await pg.wait_for_selector('.cnerr', timeout=120000)
@@ -4318,6 +4318,74 @@ async def main():
             check('release: no script errors or failed requests in the browser', not errs_r, '; '.join(errs_r)[:500])
             await ctx_r.close()
             # <<< T032R
+
+            # >>> T034
+            # ---------- T-034: an outline reply cut short at max_tokens keeps the units that were whole before the cut; no retry, no extra charge ----------
+            knowledge_files(tmp / 'kn34')
+            KN34 = tmp / 'kn34'
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline')   # both outline replies are cut inside their knowledge list: Core keeps 4 of 8 units, Extra 3 of 6
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            ctx_t, pt, errs_t = await open_ctx(legacy=False)
+            await pt.goto(SITE + '?create=1&i=' + INVITE)
+            await pt.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pt.fill('input[name=email]', 'truncated@test.ee')
+            await pt.fill('input[name=password]', 'kolju2026')
+            await pt.click('.cw-go')
+            await app_ready(pt)
+            await ui_lang(pt, 'et')
+            ai_t = watch_ai(pt)
+            uid_t = await pt.evaluate('CORPUS_WEB.uid')
+            mine_t = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_t]
+            used_t = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_t, 0)
+            await pt.evaluate("go({name:'courses'})")
+            await pt.wait_for_selector('.cnnew')
+            await pt.click('.cnnew')
+            await pt.wait_for_selector('.cnw')
+            did_t = await pt.evaluate('view.did')
+            await pt.fill('#cnName', 'Katkenud')
+            await pt.press('#cnName', 'Tab')
+            await pt.set_input_files('#cnFile', [str(KN34 / 'Heat notes.pdf'), str(KN34 / 'Extra reading.pdf')])
+            await pt.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            await pt.click('.cnmain')
+            await pt.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_t(s, 'cplan')) and len([r for r in mine_t(s, 'ctext') if '.ku1.' in r['id']]) == 2 and any(r['data'].get('planAt') for r in mine_t(s, 'cdraft')))
+            check('truncated outline: the plan is made from what was kept: outline ×2 (each cut short) and the plan once, no retry; 2 + 5 = 7 units paid',
+                  [c.get('task') for c in ai_t] == ['outline', 'outline', 'plan'] and used_t() == 7, json.dumps([[c.get('task') for c in ai_t], used_t()]))
+            mats_t = {m['name']: m['id'] for m in mine_t(st, 'cdraft')[0]['data']['mats']}
+            kus_t = {v['materialId']: v for v in (r['data'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'])}
+            ku_t = {n: (len([u for u in kus_t[i]['units'] if u['extractionStatus'] == 'extracted']), kus_t[i]['outlineStatus'], sorted(x for x in kus_t[i]['issues'] if x.startswith(('outline_', 'knowledge_missing')))) for n, i in mats_t.items()}
+            check('truncated outline: registry Core 4 units, Extra 3 (the whole ones before the cut), both incomplete with outline_truncated + outline_truncated_partial:N, no knowledge_missing',
+                  ku_t == {'Heat notes.pdf': (4, 'incomplete', ['outline_truncated', 'outline_truncated_partial:4']), 'Extra reading.pdf': (3, 'incomplete', ['outline_truncated', 'outline_truncated_partial:3'])}, json.dumps(ku_t))
+            cp_t = mine_t(st, 'cplan')[0]['data']
+            ids_t = sorted(u['id'] for v in kus_t.values() for u in v['units'] if u['extractionStatus'] == 'extracted')
+            check('truncated outline: the knowledge plan (v2) covers exactly the 7 kept units: expected 7 = planned 7, missing/duplicates/unknown 0, 3 lessons',
+                  cp_t.get('planVersion') == 2 and cp_t['coverage']['expected'] == 7 == cp_t['coverage']['planned'] and cp_t['coverage']['missing'] == cp_t['coverage']['duplicates'] == cp_t['coverage']['unknown'] == 0
+                  and sorted(i for p_ in cp_t['parts'] for l in p_['lessons'] for i in l['knowledgeIds']) == ids_t and sum(len(p_['lessons']) for p_ in cp_t['parts']) == 3, json.dumps(cp_t['coverage']))
+            warn_t = {}
+            for lg_ in ('ru', 'en', 'et'):
+                await ui_lang(pt, lg_)
+                await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:3})")
+                await pt.wait_for_selector('.cnbtns [data-cn=build] b')
+                warn_t[lg_] = await pt.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            msg_t = {'ru': 'Ответ ИИ оборвался: принята только часть найденного, остальное не сохранено. Проверьте материал или составьте план заново.',
+                     'en': 'The AI answer was cut short: only part of what was found was accepted, the rest was not saved. Check the material or make the plan again.',
+                     'et': 'TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.'}
+            check('truncated outline: the plan screen warns about both materials in ru / en / et («Ответ ИИ оборвался…», «The AI answer was cut short…», «TI vastus katkes…»)',
+                  all(len(warn_t[k]) == 2 and all(w.endswith(': ' + msg_t[k]) for w in warn_t[k]) and any(w.startswith('Heat notes') for w in warn_t[k]) for k in msg_t), json.dumps(warn_t, ensure_ascii=False))
+            await ui_lang(pt, 'et')
+            await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:3})")
+            await pt.wait_for_selector('.cnbtns [data-cn=build] b')
+            n_t = len(ai_t)
+            await pt.click('.cnbtns [data-cn=build]')
+            await pt.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            st = await state_when(lambda s: len(mine_t(s, 'plates')) == 3 and all(not r['data']['bld'].get('run') for r in mine_t(s, 'cplan')))
+            built_t = sorted(i for r in mine_t(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('truncated outline: the lessons (v2) are built from the kept units: 3 lesson requests and nothing else (no outline again), 3 plates with the 7 units, 3 × 2 = 6 more units paid',
+                  [c.get('task') for c in ai_t[n_t:]] == ['lesson'] * 3 and built_t == ids_t and used_t() == 7 + 6, json.dumps([[c.get('task') for c in ai_t[n_t:]], len(built_t), used_t()]))
+            check('truncated outline: no script errors or failed requests in the browser', not errs_t, '; '.join(errs_t)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx_t.close()
+            # <<< T034
 
             # ---------- T-032: a draft and a plan in the old format (v1: parts / lessons / terms, no registry, as the app of cb61180 wrote them) open and build in the real app, nothing of v2 is written ----------
             # >>> T032C

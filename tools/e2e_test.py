@@ -350,14 +350,41 @@ def knowledge_files(d):
         pdf_file(d / name, [[(True, 24, 50, 780, h), (False, 12, 50, 740, a), (False, 12, 50, 722, b)] for h, a, b in pages])
 
 
+def ku_total(docs):
+    """The registry documents of one material (one per outline request since T-039 may be several) as one: (extracted units, 'processed' only if every document is, the issues with the outline_truncated_partial:N codes added up)."""
+    iss, tot = set(), 0
+    for dc in docs:
+        for x in dc['issues']:
+            if x.startswith('outline_truncated_partial:'):
+                tot += int(x.split(':')[1])
+            else:
+                iss.add(x)
+    if tot:
+        iss.add('outline_truncated_partial:%d' % tot)
+    return len([u for dc in docs for u in dc['units'] if u['extractionStatus'] == 'extracted']), ('processed' if all(dc['outlineStatus'] == 'processed' for dc in docs) else 'incomplete'), iss
+
+
+def chunk_files(d):
+    """Materials for T-039: «Long pages» — 4 pages of ~1300 characters (a bold heading and 12 long lines: expected reply 2000+ tokens, so one outline request a page) and the «Extra reading» of
+    knowledge_files (3 short pages: one request); «Huge chunks» — 81 such long pages (81 requests: over the limit of 80 for one material)."""
+    d = pathlib.Path(d); d.mkdir(exist_ok=True)
+    def long_page(n):
+        return [(True, 24, 50, 800, 'Topic %d: heat in system %d' % (n, n))] + [(False, 12, 50, 770 - 14 * k, 'Detail %d.%d: the transfer of energy in system number %d is described here at some length for line %d.' % (n, k, n, k)) for k in range(1, 13)]
+    pdf_file(d / 'Long pages.pdf', [long_page(n) for n in range(1, 5)])
+    pdf_file(d / 'Huge chunks.pdf', [long_page(n) for n in range(1, 82)])
+    knowledge_files(d / 'x')
+    (d / 'x' / 'Extra reading.pdf').replace(d / 'Extra reading.pdf')
+    (d / 'x' / 'Heat notes.pdf').replace(d / 'Heat notes.pdf')
+
+
 def big_knowledge_files(d, pages=100):
-    """Materials for the plan by groups (T-037): a «Core» PDF of `pages` pages and the small «Extra» PDF of knowledge_files. A page is a bold heading (a term) and one long paragraph (a statement, about 1600
-    characters, so that an outline request takes about 20 pages and stays within the 50 units a request may return): 2 units a page, 200 + 6 units in all, more than the 146 units a per-unit plan request holds."""
+    """Materials for the plan by groups (T-037): a «Core» PDF of `pages` pages and the small «Extra» PDF of knowledge_files. A page is a bold heading (a term) and one paragraph (a statement, about 800
+    characters, so that by the density rule of T-039 two pages make one outline request: 50 requests, 4 units each): 2 units a page, 200 + 6 units in all, more than the 146 units a per-unit plan request holds."""
     d = pathlib.Path(d); d.mkdir(exist_ok=True)
     core = []
     for n in range(1, pages + 1):
         items = [(True, 24, 50, 800, 'Topic %d: heat in system %d' % (n, n)), (False, 12, 50, 770, 'Statement %d: heat flows in system number %d from the hotter body to the colder body.' % (n, n))]
-        items += [(False, 10, 50, 756 - 13 * k, 'Detail %d.%d: the transfer of energy in system %d is described here at some length for the line %d.' % (n, k, n, k)) for k in range(1, 18)]
+        items += [(False, 10, 50, 756 - 13 * k, 'Detail %d.%d: the transfer of energy in system %d is described here at some length for the line %d.' % (n, k, n, k)) for k in range(1, 8)]
         core.append(items)
     pdf_file(d / 'Heat notes.pdf', core)
     knowledge_files(d / 'x')
@@ -4559,16 +4586,16 @@ async def main():
             await pt.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
             await pt.click('.cnmain')
             await pt.wait_for_selector('.cnph', timeout=120000)
-            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_t(s, 'cplan')) and len([r for r in mine_t(s, 'ctext') if '.ku1.' in r['id']]) == 2 and any(r['data'].get('planAt') for r in mine_t(s, 'cdraft')))
-            check('truncated outline: the plan is made from what was kept: outline ×2 (each cut short) and the plan once, no retry; 2 + 5 = 7 units paid',
-                  [c.get('task') for c in ai_t] == ['outline', 'outline', 'plan'] and used_t() == 7, json.dumps([[c.get('task') for c in ai_t], used_t()]))
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_t(s, 'cplan')) and len([r for r in mine_t(s, 'ctext') if '.ku1.' in r['id']]) == 4 and any(r['data'].get('planAt') for r in mine_t(s, 'cdraft')))
+            check('truncated outline: every outline is cut short, so each chunk is asked again once in halves (T-039: 1 + 2 requests for Core, 1 + 2 for Extra, the halves are cut too and are not divided again) and the plan once; 6 + 5 = 11 units paid',
+                  [c.get('task') for c in ai_t] == ['outline'] * 6 + ['plan'] and used_t() == 11, json.dumps([[c.get('task') for c in ai_t], used_t()]))
             mats_t = {m['name']: m['id'] for m in mine_t(st, 'cdraft')[0]['data']['mats']}
-            kus_t = {v['materialId']: v for v in (r['data'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'])}
-            ku_t = {n: (len([u for u in kus_t[i]['units'] if u['extractionStatus'] == 'extracted']), kus_t[i]['outlineStatus'], sorted(x for x in kus_t[i]['issues'] if x.startswith(('outline_', 'knowledge_missing')))) for n, i in mats_t.items()}
+            kdocs_t = lambda i: [r['data'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == i]
+            ku_t = {n: (ku_total(kdocs_t(i))[0], ku_total(kdocs_t(i))[1], sorted(x for x in ku_total(kdocs_t(i))[2] if x.startswith(('outline_', 'knowledge_missing')))) for n, i in mats_t.items()}
             check('truncated outline: registry Core 4 units, Extra 3 (the whole ones before the cut), both incomplete with outline_truncated + outline_truncated_partial:N, no knowledge_missing',
                   ku_t == {'Heat notes.pdf': (4, 'incomplete', ['outline_truncated', 'outline_truncated_partial:4']), 'Extra reading.pdf': (3, 'incomplete', ['outline_truncated', 'outline_truncated_partial:3'])}, json.dumps(ku_t))
             cp_t = mine_t(st, 'cplan')[0]['data']
-            ids_t = sorted(u['id'] for v in kus_t.values() for u in v['units'] if u['extractionStatus'] == 'extracted')
+            ids_t = sorted(u['id'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'] for u in r['data']['units'] if u['extractionStatus'] == 'extracted')
             check('truncated outline: the knowledge plan (v2) covers exactly the 7 kept units: expected 7 = planned 7, missing/duplicates/unknown 0, 3 lessons',
                   cp_t.get('planVersion') == 2 and cp_t['coverage']['expected'] == 7 == cp_t['coverage']['planned'] and cp_t['coverage']['missing'] == cp_t['coverage']['duplicates'] == cp_t['coverage']['unknown'] == 0
                   and sorted(i for p_ in cp_t['parts'] for l in p_['lessons'] for i in l['knowledgeIds']) == ids_t and sum(len(p_['lessons']) for p_ in cp_t['parts']) == 3, json.dumps(cp_t['coverage']))
@@ -4609,8 +4636,8 @@ async def main():
             check('truncated outline: the course build screen shows the short mark «part of the findings was not saved» in et / ru / en, once, next to the test-feature note',
                   all(note_t[k] == [note_msg[k]] for k in note_msg), json.dumps(note_t, ensure_ascii=False))
             built_t = sorted(i for r in mine_t(st, 'plates') for i in r['data']['knowledgeIds'])
-            check('truncated outline: the lessons (v2) are built from the kept units: 3 lesson requests and nothing else (no outline again), 3 plates with the 7 units, 3 × 2 = 6 more units paid',
-                  [c.get('task') for c in ai_t[n_t:]] == ['lesson'] * 3 and built_t == ids_t and used_t() == 7 + 6, json.dumps([[c.get('task') for c in ai_t[n_t:]], len(built_t), used_t()]))
+            check('truncated outline: the lessons (v2) are built from the kept units: 3 lesson requests and nothing else (no outline again), 3 plates with the 7 units, 3 × 2 = 6 more units paid (11 + 6)',
+                  [c.get('task') for c in ai_t[n_t:]] == ['lesson'] * 3 and built_t == ids_t and used_t() == 11 + 6, json.dumps([[c.get('task') for c in ai_t[n_t:]], len(built_t), used_t()]))
             check('truncated outline: no script errors or failed requests in the browser', not errs_t, '; '.join(errs_t)[:500])
             urllib.request.urlopen(API + '/__fn')
             await ctx_t.close()
@@ -4712,6 +4739,111 @@ async def main():
             urllib.request.urlopen(API + '/__fn')
             await ctx_g.close()
             # <<< T037
+
+            # >>> T039
+            # ---------- T-039: outline requests are cut by the density of the text; a chunk cut short at the token limit is asked again in halves (at most 3 repeat requests a material); a material of more than 80 chunks is refused ----------
+            chunk_files(tmp / 'kn39')
+            KN39 = tmp / 'kn39'
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+
+            async def t39_open(email):
+                ctx_, p_, errs_ = await open_ctx(legacy=False)
+                await p_.goto(SITE + '?create=1&i=' + INVITE)
+                await p_.wait_for_selector('.cw-auth .cw-tabs .on')
+                await p_.fill('input[name=email]', email)
+                await p_.fill('input[name=password]', 'kolju2026')
+                await p_.click('.cw-go')
+                await app_ready(p_)
+                await ui_lang(p_, 'et')
+                uid_ = await p_.evaluate('CORPUS_WEB.uid')
+                return ctx_, p_, errs_, watch_ai(p_), uid_
+
+            async def t39_draft(p_, name, files):
+                await p_.evaluate("go({name:'courses'})")
+                await p_.wait_for_selector('.cnnew')
+                await p_.click('.cnnew')
+                await p_.wait_for_selector('.cnw')
+                did_ = await p_.evaluate('view.did')
+                await p_.fill('#cnName', name)
+                await p_.press('#cnName', 'Tab')
+                await p_.set_input_files('#cnFile', [str(KN39 / f) for f in files])
+                await p_.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=" + str(len(files)) + "&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=120000)
+                return did_
+
+            used39 = lambda uid_: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_, 0)
+            # --- A: the cut chunks are recovered by their halves ---
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline&truncmin=3')   # an outline request of 3 pages or more is cut short, the halves (≤ 2 pages) are answered whole
+            ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunks@test.ee')
+            mine_c = lambda s_, coll: [r for r in s_['docs'] if r['coll'] == coll and r['owner'] == uid_c]
+            did_c = await t39_draft(pc, 'Poolitatud', ['Heat notes.pdf', 'Extra reading.pdf'])
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: before the start the estimate is the number of outline chunks + 5 for the plan: two short PDFs = 1 + 1 + 5 → «≈ 7 TI päringut»', 'Koosta plaan' in btn_c and '≈ 7 TI päringut' in btn_c, btn_c)
+            await pc.click('.cnmain')
+            await pc.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s_: any(r['coll'] == 'cplan' for r in mine_c(s_, 'cplan')) and len([r for r in mine_c(s_, 'ctext') if '.ku1.' in r['id']]) == 4 and any(r['data'].get('planAt') for r in mine_c(s_, 'cdraft')))
+            tasks_c = [c.get('task') for c in ai_c]
+            sizes_c = sorted(len(c['input']['pages']) for c in ai_c if c.get('task') == 'outline')
+            check('chunks: both chunks (4 and 3 pages) are cut short → each is asked again in two halves: 3 + 3 = 6 outline requests (pages 1 + 2 + 2 + 2 + 3 + 4) and the plan once; 6 + 5 = 11 units paid',
+                  tasks_c == ['outline'] * 6 + ['plan'] and sizes_c == [1, 2, 2, 2, 3, 4] and used39(uid_c) == 11, json.dumps([tasks_c, sizes_c, used39(uid_c)]))
+            mats_c = {m['name']: m['id'] for m in mine_c(st, 'cdraft')[0]['data']['mats']}
+            kus_c = {i: [r['data'] for r in mine_c(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == i] for i in mats_c.values()}
+            ku_c = {n_: (ku_total(kus_c[i])[0], ku_total(kus_c[i])[1], sorted(x for x in ku_total(kus_c[i])[2] if x.startswith(('outline_', 'knowledge_missing', 'duplicate')))) for n_, i in mats_c.items()}
+            check('chunks: the units of the halves replace the cut chunk: Core 8 units, Extra 6, no unit twice, both processed, no outline_truncated / knowledge_missing / duplicate mark',
+                  ku_c == {'Heat notes.pdf': (8, 'processed', []), 'Extra reading.pdf': (6, 'processed', [])} and len({u['id'] for v in kus_c.values() for dc in v for u in dc['units']}) == sum(len(dc['units']) for v in kus_c.values() for dc in v), json.dumps(ku_c))
+            cp_c = mine_c(st, 'cplan')[0]['data']
+            check('chunks: the plan covers exactly the 14 registry units (expected 14 = planned 14, nothing missing or twice)', cp_c['coverage']['expected'] == 14 == cp_c['coverage']['planned'] and cp_c['coverage']['missing'] == cp_c['coverage']['duplicates'] == cp_c['coverage']['unknown'] == 0, json.dumps(cp_c['coverage']))
+            await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:3})")
+            await pc.wait_for_selector('.cnbtns [data-cn=build] b')
+            check('chunks: the plan screen shows NO «answer cut short» warning when every cut chunk was recovered', await pc.evaluate("document.querySelectorAll('.cnwarn[data-k=truncated-partial]').length") == 0)
+            check('chunks: no script errors or failed requests in the browser (recovery)', not errs_c, '; '.join(errs_c)[:500])
+            await ctx_c.close()
+
+            # --- B: every outline is cut short: the cap of repeat requests, the warning stays ---
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline')
+            ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunkcap@test.ee')
+            mine_c = lambda s_, coll: [r for r in s_['docs'] if r['coll'] == coll and r['owner'] == uid_c]
+            did_c = await t39_draft(pc, 'Ülempiir', ['Long pages.pdf', 'Extra reading.pdf'])
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: the estimate follows the chunks: Long pages (4 chunks) + Extra (1) + 5 → «≈ 10 TI päringut» (a text page of ~1300 characters is one request)', '≈ 10 TI päringut' in btn_c, btn_c)
+            await pc.click('.cnmain')
+            await pc.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s_: any(r['coll'] == 'cplan' for r in mine_c(s_, 'cplan')) and len([r for r in mine_c(s_, 'ctext') if '.ku1.' in r['id']]) == 7 and any(r['data'].get('planAt') for r in mine_c(s_, 'cdraft')))
+            outs_c = [c for c in ai_c if c.get('task') == 'outline']
+            per_c = {n_: len([c for c in outs_c if c['input']['name'] == n_]) for n_ in ('Long pages.pdf', 'Extra reading.pdf')}
+            check('chunks: the cap — Long pages: 4 chunks + only 2 repeat requests (one pair; the other cut chunks are kept as they are: a second pair would pass the cap of 3), Extra: 1 + 2; 9 outline requests, the plan once; 9 + 5 = 14 units paid',
+                  per_c == {'Long pages.pdf': 6, 'Extra reading.pdf': 3} and [c.get('task') for c in ai_c] == ['outline'] * 9 + ['plan'] and used39(uid_c) == 14, json.dumps([per_c, [c.get('task') for c in ai_c], used39(uid_c)]))
+            check('chunks: the repeat requests of a material never exceed the cap of 3 (requests beyond one per chunk: 2 and 2)', per_c['Long pages.pdf'] - 4 <= 3 and per_c['Extra reading.pdf'] - 1 <= 3)
+            mats_c = {m['name']: m['id'] for m in mine_c(st, 'cdraft')[0]['data']['mats']}
+            kus_c = {i: [r['data'] for r in mine_c(st, 'ctext') if '.ku1.' in r['id'] and r['data']['materialId'] == i] for i in mats_c.values()}
+            ku_c = {n_: (ku_total(kus_c[i])[1], 'outline_truncated' in ku_total(kus_c[i])[2], any(x.startswith('outline_truncated_partial:') for x in ku_total(kus_c[i])[2]), 'knowledge_missing' in ku_total(kus_c[i])[2]) for n_, i in mats_c.items()}
+            check('chunks: the cap is reached: both registries stay incomplete with outline_truncated + outline_truncated_partial:N (T-034), no knowledge_missing', ku_c == {'Long pages.pdf': ('incomplete', True, True, False), 'Extra reading.pdf': ('incomplete', True, True, False)}, json.dumps(ku_c))
+            await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:3})")
+            await pc.wait_for_selector('.cnbtns [data-cn=build] b')
+            warn_c = await pc.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            check('chunks: the plan screen warns about both materials (the warning stays when the cap is reached)', len(warn_c) == 2 and all(w.endswith('TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.') for w in warn_c), json.dumps(warn_c, ensure_ascii=False))
+            check('chunks: no script errors or failed requests in the browser (cap)', not errs_c, '; '.join(errs_c)[:500])
+            await ctx_c.close()
+
+            # --- C: a material of more than 80 chunks is refused before any request ---
+            urllib.request.urlopen(API + '/__fn')
+            ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunkbig@test.ee')
+            did_c = await t39_draft(pc, 'Liiga suur', ['Huge chunks.pdf'])
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: the estimate of a material of 81 chunks is «≈ 86 TI päringut» (81 + 5)', '≈ 86 TI päringut' in btn_c, btn_c)
+            await pc.click('.cnmain')
+            await pc.wait_for_selector('.cnerr', timeout=120000)
+            err_c = {}
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pc, lg_)
+                await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:2})")
+                await pc.wait_for_selector('.cnerr')
+                err_c[lg_] = await pc.inner_text('.cnerr')
+            check('chunks: more than 80 chunks → an explicit error in et / ru / en with the numbers («81», «80»), no request is sent, nothing is charged, no «Retry» button',
+                  len(ai_c) == 0 and used39(uid_c) == 0 and 'liiga suur' in err_c['et'] and 'Huge chunks' in err_c['et'] and '81' in err_c['et'] and '80' in err_c['et'] and 'слишком большой' in err_c['ru'] and 'too large' in err_c['en'] and 'Ничего не списано' in err_c['ru']
+                  and await pc.query_selector('[data-cn=rretry]') is None, json.dumps([len(ai_c), used39(uid_c), err_c], ensure_ascii=False))
+            check('chunks: no script errors or failed requests in the browser (too large)', not errs_c, '; '.join(errs_c)[:500])
+            await ctx_c.close()
+            # <<< T039
 
             # ---------- T-032: a draft and a plan in the old format (v1: parts / lessons / terms, no registry, as the app of cb61180 wrote them) open and build in the real app, nothing of v2 is written ----------
             # >>> T032C

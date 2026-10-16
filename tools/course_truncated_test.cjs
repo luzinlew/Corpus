@@ -107,7 +107,8 @@ async function step(answer) {
   Object.assign(context, { cnTextMats: d => d.mats.filter(m => ["base", "extra"].includes(m.role)), cnPagesOf: async () => clone(fixture.pages),
     cnWrite: async (coll, id, data) => written.set(coll + "/" + id, clone(data)),
     window: { CORPUS_WEB: { courseAI: { outline: async (_lang, input) => { calls.push(input.name); return answer(); } } } }, S: { db: true } });
-  const r = { dt: {}, cache: { outl: new Map() }, ac: { signal: {} }, cancel: false, spent: 0 };
+  // T-039: a cut-short chunk is asked again in halves; here the repeat cap of the material is used up (3 of 3), so the T-034 path (whole units kept, no repeat) is what is checked
+  const r = { dt: {}, cache: { outl: new Map(), retries: vm.runInContext("(e => new Map(e))", context)([[M.id, 3]]) }, ac: { signal: {} }, cancel: false, spent: 0 };
   let thrown = null; try { await stepOutline(draft, r); } catch (e) { thrown = e; }
   const docs = [...written.values()].filter(x => x.kind === "course-knowledge");
   return { r, calls, thrown, docs, draft };

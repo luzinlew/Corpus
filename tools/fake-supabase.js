@@ -32,8 +32,9 @@ let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429.
    The same switches work for the course outline, plan and lesson requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
-   trunc — cut short with stop_reason max_tokens (trunc=outline: only the outline, inside its knowledge list, the whole units of the first half kept); fail_after — 429 from the model service */
+   trunc — cut short with stop_reason max_tokens (trunc=outline: only the outline, inside its knowledge list, the whole units of the first half kept; with truncmin=N only a request of N pages or more); fail_after — 429 from the model service */
 let FN_DROP = false, FN_TRUNC = false, FN_HANG = '', FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
+let FN_TRUNC_MIN = 0;   // truncmin=N (with trunc=outline): only an outline request of N pages or more is cut short; smaller ones (the halves of a cut chunk) are answered whole
 let FN_V2L = 0;   // v2lessons=N: the knowledge plan has exactly N lessons (the units spread evenly, in source order); 0: FAKE_V2_PER_LESSON units (default 3) in a lesson
 let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
 let FN_TAKEERR = '';       // takeerr=1: corpus_ai_take fails (as with a missing private.ai_global: 42P01) for p_units >= 1; takeerr=all: for p_units = 0 too (the status), also in corpus_ai_take_course
@@ -162,9 +163,9 @@ http.createServer(async (req, res) => {
     FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan', 'lesson', 'outline'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = ['plan', 'lesson'].includes(u.searchParams.get('hang')) ? u.searchParams.get('hang') : ''; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
     FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
-    FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0; FN_V2L = +u.searchParams.get('v2lessons') || 0;
+    FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0; FN_V2L = +u.searchParams.get('v2lessons') || 0; FN_TRUNC_MIN = +u.searchParams.get('truncmin') || 0;
     FN_TAKEERR = ['1', 'all'].includes(u.searchParams.get('takeerr')) ? u.searchParams.get('takeerr') : '';
-    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, hang: FN_HANG, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR, v2lessons: FN_V2L }); return;
+    send(res, 200, { fn: FN_URL, delay: FN_DELAY, drop: FN_DROP, trunc: FN_TRUNC, hang: FN_HANG, case: FN_CASE, fail_after: FN_FAIL_AFTER, nocourse: FN_NOCOURSE, statusdelay: FN_STATUS_DELAY, takeerr: FN_TAKEERR, v2lessons: FN_V2L, truncmin: FN_TRUNC_MIN }); return;
   }   // off=1: not deployed; delay=ms: the function answers POSTs that much later (a test sees the wait screen); statusdelay=ms: the status (p_units=0) comes that much later; takeerr=1|all: the limit RPC fails
 
   /* ---------- auth ---------- */
@@ -434,7 +435,7 @@ http.createServer(async (req, res) => {
           knowledge, knowledge_limited: false,
         };
         if (FN_DROP) delete ans.topics;
-        if (FN_TRUNC === 'outline' && knowledge.length) {
+        if (FN_TRUNC === 'outline' && knowledge.length && (inp.pages || []).length >= FN_TRUNC_MIN) {
           /* trunc=outline: the knowledge comes first (as the v3 prompt asks) and the reply is cut inside the unit after the first half, stop_reason max_tokens:
              the whole units before the cut are ceil(n/2) */
           const keep = Math.ceil(knowledge.length / 2), head = JSON.stringify({ knowledge: knowledge.slice(0, keep) }).length - 2 + 1;

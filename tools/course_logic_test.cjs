@@ -50,6 +50,7 @@ const context = vm.createContext({
   S: { db: true }, cnDirty: () => {}, cnSave: async () => {}, cnT: () => ({}), cnDelIds: () => {}, cnWrite: async () => {},
 });
 const code = [
+  between("const CN_OUT=", "\n/* сокращения в начале названия"),
   between("const cnStrs=", "\n/* a draft from the cloud"),
   between("function cnAuditClean(", "\n/* the role «exam»"),
   between("function cnExtractDiag(", "\nasync function cnPageText"),

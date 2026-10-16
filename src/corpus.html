@@ -4303,7 +4303,7 @@ function cnDraftOk(o,id){
     if(['reading','ready','empty','error'].indexOf(m.status)<0)m.status='error';
     m.lang=cnLangOk(m.lang);if(!m.lang)delete m.lang;m.chunks=cnStrs(m.chunks);m.kdocs=cnKnowledgeRefsClean(m.kdocs,id,m.id);if(!m.kdocs.length)delete m.kdocs;if(typeof m.qdoc!=='string')delete m.qdoc;
     if(['processed','incomplete','storage_error'].indexOf(m.kstatus)<0)delete m.kstatus;
-    ['pages','photos','size','bytes','qn','gen'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);m.audit=cnAuditClean(m.audit);if(!m.audit)delete m.audit;
+    ['pages','photos','size','bytes','qn','gen','olN'].forEach(k=>{if(m[k]!==undefined)m[k]=Math.max(0,+m[k]||0);});m.sigs=cnStrs(m.sigs);if(m.lab!==undefined)m.lab=cnStrs(m.lab).slice(0,CN_LIM.photos);m.audit=cnAuditClean(m.audit);if(!m.audit)delete m.audit;
     return m;});
   return {id:id,name:String(o.name||'').slice(0,80),createdAt:+o.createdAt||0,updatedAt:+o.updatedAt||0,planAt:Math.max(0,+o.planAt||0),bldAt:Math.max(0,+o.bldAt||0),courseId:typeof o.courseId==='string'&&o.courseId.length<80?o.courseId:'',lang:cnLangOk(o.lang),gone:cnStrs(o.gone),mats:mats};
 }
@@ -4473,7 +4473,7 @@ function cnQuestions(lines){
 }
 /* the writer of the text of one material: pages go into chunks of ≤200 KB, each is a document ctext/<draft>.<material>.<n>; a refusal of the storage (quota) stops the reading */
 function cnSink(d,m){
-  const enc=new TextEncoder(),ids=[],audit={pages:0,empty:[],short:[],truncated:[],visual:[],unknown:[]};let cur=[],bytes=0,ci=0,chars=0,tb=0,sample='',lines=[];
+  const enc=new TextEncoder(),ids=[],audit={pages:0,empty:[],short:[],truncated:[],visual:[],unknown:[]};let cur=[],bytes=0,ci=0,chars=0,tb=0,sample='',lines=[];const es=[];   // es: ожидаемый выход каждой страницы (T-039) — по ним в done() считается число кусков outline
   const pre=m.gen?'g'+m.gen+'_':'',flush=async()=>{if(!cur.length)return;const id=d.id+'.'+m.id+'.'+pre+(ci++),data={pages:cur};cur=[];bytes=0;if(S.db)await cnWrite('ctext',id,data);ids.push(id);m.chunks=ids.slice();};
   return {
     async add(n,text,em,meta){
@@ -4481,19 +4481,20 @@ function cnSink(d,m){
       if(q.empty)audit.empty.push(n);if(q.short)audit.short.push(n);if(q.extractionTruncated)audit.truncated.push(n);if(q.visual===true)audit.visual.push(n);if(q.extractionUnknown)audit.unknown.push(n);
       if(cur.length&&bytes+b>CN_LIM.chunk)await flush();
       cur.push(pg);bytes+=b;chars+=text.length;tb+=enc.encode(text).length;m.bytes=tb;
+      if(text.trim()||(pg.em||[]).length)es.push({e:cnOutlineEst({text:text.slice(0,6000)}).e,len:Math.min(text.length,6000)+80});
       if(sample.length<8000)sample+=text+'\n';
       text.split('\n').forEach(l=>lines.push(l));
       if(cnBytes(d)>CN_LIM.draftBytes||cnAllBytes()>CN_LIM.allBytes)throw {code:'limit'};
     },
     async done(){
-      await flush();m.chars=chars;m.audit=audit;const qs=cnQuestions(lines);
+      await flush();m.chars=chars;m.olN=cnOutlineSplitIdx(es).length;m.audit=audit;const qs=cnQuestions(lines);
       if(qs.length){const id=d.id+'.'+m.id+'.'+pre+'q';if(S.db)await cnWrite('ctext',id,{qs:qs});ids.push(id);m.qdoc=id;m.qn=qs.length;}else{delete m.qn;delete m.qdoc;}
       m.chunks=ids.filter(x=>x!==m.qdoc);
       const letters=(sample.match(/\p{L}/gu)||[]).length;   // too few letters: the language is not told
       m.lang=letters>=40&&letters/sample.length>=0.4?cnLangOk(crGuessLang(sample.slice(0,8000))):'';
       if(!m.lang)delete m.lang;
     },
-    drop(){cnDelIds(ids);ids.length=0;cur=[];m.chunks=[];delete m.qdoc;delete m.qn;delete m.audit;m.bytes=0;m.chars=0;}
+    drop(){cnDelIds(ids);ids.length=0;cur=[];m.chunks=[];delete m.qdoc;delete m.qn;delete m.audit;m.bytes=0;m.chars=0;m.olN=0;}
   };
 }
 async function cnRead(d,m,file,retry){
@@ -4504,7 +4505,7 @@ async function cnRead(d,m,file,retry){
   if(t.dead)return;
   let sink=null,doc=null;
   try{
-    if(retry){cnDelIds(cnMatIds(m));m.gen=(m.gen||0)+1;m.chunks=[];m.kdocs=[];m.kstatus='incomplete';delete m.qdoc;delete m.qn;delete m.audit;m.bytes=0;m.chars=0;t.local=true;}
+    if(retry){cnDelIds(cnMatIds(m));m.gen=(m.gen||0)+1;m.chunks=[];m.kdocs=[];m.kstatus='incomplete';delete m.qdoc;delete m.qn;delete m.audit;m.bytes=0;m.chars=0;m.olN=0;t.local=true;}
     else{
       const ok=await cnPut(cnKey(d.id,m.id),file);
       if(t.dead){cnDelBlobs(d.id,m.id);return;}
@@ -4793,6 +4794,10 @@ SCREENS.courseNew={
    В cdraft: planAt — когда составлен план (по нему черновик открывается на шаге 3). Запущенное чтение живёт в памяти (d._run); готовые ответы outline и plan остаются в d._run.cache,
    «Повторить» их не заказывает снова. */
 const CN_PL={outPages:40,outJson:36000,topics:300,terms:1500,photos:60,labels:80,pages:400,exam:200,planJson:78000,knowledge:1200,lessons:60,perLesson:40,parts:30,doc:800000};
+/* T-039: запросы outline режутся по ожидаемому размеру ответа. E = символы страницы × k (токенов на символ входа: обычный текст 1.6, список коротких строк 2.7; замеры Haiku, предел ответа 4096).
+   Кусок — подряд идущие страницы, пока ΣE ≤ target и страниц ≤ maxPages; страница с E > target идёт одна. Строка «короткая», если она короче shortLine или начинается с маркера;
+   страница — «список», если таких строк не меньше listShare. Оборванный кусок спрашивается снова половинами (не больше retryCap запросов-повторов на материал, парами); кусков на материал не больше maxChunks. */
+const CN_OUT={target:3000,maxPages:5,maxChunks:80,retryCap:3,kText:1.6,kList:2.7,shortLine:45,listShare:0.6},CN_OUT_MARK=/^\s*(?:[-–—•·*▪●◦]|\d{1,3}[.)])\s/;
 /* сокращения в начале названия раскрываются: «Proc. coracoideus» = «Processus coracoideus» */
 const CN_ABBR={a:'arteria',aa:'arteriae',v:'vena',vv:'venae',n:'nervus',nn:'nervi',m:'musculus',mm:'musculi',lig:'ligamentum',ligg:'ligamenta',proc:'processus',for:'foramen',art:'articulatio',r:'ramus',gl:'glandula',tub:'tuberculum'};
 const cnNorm=s=>String(s==null?'':s).trim().replace(/^([A-Za-z]{1,4})\.\s*/,(m,a)=>Object.hasOwn(CN_ABBR,a.toLowerCase())?CN_ABBR[a.toLowerCase()]+' ':m).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/æ/gi,'ae').replace(/œ/gi,'oe').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
@@ -4818,8 +4823,8 @@ function cnLatin(s){
 const cnNameOf=n=>String(n||'').replace(/\.[A-Za-z0-9]{2,4}$/,'').replace(/[|~]/g,' ').trim().slice(0,40);
 const cnPhotoName=(m,i)=>{const s=(m.sigs||[])[i],k=typeof s==='string'?s.lastIndexOf('|'):-1;return k>0?s.slice(0,k):m.name;};
 const cnTextMats=d=>d.mats.filter(m=>(m.role==='base'||m.role==='extra')&&m.status==='ready'&&(m.chunks||[]).length).sort((a,b)=>(a.role==='base'?0:1)-(b.role==='base'?0:1));
-/* ≈ сколько запросов уйдёт: кусок на каждые 40 страниц или ~30 КБ текста и 3 единицы на план */
-const cnEst=d=>cnTextMats(d).reduce((a,m)=>a+Math.max(1,Math.ceil((m.pages||0)/CN_PL.outPages),Math.ceil((m.bytes||0)/30000)),0)+5;
+/* ≈ сколько запросов уйдёт: число кусков outline (m.olN — по плотности текста, считается при чтении материала; у старых черновиков — по страницам и символам) и 5 единиц на план */
+const cnEst=d=>cnTextMats(d).reduce((a,m)=>a+(m.olN>0?m.olN:Math.max(1,Math.ceil((m.pages||0)/CN_OUT.maxPages),Math.ceil((m.chars||0)*CN_OUT.kText/CN_OUT.target))),0)+5;
 const cnPlanOk0=d=>d.mats.some(m=>m.role==='base'&&m.status==='ready'&&(m.chunks||[]).length)&&!d.mats.some(m=>{const t=cnT(d.id,m.id);return t.run||t.busy;});
 /* сколько запросов осталось: курсовой лимит, если он есть, иначе дневной */
 function cnLeft(){
@@ -4914,7 +4919,7 @@ function cnRunStart(d){
   const old=d._run;if(old&&old.state==='run')return old;
   const keep=old&&old.state!=='done';
   const usage=keep&&old.usage?{calls:old.usage.calls,input_tokens:old.usage.input_tokens,output_tokens:old.usage.output_tokens,models:Object.assign(Object.create(null),old.usage.models)}:cnUsageEmpty();
-  const r={d:d,cancel:false,ac:new AbortController(),i:0,dt:{},err:null,spent:0,est:cnEst(d),state:'run',labs:new Map(),topics:[],usage:usage,cache:keep?old.cache:{outl:new Map(),knowledge:new Map(),knowledgeMeta:new Map(),plan:null}};   // ответы ИИ переживают «Повторить», отмену и возврат к материалам, но не «Пересоставить»
+  const r={d:d,cancel:false,ac:new AbortController(),i:0,dt:{},err:null,spent:0,est:cnEst(d),state:'run',labs:new Map(),topics:[],usage:usage,cache:keep?old.cache:{outl:new Map(),knowledge:new Map(),knowledgeMeta:new Map(),retries:new Map(),halves:new Map(),plan:null}};   // ответы ИИ переживают «Повторить», отмену и возврат к материалам, но не «Пересоставить»
   d._run=r;cnRun(d,r);return r;
 }
 function cnRunStop(d){const r=d&&d._run;if(r&&r.state==='run'){r.cancel=true;r.state='stop';try{r.ac.abort();}catch(e){}}}
@@ -4937,6 +4942,7 @@ function cnRunErr(e){
   if(c==='quota_exceeded')return {k:'quota'};
   if(c==='invalid_json'||c==='empty_completion'||c==='invalid_input')return {k:'format'};
   if(c==='extract_incomplete')return {k:'source'};
+  if(c==='material_too_large')return {k:'chunks',name:String(e.name||''),n:+e.n||0,max:+e.max||CN_OUT.maxChunks};
   if(c==='quota'||c==='limit'||c==='broken')return {k:'store'};
   if(c==='noterms'||c==='toolarge'||c==='timeout')return {k:c};
   if(c==='knowledge_incomplete'||c==='knowledge_empty'||c==='knowledge_too_large'||c==='knowledge_groups_unsupported'||c==='knowledge_plan_rejected')return {k:c};
@@ -5296,6 +5302,45 @@ async function cnKnowledgePersist(d,r,jobs,results,src,pageSources,failed){
   r.knowledge={version:CN_KNOWLEDGE_VERSION,status:summary.incomplete||summary.storageErrors?'incomplete':'processed',completeness:'not_proven',planCoverage:'not_measured',summary:summary};
   return r.knowledge;
 }
+/* ---- T-039: how outline requests are cut and asked again ---- */
+/* ожидаемый выход страницы: E токенов = символы × k; list — страница из коротких строк / пунктов */
+function cnOutlineEst(it){
+  const text=String(it&&it.text||''),lines=text.split('\n').map(x=>x.trim()).filter(Boolean);
+  const chars=Array.isArray(it&&it.blocks)&&it.blocks.length?it.blocks.reduce((a,b)=>a+String(b&&b.text||'').length,0):text.trim()?text.length:0;
+  const short=lines.filter(l=>l.length<CN_OUT.shortLine||CN_OUT_MARK.test(l)).length,list=lines.length>0&&short/lines.length>=CN_OUT.listShare;
+  return {chars:chars,list:list,e:Math.ceil(chars*(list?CN_OUT.kList:CN_OUT.kText))};
+}
+const cnOutlineLen=it=>JSON.stringify({n:it.n,blocks:(it.blocks||[]).map(b=>({id:b.id,text:b.text,emphasis:!!b.emphasis})),em:(it.em||[]).filter(x=>String(it.text||'').includes(x))}).length+1;
+/* w: [{e,len}] страниц по порядку → [[от,до)…]: кусок закрывается, когда ΣE перешла бы target, страниц стало maxPages (и не больше CN_PL.outPages) или JSON перешёл бы CN_PL.outJson */
+function cnOutlineSplitIdx(w){
+  const out=[];let from=0,e=0,size=0;
+  w.forEach((x,i)=>{
+    const cnt=i-from;
+    if(cnt>0&&(cnt>=CN_OUT.maxPages||cnt>=CN_PL.outPages||e+x.e>CN_OUT.target||size+x.len>CN_PL.outJson)){out.push([from,i]);from=i;e=0;size=0;}
+    e+=x.e;size+=x.len;
+  });
+  if(w.length>from)out.push([from,w.length]);
+  return out;
+}
+const cnOutlineChunks=items=>cnOutlineSplitIdx(items.map(it=>({e:cnOutlineEst(it).e,len:cnOutlineLen(it)}))).map(r=>items.slice(r[0],r[1]));
+/* k (1…n-1), при котором сумма весов слева ближе всего к половине; при равенстве — меньший k */
+function cnOutlineCut(w){
+  const tot=w.reduce((a,b)=>a+b,0);let best=1,bd=Infinity,acc=0;
+  for(let k=1;k<w.length;k++){acc+=w[k-1];const dd=Math.abs(tot-2*acc);if(dd<bd){bd=dd;best=k;}}
+  return best;
+}
+/* две половины куска: по страницам (≥2 страниц) или по блокам одной страницы (≥2 блоков; блок не режется). Порядок и id блоков те же, у каждой половины свой ключ кэша. null — делить нечего. */
+function cnOutlineHalves(j){
+  const it=j&&j.items||[];
+  if(it.length>=2){
+    const k=cnOutlineCut(it.map(p=>cnOutlineEst(p).e||1)),mk=(x,t)=>({m:j.m,items:x,blocks:x.flatMap(p=>p.blocks||[]),key:j.m.id+'.'+(j.m.gen||0)+'.'+x[0].n+'-'+x[x.length-1].n+'.'+x.length+'.h'+t,half:true});
+    return [mk(it.slice(0,k),'a'),mk(it.slice(k),'b')];
+  }
+  const p=it[0],bl=p&&p.blocks||[];
+  if(!p||bl.length<2)return null;
+  const k=cnOutlineCut(bl.map(b=>String(b.text||'').length||1)),sub=(bs,first,from)=>{const o={...p,blocks:bs,em:(p.em||[]).filter(x=>bs.some(b=>String(b.text||'').includes(x))),diag:first?p.diag:null};return {m:j.m,items:[o],blocks:bs,key:j.key+'.b'+from+'-'+(from+bs.length),half:true};};
+  return [sub(bl.slice(0,k),true,0),sub(bl.slice(k),false,k)];
+}
 async function cnStepOutline(d,r){
   r.i=1;const O=r.dt.out={k:0,n:0,topics:0},src=[],jobs=[],W=window.CORPUS_WEB;
   r.topics=[];cnRPaint();
@@ -5305,64 +5350,91 @@ async function cnStepOutline(d,r){
   if(sourceBad.length){for(const m of sourceBad)await cnKnowledgeInvalidate(d,m,'incomplete');r.knowledge={version:CN_KNOWLEDGE_VERSION,status:'incomplete',completeness:'not_proven',planCoverage:'not_measured',summary:{materials:sourceBad.length,units:0,incomplete:sourceBad.length,unresolvedVisuals:0,storageErrors:0}};throw {code:'extract_incomplete'};}
   if(!(r.cache.knowledge instanceof Map))r.cache.knowledge=new Map();
   if(!(r.cache.knowledgeMeta instanceof Map))r.cache.knowledgeMeta=new Map();
+  if(!(r.cache.retries instanceof Map))r.cache.retries=new Map();   // материал → сколько запросов-повторов уже заказано (потолок CN_OUT.retryCap на материал)
+  if(!(r.cache.halves instanceof Map))r.cache.halves=new Map();     // ключ куска → true: этот кусок уже решено спрашивать половинами (повтор «Продолжить» не платит за него снова)
   for(const m of cnTextMats(d)){
     let pages;try{pages=await cnPagesOf(m);}catch(e){await cnKnowledgeInvalidate(d,m,'incomplete');throw e;}if(r.cancel)return src;
     src.push({m:m,pages:pages});
-    let cur=[],size=0;
-    const flush=()=>{if(cur.length)jobs.push({m:m,items:cur,blocks:cur.flatMap(p=>p.blocks||[]),key:m.id+'.'+(m.gen||0)+'.'+cur[0].n+'-'+cur[cur.length-1].n+'.'+cur.length});cur=[];size=0;};
+    const its=[];
     pages.forEach(p=>{
       const full=String(p.text||''),it={n:p.n,text:full.slice(0,6000),em:(p.em||[]).slice(0,60),diag:p.diag||null,sourceTruncated:full.length>6000};
       it.blocks=cnKnowledgeBlocks(m,[it]);
       if(!it.text.trim()&&!it.em.length)return;
-      const len=JSON.stringify({n:it.n,blocks:it.blocks.map(b=>({id:b.id,text:b.text,emphasis:!!b.emphasis})),em:it.em.filter(x=>it.text.includes(x))}).length+1;
-      if(cur.length&&(cur.length>=CN_PL.outPages||size+len>CN_PL.outJson))flush();
-      cur.push(it);size+=len;
+      its.push(it);
     });
-    flush();
+    const chunks=cnOutlineChunks(its);
+    if(chunks.length>CN_OUT.maxChunks)throw {code:'material_too_large',name:cnNameOf(m.name),n:chunks.length,max:CN_OUT.maxChunks};   // ни одного запроса и ничего не списано
+    chunks.forEach(cur=>jobs.push({m:m,items:cur,blocks:cur.flatMap(p=>p.blocks||[]),key:m.id+'.'+(m.gen||0)+'.'+cur[0].n+'-'+cur[cur.length-1].n+'.'+cur.length}));
   }
   r.pageSources=[];
   for(const m of d.mats.filter(x=>x.kind!=='img'&&x.role!=='base'&&x.role!=='extra'&&['ready','empty'].includes(x.status)&&(x.chunks||[]).length)){
     const pages=await cnPagesOf(m);if(r.cancel)return src;r.pageSources.push({m:m,pages:pages});
   }
   O.n=jobs.length;r.est=jobs.length+5;cnRPaint();
-  const res=new Array(jobs.length);let next=0,done=0,failed=null;
+  const res=new Array(jobs.length),sub=new Map();let next=0,done=0,failed=null;   // sub: номер куска → {hs: половины, rs: их результаты}
+  /* один запрос outline (или готовый ответ из кэша) → {rec: запись для реестра, err: ошибка, которая останавливает шаг, trunc: ответ оборван по пределу токенов} */
+  const runJob=async j=>{
+    let out=r.cache.outl.get(j.key),knowledge=r.cache.knowledge.get(j.key),cacheMeta=r.cache.knowledgeMeta.get(j.key)||{},rec=null,err=null,trunc=false;
+    if(out&& !knowledge){knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:'cached_result_without_registry'});rec={topics:out,knowledge:knowledge,inputChars:JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:0};}
+    if(!out){
+      try{
+        const input=cnKnowledgeOutlineInput(j.m,j),raw=await W.courseAI.outline(j.m.lang||d.lang||LANG,input,{signal:r.ac.signal});cnUsageAdd(r,raw);
+        const inputChars=JSON.stringify(input).length,outputChars=JSON.stringify(raw).length;
+        knowledge=cnKnowledgeClean(raw,j.blocks,j.m);r.cache.knowledge.set(j.key,knowledge);
+        const meta=raw&&(raw.__courseAI||raw.courseAI)||{},usage=meta.usage||{};
+        cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+usage.input_tokens||0),outputTokens:Math.max(0,+usage.output_tokens||0),inputChars:inputChars,outputChars:outputChars};r.cache.knowledgeMeta.set(j.key,cacheMeta);
+        rec={topics:null,knowledge:knowledge,inputChars:inputChars,outputChars:outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens};
+        out=cnOutRequireEmphasis(cnOutClean(raw,j.items),j.items);r.cache.outl.set(j.key,out);rec.topics=out;r.spent++;
+      }catch(e){
+        cnUsageAdd(r,e);if(e&&e.courseAI&&e.courseAI.charged||e&&['invalid_json','timeout','rate_limited','empty_completion'].includes(e.code))r.spent++;
+        trunc=!!(e&&e.code==='invalid_json'&&e.truncated===true);   // только обрыв по пределу токенов даёт повтор половинами; сеть, 5xx, таймаут, испорченный JSON — нет
+        const part=!rec&&cnKnowledgePartial(e,j.blocks,j.m);
+        if(part){   // a cut-short reply with whole units: they go into the registry, the step goes on; the answer is kept, so nothing is asked again
+          const meta=e.courseAI||{};knowledge=part;out=cnOutRequireEmphasis([],j.items);
+          cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:String(e.text||'').length};
+          r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);r.cache.outl.set(j.key,out);
+          rec={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens};
+        }
+        else if(rec){rec.outlineValid=false;rec.knowledge.status='incomplete';rec.knowledge.issues.push('outline_shape_invalid');}
+        else{const input=cnKnowledgeOutlineInput(j.m,j),meta=e&&e.courseAI||{};knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:e&&e.code||'failed',truncated:trunc});cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(input).length,outputChars:String(e&&e.text||'').length};r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);rec={topics:null,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens,outlineValid:false};}
+        if(!part)err=e;
+      }
+    }
+    else if(knowledge&&knowledge.issues.indexOf('outline_truncated')>=0)trunc=true;   // a cut-short answer kept in the cache
+    if(!rec)rec={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars||JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:cacheMeta.outputChars||0,model:cacheMeta.model||'',inputTokens:cacheMeta.inputTokens||0,outputTokens:cacheMeta.outputTokens||0};
+    return {rec:rec,err:err,trunc:trunc};
+  };
   const work=async()=>{
     while(!r.cancel&&!failed){
       const i=next++;if(i>=jobs.length)return;const j=jobs[i];
       O.k=Math.min(O.n,done+1);cnRPaint();
-      let out=r.cache.outl.get(j.key),knowledge=r.cache.knowledge.get(j.key),cacheMeta=r.cache.knowledgeMeta.get(j.key)||{};
-      if(out&& !knowledge){knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:'cached_result_without_registry'});res[i]={topics:out,knowledge:knowledge,inputChars:JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:0};}
-      if(!out){
-        try{
-          const input=cnKnowledgeOutlineInput(j.m,j),raw=await W.courseAI.outline(j.m.lang||d.lang||LANG,input,{signal:r.ac.signal});cnUsageAdd(r,raw);
-          const inputChars=JSON.stringify(input).length,outputChars=JSON.stringify(raw).length;
-          knowledge=cnKnowledgeClean(raw,j.blocks,j.m);r.cache.knowledge.set(j.key,knowledge);
-          const meta=raw&&(raw.__courseAI||raw.courseAI)||{},usage=meta.usage||{};
-          cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+usage.input_tokens||0),outputTokens:Math.max(0,+usage.output_tokens||0),inputChars:inputChars,outputChars:outputChars};r.cache.knowledgeMeta.set(j.key,cacheMeta);
-          res[i]={topics:null,knowledge:knowledge,inputChars:inputChars,outputChars:outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens};
-          out=cnOutRequireEmphasis(cnOutClean(raw,j.items),j.items);r.cache.outl.set(j.key,out);res[i].topics=out;r.spent++;
-        }catch(e){
-          cnUsageAdd(r,e);if(e&&e.courseAI&&e.courseAI.charged||e&&['invalid_json','timeout','rate_limited','empty_completion'].includes(e.code))r.spent++;
-          const part=!res[i]&&cnKnowledgePartial(e,j.blocks,j.m);
-          if(part){   // a cut-short reply with whole units: they go into the registry, the step goes on; the answer is kept, so nothing is asked again
-            const meta=e.courseAI||{};knowledge=part;out=cnOutRequireEmphasis([],j.items);
-            cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:String(e.text||'').length};
-            r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);r.cache.outl.set(j.key,out);
-            res[i]={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens};
-          }
-          else if(res[i]){res[i].outlineValid=false;res[i].knowledge.status='incomplete';res[i].knowledge.issues.push('outline_shape_invalid');}
-          else{const input=cnKnowledgeOutlineInput(j.m,j),meta=e&&e.courseAI||{};knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:e&&e.code||'failed',truncated:!!(e&&e.code==='invalid_json'&&e.truncated===true)});cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(input).length,outputChars:String(e&&e.text||'').length};r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);res[i]={topics:null,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens,outlineValid:false};}
-          if(!part){failed=failed||e;return;}
+      let a=null,hs=null;
+      if(r.cache.halves.has(j.key)&&(hs=cnOutlineHalves(j))){O.n+=2;r.est+=2;}   // already decided in an earlier pass: the halves, the cut chunk is not asked again
+      else{
+        hs=null;a=await runJob(j);if(r.cancel)return;
+        if(a.trunc){   // cut short at the token limit: ask it again as two halves, if the cap of the material allows both requests and the chunk can be halved (one level, never a half of a half)
+          const used=r.cache.retries.get(j.m.id)||0,h=used+2<=CN_OUT.retryCap?cnOutlineHalves(j):null;
+          if(h){r.cache.retries.set(j.m.id,used+2);r.cache.halves.set(j.key,true);hs=h;O.n+=2;r.est+=2;}
         }
       }
-      if(!res[i])res[i]={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars||JSON.stringify(cnKnowledgeOutlineInput(j.m,j)).length,outputChars:cacheMeta.outputChars||0,model:cacheMeta.model||'',inputTokens:cacheMeta.inputTokens||0,outputTokens:cacheMeta.outputTokens||0};done++;
+      if(hs){   // the units of the halves replace the cut chunk; if a half is cut short again, its whole units are kept (T-034)
+        const rs=[];sub.set(i,{hs:hs,rs:rs});
+        for(const h of hs){const b=await runJob(h);if(r.cancel)return;rs.push(b.rec);if(b.err){failed=failed||b.err;break;}}
+        if(failed)return;
+        done++;continue;
+      }
+      res[i]=a.rec;
+      if(a.err){failed=failed||a.err;return;}
+      done++;
     }
   };
   await Promise.all([work(),work()]);   // два запроса одновременно
-  await cnKnowledgePersist(d,r,jobs,res,src,r.pageSources,failed);
+  const fj=[],fr=[];
+  jobs.forEach((j,i)=>{const s=sub.get(i);if(s)s.hs.forEach((h,k)=>{fj.push(h);fr.push(s.rs[k]);});else{fj.push(j);fr.push(res[i]);}});
+  await cnKnowledgePersist(d,r,fj,fr,src,r.pageSources,failed);
   if(failed&&!r.cancel)throw failed;
   if(r.cancel)return src;
-  jobs.forEach((j,i)=>((res[i]&&res[i].topics)||[]).forEach(t=>r.topics.push({title:t.title,pages:t.pages,terms:t.terms,m:j.m})));
+  fj.forEach((j,i)=>((fr[i]&&fr[i].topics)||[]).forEach(t=>r.topics.push({title:t.title,pages:t.pages,terms:t.terms,m:j.m})));
   O.topics=r.topics.length;
   r.diagnostics=cnCourseDiagnostics(src,r.pageSources,r.topics);
   cnRPaint();return src;
@@ -5680,8 +5752,10 @@ function cnReadRows(r){
     T3('Вопросы экзамена','Exam questions','Eksami küsimused'),T3('Свод терминов и важность','Terms and importance','Terminid ja olulisus'),T3('Делю на части и уроки','Splitting into parts and lessons','Jagan osadeks ja õppetundideks')];
   return names.map((n,i)=>[n,det[i],done||i<r.i?'done':i===r.i?(r.state==='err'?'bad':'cur'):'todo']);
 }
-function cnRunErrText(k,left){
-  const m={quota:T3('Лимит ИИ для курсов исчерпан'+(left!=null?' — осталось запросов: '+left:'')+'. Для плана нужно ещё несколько запросов; уже сделанное сохранено.','The AI limit for courses is used up'+(left!=null?' — requests left: '+left:'')+'. The plan needs a few more; what is done is kept.','Kursuste TI limiit on otsas'+(left!=null?' – päringuid jäänud: '+left:'')+'. Plaanile on vaja veel mõnda päringut; tehtu on salvestatud.'),
+function cnRunErrText(k,left,info){
+  info=info||{};
+  const m={chunks:T3('Материал «'+info.name+'» слишком большой для одного курса: для него нужно '+info.n+' запросов ИИ, а допустимо не больше '+info.max+'. Ничего не списано. Разделите материал на части и сделайте несколько курсов.','The material “'+info.name+'” is too large for one course: it needs '+info.n+' AI requests, at most '+info.max+' are allowed. Nothing was charged. Split the material into parts and make several courses.','Materjal „'+info.name+'“ on ühe kursuse jaoks liiga suur: selleks on vaja '+info.n+' TI päringut, lubatud on kuni '+info.max+'. Midagi ei arvestatud maha. Jaga materjal osadeks ja tee mitu kursust.'),
+    quota:T3('Лимит ИИ для курсов исчерпан'+(left!=null?' — осталось запросов: '+left:'')+'. Для плана нужно ещё несколько запросов; уже сделанное сохранено.','The AI limit for courses is used up'+(left!=null?' — requests left: '+left:'')+'. The plan needs a few more; what is done is kept.','Kursuste TI limiit on otsas'+(left!=null?' – päringuid jäänud: '+left:'')+'. Plaanile on vaja veel mõnda päringut; tehtu on salvestatud.'),
     ai:T3('ИИ сейчас недоступен. Проверьте соединение и повторите — сделанное не пропадёт.','The AI is not available now. Check the connection and retry: what is done is kept.','TI pole praegu saadaval. Kontrolli ühendust ja proovi uuesti – tehtu säilib.'),
     format:T3('ИИ ответил в неожиданном формате. Повторите.','The AI answered in an unexpected format. Retry.','TI vastas ootamatus vormingus. Proovi uuesti.'),
     store:T3('Не удалось сохранить в облаке. Проверьте соединение и повторите.','Could not save to the cloud. Check the connection and retry.','Pilve salvestamine ebaõnnestus. Kontrolli ühendust ja proovi uuesti.'),
@@ -5704,12 +5778,12 @@ function cnReadInner(d){
   let h='<div class="cnrhd">'+CN_MASC+'<b>'+T3('ИИ составляет план','The AI is making the plan','TI koostab plaani')+'</b><span>'+T3('Фото читаются на этом устройстве — это может занять несколько минут. Можно свернуть приложение.','Photos are read on this device, which may take a few minutes. You can minimise the app.','Fotod loetakse selles seadmes, see võib võtta mõne minuti. Rakenduse võib minimeerida.')+'</span></div>'+
     '<div class="cnck">'+cnReadRows(r).map(x=>'<div class="cnrow '+x[2]+'"><span class="cndot">'+(x[2]==='done'?CN_CHK:x[2]==='cur'?CN_SP14:x[2]==='bad'?'!':'')+'</span><span class="cnrx"><b>'+esc(x[0])+'</b><small>'+esc(x[1])+'</small></span></div>').join('')+'</div>'+
     '<div class="cnspend">'+esc(T3('Израсходовано '+r.spent+' из ≈ '+r.est+' запросов','Used '+r.spent+' of ≈ '+r.est+' requests','Kasutatud '+r.spent+' / ≈ '+r.est+' päringut')+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):'')+cnUsageText(r.usage))+'</div>';
-  if(r.state==='err')h+='<div class="cnwarn cnerr" role="alert">'+esc(cnRunErrText(r.err.k,left)+(r.planPaid&&r.err.k!=='quota'?T3(' 5 единиц квоты за составление плана уже списаны.',' The 5 quota units for making the plan were already charged.',' Plaani koostamise 5 kvoodiühikut on juba maha arvatud.'):''))+'</div>';
+  if(r.state==='err')h+='<div class="cnwarn cnerr" role="alert">'+esc(cnRunErrText(r.err.k,left,r.err)+(r.planPaid&&r.err.k!=='quota'?T3(' 5 единиц квоты за составление плана уже списаны.',' The 5 quota units for making the plan were already charged.',' Plaani koostamise 5 kvoodiühikut on juba maha arvatud.'):''))+'</div>';
   return h;
 }
 function cnReadBar(d){
   const r=d._run;
-  if(r&&r.state==='err')return (r.err.k==='quota'?'':'<button class="cnmain on" data-cn="rretry"><span><b>'+T3('Повторить','Retry','Proovi uuesti')+'</b><small>'+esc(T3('спишет ещё ≈ '+Math.max(1,r.est-r.spent),'will cost ≈ '+Math.max(1,r.est-r.spent)+' more','võtab veel ≈ '+Math.max(1,r.est-r.spent)))+'</small></span></button>')+'<button class="cnbtn2" data-cn="rback">'+T3('К материалам','Back to the materials','Tagasi materjalide juurde')+'</button>';
+  if(r&&r.state==='err')return (r.err.k==='quota'||r.err.k==='chunks'?'':'<button class="cnmain on" data-cn="rretry"><span><b>'+T3('Повторить','Retry','Proovi uuesti')+'</b><small>'+esc(T3('спишет ещё ≈ '+Math.max(1,r.est-r.spent),'will cost ≈ '+Math.max(1,r.est-r.spent)+' more','võtab veel ≈ '+Math.max(1,r.est-r.spent)))+'</small></span></button>')+'<button class="cnbtn2" data-cn="rback">'+T3('К материалам','Back to the materials','Tagasi materjalide juurde')+'</button>';
   return '<button class="cnbtn2" data-cn="rcancel">'+T3('Отменить','Cancel','Tühista')+'</button>';
 }
 let CN_RT=0;

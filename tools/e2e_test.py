@@ -615,6 +615,89 @@ async def main():
             await pg.evaluate("META.calm=false;applyLook();go({name:'home'})")
             check('strict mode hides Kostik and the fact of the day', strict == [0, False, True], json.dumps(strict))
 
+            # adaptive layout of the home screen: sidebar / narrow rail / floating bar
+            lay_js = """(()=>{const r=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return {l:b.left,w:b.width,h:b.height,t:b.top,b:b.bottom};};
+              const cs=(s,p)=>{const e=document.querySelector(s);return e?getComputedStyle(e)[p]:null;};
+              const vis=s=>{const e=document.querySelector(s);return !!e&&getComputedStyle(e).display!=='none'&&e.getBoundingClientRect().width>0;};
+              const sl=document.querySelector('.svtiles'),sg=document.querySelector('.sesslim');
+              return {wrap:r('.tabwrap'),wrapPos:cs('.tabwrap','position'),bar:r('.tabbar'),barPos:cs('.tabbar','position'),btns:document.querySelectorAll('.tabwrap .tabbar button').length,
+                head:vis('.svhead'),today:cs('.svtoday','display'),tl:r('.svt-l'),tr:r('.svt-r'),page:r('.page.svhome'),brand:vis('.tabbrand'),foot:vis('.tabfoot'),
+                cols:cs('.svtiles','gridTemplateColumns'),tdisp:cs('.svtiles','display'),tscroll:sl?sl.scrollWidth>sl.clientWidth+1:null,ntiles:document.querySelectorAll('.svtile').length,
+                mcols:cs('.modes','gridTemplateColumns').split(' ').length,sesslim:sg?sg.scrollWidth>sg.clientWidth+1:null,
+                fact:document.querySelector('.modes')&&document.querySelector('.svfact')?document.querySelector('.modes').compareDocumentPosition(document.querySelector('.svfact'))&4:null};})()"""
+            span_js = """(()=>[...document.querySelectorAll('.tabwrap .tabbar button')].map(b=>{const s=b.querySelector('span');const rg=document.createRange();rg.selectNodeContents(s);
+              return {t:s.textContent,clip:s.scrollWidth>s.clientWidth+0.5,text:rg.getBoundingClientRect().width,btn:b.clientWidth,ell:getComputedStyle(s).textOverflow};}))()"""
+            lang0 = await pg.evaluate('document.documentElement.lang')
+            async def sw_lang(lg):
+                await pg.evaluate("(l=>{const b=document.createElement('button');b.dataset.act='setLang';b.dataset.v=l;b.style.display='none';document.body.appendChild(b);b.click();b.remove();go({name:'home'});})('%s')" % lg)
+            fake_ids = ['zz%d' % i for i in range(7)]
+            async def lay(w, h=900):
+                await pg.set_viewport_size({'width': w, 'height': h})
+                return await pg.evaluate(lay_js)
+            try:
+                # seven extra (unsaved, in memory only) decks so that the tile grids have something to fill
+                await pg.evaluate("(ids=>{ids.forEach((id,i)=>S.decks.push({id,name:'Zz '+i,newPerDay:20,mode:'hideAll',createdAt:Date.now()+i}));})(%s)" % json.dumps(fake_ids))
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.evaluate("go({name:'home'})")
+                await pg.wait_for_selector('.svtoday')
+                L = await pg.evaluate(lay_js)
+                check('layout 1440: sidebar 232px at the left, six tabs inside, brand and foot shown, header hidden',
+                      L['wrapPos'] == 'fixed' and abs(L['wrap']['l']) < 1 and abs(L['wrap']['w'] - 232) < 2 and L['btns'] == 6 and L['brand'] and L['foot'] and not L['head'], json.dumps(L))
+                check('layout 1440: «today» is a card with two columns side by side, six deck columns (5 decks + the new-deck tile), four mode columns, fact below the modes',
+                      L['today'] == 'grid' and L['tl'] and L['tr'] and L['tr']['l'] > L['tl']['l'] + 100 and abs(L['tr']['t'] - L['tl']['t']) < L['tl']['h']
+                      and len(L['cols'].split()) == 6 and L['fact'] == 4 and L['mcols'] == 4, json.dumps(L))
+                L = await lay(1700)
+                check('layout 1700: the page stops at 1280px and sits right of the sidebar', 1279 <= L['page']['w'] <= 1281 and L['page']['l'] >= 232, json.dumps(L['page']))
+                L = await lay(1000, 768)
+                check('layout 1000: narrow 84px rail with six tabs, header hidden, six deck columns, four modes, page right of the rail',
+                      L['wrapPos'] == 'fixed' and abs(L['wrap']['w'] - 84) < 2 and L['btns'] == 6 and not L['head'] and len(L['cols'].split()) == 6 and L['mcols'] == 4 and L['page']['l'] >= L['wrap']['w'] - 0.5, json.dumps(L))
+                L = await lay(820, 1180)
+                check('layout 820: no sidebar (the wrapper is not fixed)', L['wrapPos'] != 'fixed', json.dumps(L))
+                check('layout 820: the tab bar itself is fixed and ≤580px wide, the head is back, «today» is a two-column card (≥800px), three deck columns',
+                      L['barPos'] == 'fixed' and L['bar']['w'] <= 580.5 and L['head'] and not L['brand'] and L['today'] == 'grid' and len(L['cols'].split()) == 3, json.dumps(L))
+                L = await lay(700, 1000)
+                check('layout 700: «today» is display:contents, the bar is floating, three deck columns, four modes',
+                      L['today'] == 'contents' and L['barPos'] == 'fixed' and L['wrapPos'] != 'fixed' and len(L['cols'].split()) == 3 and L['mcols'] == 4, json.dumps(L))
+                L = await lay(390, 844)
+                check('layout 390: six tabs fit the floating bar, «today» is display:contents, the deck row scrolls, two modes per row',
+                      L['btns'] == 6 and L['barPos'] == 'fixed' and L['bar']['l'] >= 11 and L['bar']['l'] + L['bar']['w'] <= 379 and L['today'] == 'contents'
+                      and L['tdisp'] == 'flex' and (L['ntiles'] < 4 or L['tscroll']) and L['mcols'] == 2, json.dumps(L))
+                # breakpoints, one pixel either side
+                a, b2, c, d = await lay(899), await lay(900), await lay(1099), await lay(1100)
+                check('layout breakpoints 899/900/1099/1100: floating bar, 84px rail, 84px rail, 232px sidebar',
+                      a['wrapPos'] != 'fixed' and a['barPos'] == 'fixed' and b2['wrapPos'] == 'fixed' and abs(b2['wrap']['w'] - 84) < 2
+                      and abs(c['wrap']['w'] - 84) < 2 and abs(d['wrap']['w'] - 232) < 2, json.dumps([a['wrap'], b2['wrap'], c['wrap'], d['wrap']]))
+                a, b2 = await lay(799), await lay(800)
+                check('layout breakpoints 799/800: «today» display:contents, then a card', a['today'] == 'contents' and b2['today'] != 'contents', json.dumps([a['today'], b2['today']]))
+                a, b2 = await lay(599), await lay(600)
+                check('layout breakpoints 599/600: deck row is a flex carousel, then a grid', a['tdisp'] == 'flex' and b2['tdisp'] == 'grid', json.dumps([a['tdisp'], b2['tdisp']]))
+                # labels in the 84px rail are not clipped, in every language; the session-limit chips fit on a phone
+                bad = []
+                for lg in ('ru', 'en', 'et'):
+                    await sw_lang(lg)
+                    for w in (900, 1000):
+                        await pg.set_viewport_size({'width': w, 'height': 768})
+                        for s in await pg.evaluate(span_js):
+                            if s['clip'] or s['text'] > s['btn'] + 0.5:
+                                bad.append([lg, w, s])
+                    for w in (390, 360):
+                        L = await lay(w, 800)
+                        if L['sesslim']:
+                            bad.append([lg, w, 'sesslim overflows'])
+                check('rail labels fit the 84px rail (900/1000px) and the limit chips fit at 390/360px, in ru/en/et', not bad, json.dumps(bad, ensure_ascii=False))
+                await sw_lang(lang0)
+                # a phone in landscape lands in the sidebar layout: the foot buttons must be reachable by scrolling
+                await pg.set_viewport_size({'width': 932, 'height': 430})
+                await pg.evaluate("document.querySelector('.tabfoot-b[data-act=settings]').scrollIntoView()")
+                R = await pg.evaluate("""(()=>{const w=document.querySelector('.tabwrap');const b=document.querySelector('.tabfoot-b[data-act=settings]').getBoundingClientRect();
+                  return {sh:w.scrollHeight,ch:w.clientHeight,oy:getComputedStyle(w).overflowY,top:b.top,bottom:b.bottom,ih:innerHeight};})()""")
+                check('layout 932x430: the sidebar scrolls and «Settings» can be scrolled into the window',
+                      R['sh'] >= R['ch'] and R['oy'] == 'auto' and R['top'] >= 0 and R['bottom'] <= R['ih'] + 0.5, json.dumps(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await sw_lang(lang0)
+                await pg.evaluate("(ids=>{S.decks=S.decks.filter(d=>!ids.includes(d.id));go({name:'home'});})(%s)" % json.dumps(fake_ids))
+
             # share the folder → a file with the photo inside
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")

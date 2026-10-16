@@ -14,7 +14,7 @@
 <meta name="theme-color" content="#EDF0EE" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#111614" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="web.css?v=8a909949eb">
-<script src="config.js?v=d9dc86188c"></script>
+<script src="config.js?v=d007ae7e35"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
 <script src="web.js?v=7d9342f383"></script>
 <meta name="color-scheme" content="light dark">
@@ -756,8 +756,17 @@ html.calm .rate button.auto::after{animation-duration:1.5s!important}
 .hardlist .crow{padding:9px 4px;border-bottom:1px solid var(--line)}
 .hardlist .crow:last-child{border-bottom:none}
 .hardlist .cnt{font-size:12.5px;color:var(--bad);font-weight:600;flex:none}
-.hintai{display:flex;align-items:center;gap:6px;border:none;background:none;color:var(--primary);font-weight:600;font-size:13.5px;padding:0 2px 10px;margin-top:-4px}
+.hintai{display:flex;align-items:center;gap:6px;border:none;background:none;color:var(--accent);font-weight:600;font-size:13.5px;padding:0 2px 10px;margin-top:-4px}
 .hintai:disabled{opacity:.5}
+.ibtn.plain.ask{color:var(--accent);background:var(--primary-soft)}
+.ibtn.plain.ask svg{width:22px;height:22px}
+.ibtn.plain.ask.pulse{animation:askPulse 8s ease-out 2}
+@keyframes askPulse{0%{box-shadow:0 0 0 0 var(--primary-soft)}8%{box-shadow:0 0 0 7px rgba(110,92,240,.22)}20%,100%{box-shadow:0 0 0 12px rgba(110,92,240,0)}}
+html.calm .ibtn.plain.ask.pulse{animation:none}
+@media (prefers-reduced-motion:reduce){.ibtn.plain.ask.pulse{animation:none}}
+.ainudge{display:flex;align-items:center;gap:2px;align-self:flex-start;margin:0 0 6px;border:1px solid var(--line);border-radius:20px;background:var(--surface);padding:0 4px 0 0}
+.ainudge .go{display:flex;align-items:center;gap:6px;border:none;background:none;color:var(--accent);font-weight:600;font-size:13px;padding:7px 4px 7px 12px}
+.ainudge .x{border:none;background:none;color:var(--muted,var(--ink));opacity:.6;display:flex;align-items:center;justify-content:center;min-width:38px;min-height:38px;margin:-4px 0;padding:0}
 .hvars{display:flex;flex-direction:column;gap:6px;margin:-2px 0 10px}
 .hvars:empty{display:none}
 .hvar{text-align:left;border:1px solid var(--line);background:var(--surface2);border-radius:12px;padding:9px 12px;font-size:14.5px;line-height:1.4;color:var(--ink)}
@@ -1197,6 +1206,7 @@ const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul',
 const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
 I18N_DICT.push(["Активность", "Activity", "Aktiivsus"]);
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
+I18N_DICT.push(["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"],["Больше не предлагать","Don’t suggest again","Ära paku enam"],["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]);
 I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
 I18N_DICT.push(
   ['Смахните влево или нажмите стрелку влево, чтобы открыть удаление','Swipe left or press Left Arrow to reveal Delete','Kustutamise avamiseks pühi vasakule või vajuta vasaknoolt'],
@@ -2585,6 +2595,7 @@ function distractors(c){
 }
 function tagErr(loc,e){const err=new Error('['+loc+'] '+(e&&e.message?e.message:String(e)));err.stack=e&&e.stack;return err;}
 function setupCard(){
+  CH.pin=null;
   try{
     SS.phase='ask';SS.typed='';SS.picked=null;SS.result=null;SS.peek=new Set();SS.fallback=false;SS.opts=null;SS.suggest=0;
     const c=cardById(SS.cur);if(!c)return;
@@ -2727,7 +2738,7 @@ SCREENS.study={
 function updStudy(){
   const m=$('#masks'),p=$('#panel'),k=$('#scounts'),u=$('#undoBtn'),tc=$('#tcard');
   if(tc){const fresh=tc.dataset.id!==SS.cur;tc.innerHTML=textCardHtml();mountImgFallbacks();if(fresh){tc.dataset.id=SS.cur;tc.classList.remove('tc-in');void tc.offsetWidth;tc.classList.add('tc-in');}}
-  if(m)m.innerHTML=studyMasks();if(p){p.innerHTML=studyPanel();bindRing();fitRing();layoutStage();}const kp=$('#kprog');if(kp)kp.innerHTML=kprogHtml();if(k)k.innerHTML=countsBar();if(u)u.disabled=!SS.undo.length;
+  if(m)m.innerHTML=studyMasks();if(p){p.innerHTML=aiNudgeHtml()+studyPanel();bindRing();fitRing();layoutStage();}const kp=$('#kprog');if(kp)kp.innerHTML=kprogHtml();if(k)k.innerHTML=countsBar();if(u)u.disabled=!SS.undo.length;
   if(SS.phase==='ask'&&SS.cm==='type'&&!CH.open){const i=$('#typeIn');if(i)setTimeout(()=>i.focus(),30);}
   chatSync();
 }
@@ -2770,10 +2781,11 @@ function rate(r){
     SS.undo.push({id:c.id,deckId:c.deckId,card:JSON.parse(JSON.stringify(c)),mates:SS.cram?null:grpMates(c).map(o=>JSON.parse(JSON.stringify(o))),newToday:d.newToday?Object.assign({},d.newToday):null,cramQueue:SS.cramQueue.slice(),done:SS.done,ok:r>1,counted:!SS.cram});
     (SS.log=SS.log||[]).push({id:c.id,ok:r>1});
     if(SS.undo.length>30)SS.undo.shift();
-    SS.streak=r>1?(SS.streak||0)+1:0;
+    SS.streak=r>1?(SS.streak||0)+1:0;SS.nudge=null;
     if(SS.cram){if(r===1)SS.cramQueue.splice(Math.min(3,SS.cramQueue.length),0,c.id);}
     else{
       applyRating(c,r,d);
+      if(r===1)aiNudgeMaybe(c);
       if(SS.hard&&r===1)SS.cramQueue.splice(Math.min(3,SS.cramQueue.length),0,c.id);
       if(r===1&&!c.hint&&c.miss>=hintAfter()&&c.miss>=(c.hintSnooze||0)){
         SS.done++;SS.lastId=c.id;askHint(c).then(()=>nextCard()).catch(e=>recoverFromError(tagErr('askHint',e)));return;
@@ -2805,7 +2817,7 @@ function nextCard(){
   }catch(e){recoverFromError(tagErr('render',e));}
 }
 function undoStudy(){
-  cancelAuto();
+  cancelAuto();if(SS)SS.nudge=null;CH.pin=null;
   const s=SS&&SS.undo.pop();if(!s)return;if(SS.log)SS.log.pop();const c=cardById(s.id);if(!c){render();return;}
   const d=deckById(s.deckId||SS.deckId);
   if(s.counted){const hk=c.hint&&!s.card.hint?c.hint:null;Object.keys(c).forEach(k=>{if(!(k in s.card))delete c[k];});Object.assign(c,s.card);if(hk){c.hint=hk;c.hintLeft=hintShows();}persist('terms',c.id);
@@ -8716,13 +8728,13 @@ function afterSetting(){
 }
 
 /* ---------- ask panel: a side chat with Claude about the current card ---------- */
-const CH={open:false,turns:[],busy:false,ctl:null,ctxKey:null,imgFor:null,dead:false};
-const CH_CHIPS=['Объясни простыми словами','Где находится и с чем граничит?','Как это запомнить?','Перевод с латыни по словам','Проверь меня: задай вопрос'];
+const CH={open:false,turns:[],busy:false,ctl:null,ctxKey:null,imgFor:null,dead:false,pin:null};
+const CH_CHIPS=['Объясни простыми словами','Дай ассоциацию','Где находится и с чем граничит?','Как это запомнить?','Перевод с латыни по словам','Проверь меня: задай вопрос'];
 function chatAvailable(){return !!S.sample&&!CH.dead;}
 function chatCtx(){
   const out={key:'none',label:'',text:'',plate:null,box:null};
   if(view.name==='study'&&SS&&SS.cur){
-    const c=cardById(SS.cur);if(!c)return out;const d=deckById(c.deckId);const shown=SS.phase==='answer';
+    const pin=CH.pin&&cardById(CH.pin);const c=pin||cardById(SS.cur);if(!c)return out;const d=deckById(c.deckId);const shown=pin?true:SS.phase==='answer';
     out.key=c.id;
     if(isText(c)){
       out.label=(shown||c.dir!=='r'?c.front:'текстовая карточка');
@@ -8748,7 +8760,7 @@ function chatEnsure(){
     '<form class="ch-form" id="chForm"><textarea id="chIn" rows="1" placeholder="Спросите про эту карточку…" enterkeyhint="send"></textarea><button class="ibtn" id="chSend" type="submit" aria-label="Отправить">'+ic('send',20)+'</button></form>';
   document.body.appendChild(el);
   $('#chClose').onclick=()=>chatToggle(false);
-  $('#chNew').onclick=()=>{if(CH.ctl)CH.ctl.abort();CH.turns=[];CH.imgFor=null;chatRender();$('#chIn').focus();};
+  $('#chNew').onclick=()=>{if(CH.ctl)CH.ctl.abort();CH.turns=[];CH.pin=null;CH.imgFor=null;chatRender();$('#chIn').focus();};
   $('#chChips').onclick=e=>{const b=e.target.closest('button');if(b)chatSend(b.textContent);};
   const inp=$('#chIn');
   inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=Math.min(120,inp.scrollHeight)+'px';});
@@ -8759,10 +8771,11 @@ function chatEnsure(){
 function chatToggle(on){
   if(on==null)on=!CH.open;
   if(on)cancelAuto();
+  if(on&&!META.aiSeen){META.aiSeen=true;persistMeta();document.querySelectorAll('[data-act=askOpen]').forEach(b=>b.classList.remove('pulse'));}
   if(on&&!chatAvailable()){toast('Чат недоступен в этом окне.');return;}
   CH.open=on;const el=chatEnsure();el.classList.toggle('on',on);document.body.classList.toggle('chat-open',on);
   if(on){chatRender();if(matchMedia('(pointer:fine)').matches)setTimeout(()=>{const i=$('#chIn');if(i)i.focus();},120);}
-  else blurActive();
+  else{CH.pin=null;blurActive();}
   setTimeout(()=>{applyStudyLayout();if(view.name==='crop')layoutCrop();else layoutStage();},360);
 }
 function chatSync(){if(CH.open)chatRenderCtx();}
@@ -8826,7 +8839,17 @@ function chatRenderLast(ans){
   const log=$('#chLog');if(!log)return;const last=log.lastElementChild;
   if(last&&last.classList.contains('a')){last.classList.remove('wait');last.innerHTML=chMd(ans.content);const near=log.scrollHeight-log.scrollTop-log.clientHeight<80;if(near)log.scrollTop=log.scrollHeight;}
 }
-function askBtn(){return chatAvailable()?'<button class="ibtn plain" data-act="askOpen" aria-label="Спросить Claude" title="Спросить">'+ic('chat')+'</button>':'';}/* ---------- hard cards ("leeches") and Claude-made mnemonics ---------- */
+function askBtn(){return chatAvailable()?'<button class="ibtn plain ask'+(META.aiSeen?'':' pulse')+'" data-act="askOpen" aria-label="Спросить Claude" title="Спросить">'+ic('chat',22)+'</button>':'';}
+/* a soft hint after a miss: one line above the next card, at most once a session and 3 a day, off for good once closed */
+function aiNudgeHtml(){
+  if(!SS||!SS.nudge||SS.phase!=='ask'||!chatAvailable()||META.aiNudgeOff||CH.open)return '';
+  return '<div class="ainudge"><button class="go" data-act="aiNudgeGo">'+ic('spark',16)+'<span>Объяснить с Claude</span></button><button class="x" data-act="aiNudgeOff" aria-label="Больше не предлагать">'+ic('close',14)+'</button></div>';
+}
+function aiNudgeMaybe(c){
+  if(!SS||SS.cram||META.aiNudgeOff||!chatAvailable()||SS.nudgeShown||CH.open)return;
+  const d=dayKey(),n=META.aiNudge&&META.aiNudge.day===d?(Number(META.aiNudge.n)||0):0;if(n>=3)return;
+  SS.nudge=c.id;SS.nudgeShown=true;META.aiNudge={day:d,n:n+1};persistMeta();
+}/* ---------- hard cards ("leeches") and Claude-made mnemonics ---------- */
 function edLinkStart(){const c=cardById(ED&&ED.sel);if(!c)return;flushTerm();ED.linkFrom=c.id;updEd();}
 function edLinkTo(id){
   const a=cardById(ED.linkFrom),b=cardById(id);ED.linkFrom=null;if(!a||!b||a.id===b.id){updEd();return;}
@@ -9598,6 +9621,8 @@ const A={
     window.CORPUS_WEB.signOut();},
   foreignPeek:()=>{S.foreign=false;bootData();},
   askOpen:()=>chatToggle(),
+  aiNudgeGo:()=>{const id=SS&&SS.nudge;const c=id&&cardById(id);if(CH.busy){chatToggle(true);return;}SS.nudge=null;if(!c||!chatAvailable()){updStudy();return;}CH.pin=c.id;CH.turns=[];CH.imgFor=null;chatToggle(true);updStudy();chatSend('Объясни «'+cardTitle(c)+'»');},
+  aiNudgeOff:()=>{META.aiNudgeOff=true;persistMeta();if(SS)SS.nudge=null;const n=$('.ainudge');if(n)n.remove();},
   home:()=>go({name:'home'}),
   library:()=>go({name:'library'}),
   settings:()=>go({name:'settings'}),
@@ -9672,7 +9697,7 @@ const A={
   lesson:()=>lessonStart(view.deckId),
   crBack:()=>crHome(),
   crList:()=>go({name:'courses',fid:'-'}),
-  studyExit:()=>{if(SS&&SS.hard){const hf=SS.hardFolderId||null;SS=Object.assign({},{zoom:SS.zoom});go(hf?{name:'hard',folderId:hf}:{name:'hard'});return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
+  studyExit:()=>{CH.pin=null;if(SS)SS.nudge=null;if(SS&&SS.hard){const hf=SS.hardFolderId||null;SS=Object.assign({},{zoom:SS.zoom});go(hf?{name:'hard',folderId:hf}:{name:'hard'});return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
   studyUndo:()=>undoStudy(),
   introNext:()=>introGo(1),
   introPrev:()=>introGo(-1),
@@ -9819,7 +9844,7 @@ async function bootData(){
   if(S.db){
     try{
       const g=await Promise.all(['decks','plates','terms','stats','folders','packs','exams'].map(n=>S.db.collection(n).get().catch(e=>{if(n==='exams')return {docs:[]};throw e;})));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','intro','coursePrio','courseLast','create'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','aiSeen','aiNudge','aiNudgeOff','intro','coursePrio','courseLast','create'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
         {const lc=META.courseLast;if(lc!==undefined&&!(lc&&typeof lc==='object'&&typeof lc.pid==='string'&&lc.pid.length<=100&&LSKEYS.indexOf(lc.step)>=0))delete META.courseLast;   // saved data is not trusted
         if(META.coursePrio!==undefined&&[1,2,3].indexOf(META.coursePrio)<0)delete META.coursePrio;}
         applyLook();}}catch(e){}

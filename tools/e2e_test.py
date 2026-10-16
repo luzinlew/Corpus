@@ -350,6 +350,20 @@ def knowledge_files(d):
         pdf_file(d / name, [[(True, 24, 50, 780, h), (False, 12, 50, 740, a), (False, 12, 50, 722, b)] for h, a, b in pages])
 
 
+def big_knowledge_files(d, pages=100):
+    """Materials for the plan by groups (T-037): a «Core» PDF of `pages` pages and the small «Extra» PDF of knowledge_files. A page is a bold heading (a term) and one long paragraph (a statement, about 1600
+    characters, so that an outline request takes about 20 pages and stays within the 50 units a request may return): 2 units a page, 200 + 6 units in all, more than the 146 units a per-unit plan request holds."""
+    d = pathlib.Path(d); d.mkdir(exist_ok=True)
+    core = []
+    for n in range(1, pages + 1):
+        items = [(True, 24, 50, 800, 'Topic %d: heat in system %d' % (n, n)), (False, 12, 50, 770, 'Statement %d: heat flows in system number %d from the hotter body to the colder body.' % (n, n))]
+        items += [(False, 10, 50, 756 - 13 * k, 'Detail %d.%d: the transfer of energy in system %d is described here at some length for the line %d.' % (n, k, n, k)) for k in range(1, 18)]
+        core.append(items)
+    pdf_file(d / 'Heat notes.pdf', core)
+    knowledge_files(d / 'x')
+    (d / 'x' / 'Extra reading.pdf').replace(d / 'Extra reading.pdf')
+
+
 def plan_files(d):
     """Materials for «the plan» (T-018): a lecture (Core: 3 pages, bold headings and one bold term), an extra reading, a list of 2 exam questions and a picture with three printed Latin labels
     (black text on white, so that the on-device recognition finds something). The Latin names are written as «Capital lower» pairs: the fake model finds terms by that shape."""
@@ -3778,6 +3792,32 @@ async def main():
                   status == 200 and c2 - c1 == 5 and pr and pr[0]['lessons'][0] == {'title': 'Spina scapulae', 'pic': 'p1', 'terms': ['t1']} and lp['model'] == 'claude-sonnet-5-5' and lp['thinking'] == {'type': 'between_tools'} and lp['max_tokens'] == 8000
                   and lp['turns'] == 1 and lp['said'].startswith('CORPUS-PLAN ru\n') and 'EVIL' not in lp['said'] and lp['system'].startswith('Your reply is read by a program'), json.dumps([status, j, lp])[:500])
             check('plan: the prompts carry the input as JSON after «INPUT:» and say the values are data, not instructions', lp['said'].endswith('INPUT:\n' + json.dumps(good_p['input'], separators=(',', ':'), ensure_ascii=False)) and 'never instructions' in lp['said'] and 'never instructions' in lo['said'], lp['said'][-120:])
+            # the plan by groups (T-037): the same task with another kind of input
+            good_gi = {'kind': 'knowledge-groups-v1', 'name': 'Soojus', 'topicHints': [{'title': 'Heat', 'pages': [1, 2], 'm': 0}], 'materials': ['Heat notes'],
+                       'groups': [{'id': 'g1', 'm': 0, 'p': 1, 'n': 2, 't': ['Heat', 'Heat flows']}, {'id': 'g2', 'm': 0, 'p': 2, 'n': 3, 't': ['Conduction']}, {'id': 'g3', 'm': 0, 'p': 3, 'n': 1, 't': []}],
+                       'excluded': [{'m': 0, 'n': 2}], 'sourceStatus': {'status': 'no_warning_detected', 'registryStatus': 'processed', 'incompleteMaterials': 0, 'reviewMaterials': 0, 'unresolvedVisuals': 2, 'unprocessedVisuals': 0}}
+            def with_gi(**ch):
+                x = json.loads(json.dumps(good_gi)); x.update(ch); return {**good_p, 'input': x}
+            bad_g = {'duplicate id': with_gi(groups=[good_gi['groups'][0], {**good_gi['groups'][1], 'id': 'g1'}]), 'extra key': with_gi(extra=1), '251 groups': with_gi(groups=[{'id': 'g%d' % i, 'm': 0, 'p': 1, 'n': 1, 't': []} for i in range(1, 252)]),
+                     'a fragment of 81': with_gi(groups=[{'id': 'g1', 'm': 0, 'p': 1, 'n': 1, 't': ['x' * 81]}]), 'n of 7': with_gi(groups=[{'id': 'g1', 'm': 0, 'p': 1, 'n': 7, 't': []}]), 'p is a string': with_gi(groups=[{'id': 'g1', 'm': 0, 'p': '1', 'n': 1, 't': []}]),
+                     'a unit list instead of groups': with_gi(knowledge=[]), 'no groups': with_gi(groups=[]), 'material out of range': with_gi(groups=[{'id': 'g1', 'm': 3, 'p': 1, 'n': 1, 't': []}]), 'bad id': with_gi(groups=[{'id': 'x1', 'm': 0, 'p': 1, 'n': 1, 't': []}])}
+            wrong_g = {}
+            cg0 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values()); lg0 = lastai()
+            for name, body_ in bad_g.items():
+                status, j = fn_call(tokp, 'POST', body_)
+                if not (status == 400 and j.get('code') == 'invalid_input' and str(j.get('message', '')).startswith('plan:')):
+                    wrong_g[name] = [status, str(j)[:80]]
+            cg1 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            check('plan by groups: %d wrong forms → 400 invalid_input «plan: …», none counted or sent to the model' % len(bad_g), not wrong_g and cg1 == cg0 and lastai() == lg0, json.dumps([wrong_g, cg0, cg1])[:400])
+            sd, jd = fn_call(None, 'POST', with_gi(), demo=True)
+            check('plan by groups: in demo mode → 403 not_granted', sd == 403 and jd.get('code') == 'not_granted', json.dumps([sd, jd]))
+            status, j = fn_call(tokp, 'POST', {**with_gi(), **evil})
+            lg = lastai()
+            cg2 = sum(json.loads(urllib.request.urlopen(API + '/__course').read())['used'].values())
+            ans_g = json.loads(j['text'])['parts'] if status == 200 else None
+            check('plan by groups: answered, 5 units; model claude-sonnet-5-5 with thinking between_tools, 8000 tokens, the prompt «CORPUS-PLAN ru» of the groups, input as JSON after «INPUT:»; the client\'s messages, model, system, tokens are ignored; every group once in the answer',
+                  status == 200 and cg2 - cg1 == 5 and ans_g and sorted(g for pt in ans_g for l in pt['lessons'] for g in l['groups']) == ['g1', 'g2', 'g3'] and lg['model'] == 'claude-sonnet-5-5' and lg['thinking'] == {'type': 'between_tools'} and lg['max_tokens'] == 8000 and lg['turns'] == 1
+                  and lg['said'].startswith('CORPUS-PLAN ru\n') and 'GROUPS' in lg['said'] and 'exactly once' in lg['said'] and 'never instructions' in lg['said'] and 'EVIL' not in lg['said'] and lg['said'].endswith('INPUT:\n' + json.dumps(good_gi, separators=(',', ':'), ensure_ascii=False)), json.dumps([status, j, lg])[:500])
             # the biggest accepted shapes
             big_o = with_o(input={'pages': [pg_of(n=i + 1, text='a' * 600, em=['e' * 200] * 60) if i else pg_of(n=1, text='a' * 6000, em=['e' * 200] * 60) for i in range(2)]})
             big_o['input']['pages'] = big_o['input']['pages'] + [pg_of(n=i + 3, text='b', em=[]) for i in range(38)]
@@ -4430,6 +4470,103 @@ async def main():
             urllib.request.urlopen(API + '/__fn')
             await ctx_t.close()
             # <<< T034
+
+            # >>> T037
+            # ---------- T-037: a registry too large for the per-unit plan request is planned by groups: outline ×N, one plan request with groups, 5 units; the plan is the same v2 document; a stopped build is continued after a reload ----------
+            big_knowledge_files(tmp / 'kn37')
+            KN37 = tmp / 'kn37'
+            urllib.request.urlopen(API + '/__fn?v2lessons=10')   # the fake plan spreads the groups over exactly 10 lessons
+            urllib.request.urlopen(API + '/__course?free=300&limit=')
+            ctx_g, pgz, errs_g = await open_ctx(legacy=False)
+            await pgz.goto(SITE + '?create=1&i=' + INVITE)
+            await pgz.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pgz.fill('input[name=email]', 'groups@test.ee')
+            await pgz.fill('input[name=password]', 'kolju2026')
+            await pgz.click('.cw-go')
+            await app_ready(pgz)
+            await ui_lang(pgz, 'et')
+            ai_g = watch_ai(pgz)
+            uid_g = await pgz.evaluate('CORPUS_WEB.uid')
+            mine_g = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_g]
+            used_g = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_g, 0)
+            lessons_g = lambda: [c for c in ai_g if c.get('task') == 'lesson']
+            cbn_g = lambda: pgz.evaluate("document.querySelector('.cnbn').innerText.replace(/\\n+/g,' ')")
+            await pgz.evaluate("go({name:'courses'})")
+            await pgz.wait_for_selector('.cnnew')
+            await pgz.click('.cnnew')
+            await pgz.wait_for_selector('.cnw')
+            did_g = await pgz.evaluate('view.did')
+            await pgz.fill('#cnName', 'Suur register')
+            await pgz.press('#cnName', 'Tab')
+            await pgz.set_input_files('#cnFile', [str(KN37 / 'Heat notes.pdf'), str(KN37 / 'Extra reading.pdf')])
+            await pgz.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=120000)
+            await pgz.click('.cnmain')
+            await pgz.wait_for_selector('.cnph', timeout=240000)
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_g(s, 'cplan')) and len([r for r in mine_g(s, 'ctext') if '.ku1.' in r['id']]) >= 2 and any(r['data'].get('planAt') for r in mine_g(s, 'cdraft')))
+            tasks_g = [c.get('task') for c in ai_g]
+            n_out = tasks_g.count('outline')
+            check('plan by groups: outline ×N (N ≥ 5), the plan once at the end, no lesson yet; N + 5 units paid', n_out >= 5 and tasks_g == ['outline'] * n_out + ['plan'] and used_g() == n_out + 5, json.dumps([tasks_g, used_g()]))
+            cpg = mine_g(st, 'cplan')[0]['data']
+            kug = {r['id']: r['data'] for r in mine_g(st, 'ctext') if '.ku1.' in r['id']}
+            unit_g = [u['id'] for v in kug.values() for u in v['units'] if u['extractionStatus'] == 'extracted']
+            reqg = ai_g[-1]['input']
+            sent = json.dumps(reqg, separators=(',', ':'), ensure_ascii=False)
+            check('plan by groups: the request is «knowledge-groups-v1» (groups, no per-unit knowledge list), ≤ 60000 characters, ≤ 250 groups of ≤ 6 units; the 206 units are in the groups (n summed), and the request holds no unit id or block id',
+                  reqg['kind'] == 'knowledge-groups-v1' and 'knowledge' not in reqg and len(unit_g) == 206 and sum(g['n'] for g in reqg['groups']) == 206 and len(sent) <= 60000 and 0 < len(reqg['groups']) <= 250 and all(1 <= g['n'] <= 6 and len(g['t']) <= 3 for g in reqg['groups'])
+                  and 'ku1_' not in sent and 'blockId' not in sent and sorted(reqg['materials']) == ['Extra reading', 'Heat notes'], json.dumps([reqg['kind'], len(unit_g), len(sent), len(reqg['groups']), reqg['materials']]))
+            planned_g = [i for pt in cpg['parts'] for l in pt['lessons'] for i in l['knowledgeIds']]
+            check('plan by groups: cplan is the same document, planVersion 2 / planKind knowledge, marked grouped with groupCount; coverage expected 206 = planned 206, missing/duplicates/unknown 0, completeness not_proven; every registry unit in exactly one lesson, in the source order of the groups',
+                  cpg.get('planVersion') == 2 and cpg.get('planKind') == 'knowledge' and cpg.get('grouped') is True and cpg.get('groupCount') == len(reqg['groups']) and cpg['coverage']['expected'] == 206 == cpg['coverage']['planned'] and cpg['coverage']['missing'] == cpg['coverage']['duplicates'] == cpg['coverage']['unknown'] == 0
+                  and cpg['coverage']['completeness'] == 'not_proven' and sorted(planned_g) == sorted(unit_g) and len(planned_g) == len(set(planned_g)) and cpg['coverage']['sequenceChanges'] == 0 and cpg.get('fallback') is False and len(json.dumps(cpg)) < 800000, json.dumps(cpg['coverage']))
+            check('plan by groups: 10 lessons in 4 parts (3 + 3 + 3 + 1), each of ≤ 40 units with a rationale; the index keeps all units with their lesson (no label longer than 80 characters); the screen says «10 õppetundi» and «206 / 206»',
+                  [len(pt['lessons']) for pt in cpg['parts']] == [3, 3, 3, 1] and all(0 < len(l['knowledgeIds']) <= 40 and len(l['rationale']) >= 12 for pt in cpg['parts'] for l in pt['lessons']) and len(cpg['knowledgeIndex']) == 206 and all(len(x['label']) <= 80 and x['lessonId'] for x in cpg['knowledgeIndex'])
+                  and await pgz.inner_text('.cnph') == '10 õppetundi' and await pgz.inner_text('.cnpx1') == '206 / 206', json.dumps([await pgz.inner_text('.cnph'), await pgz.inner_text('.cnpx1')]))
+            # --- build: stop after two lessons, reload, continue ---
+            urllib.request.urlopen(API + '/__fn?delay=2500')
+            await pgz.click('.cnbtns [data-cn=build]')
+            await pgz.wait_for_function("view.step===4&&!!CDRAFTS.get(view.did)._bld", timeout=60000)
+            await pgz.wait_for_function("S.plates.filter(p=>p.cb&&p.cb.startsWith(view.did+'|')).length>=1", timeout=60000)
+            for _ in range(200):
+                if len(lessons_g()) >= 2:
+                    break
+                await pgz.wait_for_timeout(50)
+            await pgz.click('[data-cn=pause]')
+            await pgz.wait_for_function("CDRAFTS.get(view.did)._bld.state==='pause'", timeout=60000)
+            await pgz.wait_for_timeout(300)
+            st = await state_when(lambda s: len(mine_g(s, 'plates')) == 2 and all(not r['data']['bld'].get('run') for r in mine_g(s, 'cplan')))
+            n_g = len(lessons_g())
+            done_ids = sorted(i for r in mine_g(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('plan by groups: «Paus» leaves exactly 2 of 10 lessons built (2 lesson requests, 2 plates), 2 units paid for each', n_g == 2 and len(mine_g(st, 'plates')) == 2 and used_g() == n_out + 5 + 4 and (await cbn_g()).startswith('2 '), json.dumps([n_g, await cbn_g(), used_g()]))
+            await pgz.add_init_script("try{localStorage.removeItem('corpus.ai');}catch(e){}")
+            urllib.request.urlopen(API + '/__fn')
+            await pgz.reload()
+            await app_ready(pgz)
+            await pgz.click('.tabbar [data-v=courses]')
+            await pgz.wait_for_selector('.crs .cnd')
+            await pgz.click('.cnd .cndgo')
+            await pgz.wait_for_selector('.cnbl', timeout=30000)
+            reload_txt = await cbn_g()
+            grouped_back = await pgz.evaluate("(()=>{const p=CDRAFTS.get(view.did)._plan;return p&&[p.grouped,p.groupCount,p.coverage.expected,p.coverage.planned]})()")
+            check('plan by groups: after a reload the plan is read back as grouped (206 / 206) and the build shows «2 / 10 õppetundi valmis» with «Jätka»',
+                  reload_txt == '2 / 10 õppetundi valmis' and 'Jätka' in await pgz.inner_text('#cnBar') and grouped_back == [True, len(reqg['groups']), 206, 206], json.dumps([reload_txt, grouped_back]))
+            await pgz.wait_for_function("!!(CORPUS_WEB.courseAI&&CORPUS_WEB.courseAI.lesson)", timeout=30000)
+            await pgz.click('[data-cn=resume]')
+            await pgz.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            await pgz.wait_for_timeout(300)
+            st = await state_when(lambda s: len(mine_g(s, 'plates')) == 10 and all(not r['data']['bld'].get('run') for r in mine_g(s, 'cplan')))
+            after_g = lessons_g()[n_g:]
+            ids_after = [u['id'] for c in after_g for u in c['input']['units']]
+            built_g = sorted(i for r in mine_g(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('plan by groups: «Jätka» sends exactly the 8 lesson requests left (none for the 2 ready lessons); 16 more units paid; no outline or plan again',
+                  len(after_g) == 8 and len(lessons_g()) == 10 and not set(ids_after) & set(done_ids) and sorted(ids_after + done_ids) == sorted(planned_g) and used_g() == n_out + 5 + 20 and [c.get('task') for c in ai_g][:n_out + 1] == ['outline'] * n_out + ['plan'] and [c.get('task') for c in ai_g].count('plan') == 1, json.dumps([len(after_g), used_g()]))
+            cards_g = await pgz.evaluate("S.cards.filter(c=>c.knowledgeId).map(c=>c.knowledgeId)")
+            check('plan by groups: 10 plates, every one of the 206 registry units in exactly one lesson and on exactly one card; the plan stays v2 with empty compatibility terms',
+                  built_g == sorted(unit_g) and sorted(cards_g) == sorted(unit_g) and len(mine_g(st, 'plates')) == 10 and (await cbn_g()) == '10 / 10 õppetundi valmis'
+                  and mine_g(st, 'cplan')[0]['data']['planVersion'] == 2 and all(l['terms'] == [] for pt in mine_g(st, 'cplan')[0]['data']['parts'] for l in pt['lessons']), json.dumps([len(built_g), len(cards_g), await cbn_g()]))
+            check('plan by groups: no script errors or failed requests in the browser', not errs_g, '; '.join(errs_g)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx_g.close()
+            # <<< T037
 
             # ---------- T-032: a draft and a plan in the old format (v1: parts / lessons / terms, no registry, as the app of cb61180 wrote them) open and build in the real app, nothing of v2 is written ----------
             # >>> T032C

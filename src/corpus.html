@@ -752,7 +752,7 @@ html.calm .ibtn.plain.ask.pulse{animation:none}
 @media (prefers-reduced-motion:reduce){.ibtn.plain.ask.pulse{animation:none}}
 .ainudge{display:flex;align-items:center;gap:2px;align-self:flex-start;margin:0 0 6px;border:1px solid var(--line);border-radius:20px;background:var(--surface);padding:0 4px 0 0}
 .ainudge .go{display:flex;align-items:center;gap:6px;border:none;background:none;color:var(--accent);font-weight:600;font-size:13px;padding:7px 4px 7px 12px}
-.ainudge .x{border:none;background:none;color:var(--muted,var(--ink));opacity:.6;display:flex;align-items:center;padding:6px}
+.ainudge .x{border:none;background:none;color:var(--muted,var(--ink));opacity:.6;display:flex;align-items:center;justify-content:center;min-width:38px;min-height:38px;margin:-4px 0;padding:0}
 .hvars{display:flex;flex-direction:column;gap:6px;margin:-2px 0 10px}
 .hvars:empty{display:none}
 .hvar{text-align:left;border:1px solid var(--line);background:var(--surface2);border-radius:12px;padding:9px 12px;font-size:14.5px;line-height:1.4;color:var(--ink)}
@@ -2581,6 +2581,7 @@ function distractors(c){
 }
 function tagErr(loc,e){const err=new Error('['+loc+'] '+(e&&e.message?e.message:String(e)));err.stack=e&&e.stack;return err;}
 function setupCard(){
+  CH.pin=null;
   try{
     SS.phase='ask';SS.typed='';SS.picked=null;SS.result=null;SS.peek=new Set();SS.fallback=false;SS.opts=null;SS.suggest=0;
     const c=cardById(SS.cur);if(!c)return;
@@ -2802,7 +2803,7 @@ function nextCard(){
   }catch(e){recoverFromError(tagErr('render',e));}
 }
 function undoStudy(){
-  cancelAuto();
+  cancelAuto();if(SS)SS.nudge=null;CH.pin=null;
   const s=SS&&SS.undo.pop();if(!s)return;if(SS.log)SS.log.pop();const c=cardById(s.id);if(!c){render();return;}
   const d=deckById(s.deckId||SS.deckId);
   if(s.counted){const hk=c.hint&&!s.card.hint?c.hint:null;Object.keys(c).forEach(k=>{if(!(k in s.card))delete c[k];});Object.assign(c,s.card);if(hk){c.hint=hk;c.hintLeft=hintShows();}persist('terms',c.id);
@@ -8739,8 +8740,8 @@ function aiNudgeHtml(){
   return '<div class="ainudge"><button class="go" data-act="aiNudgeGo">'+ic('spark',16)+'<span>Объяснить с Claude</span></button><button class="x" data-act="aiNudgeOff" aria-label="Больше не предлагать">'+ic('close',14)+'</button></div>';
 }
 function aiNudgeMaybe(c){
-  if(!SS||SS.cram||META.aiNudgeOff||!chatAvailable()||SS.nudgeShown)return;
-  const d=dayKey(),n=META.aiNudge&&META.aiNudge.day===d?META.aiNudge.n:0;if(n>=3)return;
+  if(!SS||SS.cram||META.aiNudgeOff||!chatAvailable()||SS.nudgeShown||CH.open)return;
+  const d=dayKey(),n=META.aiNudge&&META.aiNudge.day===d?(Number(META.aiNudge.n)||0):0;if(n>=3)return;
   SS.nudge=c.id;SS.nudgeShown=true;META.aiNudge={day:d,n:n+1};persistMeta();
 }/* ---------- hard cards ("leeches") and Claude-made mnemonics ---------- */
 function edLinkStart(){const c=cardById(ED&&ED.sel);if(!c)return;flushTerm();ED.linkFrom=c.id;updEd();}
@@ -9514,7 +9515,7 @@ const A={
     window.CORPUS_WEB.signOut();},
   foreignPeek:()=>{S.foreign=false;bootData();},
   askOpen:()=>chatToggle(),
-  aiNudgeGo:()=>{const id=SS&&SS.nudge;const c=id&&cardById(id);SS.nudge=null;if(!c||!chatAvailable()){updStudy();return;}CH.pin=c.id;CH.turns=[];CH.imgFor=null;chatToggle(true);updStudy();chatSend('Объясни «'+cardTitle(c)+'»');},
+  aiNudgeGo:()=>{const id=SS&&SS.nudge;const c=id&&cardById(id);if(CH.busy){chatToggle(true);return;}SS.nudge=null;if(!c||!chatAvailable()){updStudy();return;}CH.pin=c.id;CH.turns=[];CH.imgFor=null;chatToggle(true);updStudy();chatSend('Объясни «'+cardTitle(c)+'»');},
   aiNudgeOff:()=>{META.aiNudgeOff=true;persistMeta();if(SS)SS.nudge=null;const n=$('.ainudge');if(n)n.remove();},
   home:()=>go({name:'home'}),
   library:()=>go({name:'library'}),
@@ -9588,7 +9589,7 @@ const A={
   lesson:()=>lessonStart(view.deckId),
   crBack:()=>crHome(),
   crList:()=>go({name:'courses',fid:'-'}),
-  studyExit:()=>{if(SS&&SS.hard){const hf=SS.hardFolderId||null;SS=Object.assign({},{zoom:SS.zoom});go(hf?{name:'hard',folderId:hf}:{name:'hard'});return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
+  studyExit:()=>{CH.pin=null;if(SS)SS.nudge=null;if(SS&&SS.hard){const hf=SS.hardFolderId||null;SS=Object.assign({},{zoom:SS.zoom});go(hf?{name:'hard',folderId:hf}:{name:'hard'});return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
   studyUndo:()=>undoStudy(),
   introNext:()=>introGo(1),
   introPrev:()=>introGo(-1),

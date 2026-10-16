@@ -1516,6 +1516,12 @@ async def main():
             await pg.click('[data-act=studyHome]')
             await pg.wait_for_function("view.name==='home'", timeout=5000)
             check('summary: «back to home» leads to the home screen', True)
+            check('home: the 16-week heatmap is gone, a 7-day strip stays', await pg.evaluate("!document.querySelector('#app .svhm') && !document.querySelector('#app .hm') && document.querySelectorAll('#app .svdots i').length===7"))
+            await pg.evaluate("go({name:'globalStats'})")
+            await pg.wait_for_selector('#app .sbox .hm', timeout=5000)
+            check('stats: the full calendar is called «Activity» (not the tests «Calendar»)', await pg.evaluate("(()=>{const hs=[...document.querySelectorAll('#app .sbox h3')].map(h=>h.textContent);return hs.some(t=>['Активность','Activity','Aktiivsus'].includes(t))&&!hs.some(t=>t.indexOf('Календарь занятий')>=0);})()"))
+            check('stats: «Активность» has en/et translations', '["Активность", "Activity", "Aktiivsus"]' in open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read())
+            await pg.evaluate("go({name:'home'})")
             # ---------- «Hard» virtual deck: tile, all modes, schedule-affecting answers, leaving after 3 correct in a row ----------
             await pg.evaluate("go({name:'library'})")
             await pg.wait_for_selector('.page.tabbed')

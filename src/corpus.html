@@ -1181,6 +1181,7 @@ const I18N_PLU={
 };
 const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],et:['jaan','veebr','märts','apr','mai','juuni','juuli','aug','sept','okt','nov','dets']};
 const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
+I18N_DICT.push(["Активность", "Activity", "Aktiivsus"]);
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
 I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
 I18N_DICT.push(
@@ -1922,7 +1923,6 @@ SCREENS.home={
       '<div class="svtiles">'+tiles+'<button class="svtile svnew" data-act="addMenu" data-noi18n><span class="svt-img plus">'+ic('plus',24)+'</span><span class="svt-n">'+T3('Новая колода','New deck','Uus pakk')+'</span><span class="svt-m">'+T3('или импорт из Anki','or import from Anki','või impordi Ankist')+'</span></button></div>'+
       factHtml+
       '<div class="svsec" data-noi18n><span>'+T3('Как учить','How to study','Kuidas õppida')+'</span></div>'+modeGridHtml(mode,'globalMode')+
-      '<div class="svcard svhm"><div class="svcard-h" data-noi18n><b>'+T3('Активность','Activity','Aktiivsus')+'</b><small>'+plx(16,['неделя','недели','недель'],['week','weeks'],['nädal','nädalat'])+'</small></div>'+heatmapHtml(ids,16)+'</div>'+
       '</div>';
   },
   mount(){
@@ -2057,7 +2057,7 @@ function statsHtml(ids){
     '<div class="sbox"><h3>Карточки</h3><div class="sbar">'+seg.map(s=>b[s[0]]?'<i style="flex:'+b[s[0]]+';background:'+s[1]+'"></i>':'').join('')+'</div>'+
     '<div class="legend">'+seg.map(s=>'<span><i style="background:'+s[1]+'"></i>'+s[2]+' '+b[s[0]]+'</span>').join('')+'</div></div>'+
     '<div class="sbox"><h3>Прогноз повторений на 2 недели</h3><div class="fc">'+fc.map((v,i)=>'<div><em>'+(v||'')+'</em><span class="bw"><i style="height:'+(v/mx*100)+'%"></i></span><small>'+(i===0?'сег':new Date(addDays(now,i)).getDate())+'</small></div>').join('')+'</div></div>'+
-    '<div class="sbox"><h3>Календарь занятий</h3>'+heatmapHtml(ids,17)+'</div>'+hardHtml(ids);
+    '<div class="sbox"><h3>Активность</h3>'+heatmapHtml(ids,17)+'</div>'+hardHtml(ids);
 }
 SCREENS.deck={
   html(){

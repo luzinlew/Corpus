@@ -4372,13 +4372,31 @@ async def main():
                      'et': 'TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.'}
             check('truncated outline: the plan screen warns about both materials in ru / en / et («Ответ ИИ оборвался…», «The AI answer was cut short…», «TI vastus katkes…»)',
                   all(len(warn_t[k]) == 2 and all(w.endswith(': ' + msg_t[k]) for w in warn_t[k]) and any(w.startswith('Heat notes') for w in warn_t[k]) for k in msg_t), json.dumps(warn_t, ensure_ascii=False))
+            # after a reload the warning is read back from the saved registry / plan
+            await pt.reload()
+            await app_ready(pt)
             await ui_lang(pt, 'et')
-            await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:3})")
-            await pt.wait_for_selector('.cnbtns [data-cn=build] b')
+            await pt.click('.tabbar [data-v=courses]')
+            await pt.wait_for_selector('.crs .cnd')
+            await pt.click('.cnd .cndgo')
+            await pt.wait_for_selector('.cnbtns [data-cn=build] b', timeout=60000)
+            warn_r = await pt.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            check('truncated outline: after a page reload and reopening the plan the warning is still there for both materials (read from the saved registry and plan)',
+                  len(warn_r) == 2 and all(w.endswith(': ' + msg_t['et']) for w in warn_r) and any(w.startswith('Heat notes') for w in warn_r) and any(w.startswith('Extra reading') for w in warn_r), json.dumps(warn_r, ensure_ascii=False))
             n_t = len(ai_t)
             await pt.click('.cnbtns [data-cn=build]')
             await pt.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
             st = await state_when(lambda s: len(mine_t(s, 'plates')) == 3 and all(not r['data']['bld'].get('run') for r in mine_t(s, 'cplan')))
+            note_msg = {'ru': 'Часть найденного в материалах не сохранена: ответ ИИ оборвался.', 'en': 'Part of what was found in the materials was not saved: the AI answer was cut off.', 'et': 'Osa materjalidest leitust jäi salvestamata: TI vastus katkes.'}
+            note_t = {}
+            for lg_ in ('et', 'ru', 'en'):
+                if lg_ != 'et':
+                    await ui_lang(pt, lg_)
+                await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:4})")
+                await pt.wait_for_selector('#cnBd .cnktest')
+                note_t[lg_] = await pt.evaluate("[...document.querySelectorAll('#cnBd .cnwarn[data-k=truncated-note]')].map(x=>x.innerText)")
+            check('truncated outline: the course build screen shows the short mark «part of the findings was not saved» in et / ru / en, once, next to the test-feature note',
+                  all(note_t[k] == [note_msg[k]] for k in note_msg), json.dumps(note_t, ensure_ascii=False))
             built_t = sorted(i for r in mine_t(st, 'plates') for i in r['data']['knowledgeIds'])
             check('truncated outline: the lessons (v2) are built from the kept units: 3 lesson requests and nothing else (no outline again), 3 plates with the 7 units, 3 × 2 = 6 more units paid',
                   [c.get('task') for c in ai_t[n_t:]] == ['lesson'] * 3 and built_t == ids_t and used_t() == 7 + 6, json.dumps([[c.get('task') for c in ai_t[n_t:]], len(built_t), used_t()]))

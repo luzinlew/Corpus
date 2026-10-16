@@ -4958,8 +4958,15 @@ function cnKnowledgeSalvage(text){
 }
 /* The whole units of a cut-short outline reply go through the same cnKnowledgeClean; the registry stays incomplete and says how many units were kept.
    null (the old path: knowledge_missing) when the reply is not an invalid_json one or no unit passes validation. */
+/* Unique issue codes, at most 40. The truncation codes come first so they are never pushed out; the per-part outline_truncated_partial:N codes become one with the total N. */
+function cnIssuesCap(list){
+  const u=Array.from(new Set(list)),pre='outline_truncated_partial:';let tot=0,has=false;
+  const rest=u.filter(x=>{if(typeof x==='string'&&x.startsWith(pre)){has=true;tot+=Math.max(0,+x.slice(pre.length)||0);return false;}return true;});
+  const tr=rest.filter(x=>typeof x==='string'&&x.startsWith('outline_truncated')),other=rest.filter(x=>!tr.includes(x));
+  return tr.concat(has?[pre+tot]:[],other).slice(0,40);
+}
 function cnKnowledgePartial(e,blocks,m){
-  if(!e||e.code!=='invalid_json')return null;
+  if(!e||e.code!=='invalid_json'||e.truncated!==true)return null;   // only an explicitly cut-short reply (truncated:true) is read; a spoiled one is not
   const s=cnKnowledgeSalvage(e.text);if(!s||!s.knowledge.length)return null;
   const ku=cnKnowledgeClean({knowledge:s.knowledge},blocks,m,{truncated:true});if(!ku.units.length)return null;
   ku.status='incomplete';ku.issues.push('outline_truncated_partial:'+ku.units.length);return ku;
@@ -5146,7 +5153,7 @@ async function cnStepOutline(d,r){
             res[i]={topics:out,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens};
           }
           else if(res[i]){res[i].outlineValid=false;res[i].knowledge.status='incomplete';res[i].knowledge.issues.push('outline_shape_invalid');}
-          else{const input=cnKnowledgeOutlineInput(j.m,j),meta=e&&e.courseAI||{};knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:e&&e.code||'failed',truncated:e&&e.code==='invalid_json'});cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(input).length,outputChars:String(e&&e.text||'').length};r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);res[i]={topics:null,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens,outlineValid:false};}
+          else{const input=cnKnowledgeOutlineInput(j.m,j),meta=e&&e.courseAI||{};knowledge=cnKnowledgeClean(null,j.blocks,j.m,{transportError:e&&e.code||'failed',truncated:!!(e&&e.code==='invalid_json'&&e.truncated===true)});cacheMeta={model:String(meta.model||''),inputTokens:Math.max(0,+(meta.usage&&meta.usage.input_tokens)||0),outputTokens:Math.max(0,+(meta.usage&&meta.usage.output_tokens)||0),inputChars:JSON.stringify(input).length,outputChars:String(e&&e.text||'').length};r.cache.knowledge.set(j.key,knowledge);r.cache.knowledgeMeta.set(j.key,cacheMeta);res[i]={topics:null,knowledge:knowledge,inputChars:cacheMeta.inputChars,outputChars:cacheMeta.outputChars,model:cacheMeta.model,inputTokens:cacheMeta.inputTokens,outputTokens:cacheMeta.outputTokens,outlineValid:false};}
           if(!part){failed=failed||e;return;}
         }
       }
@@ -5180,7 +5187,7 @@ async function cnKnowledgePlanInput(d,r){
     const m=materials[mi],state=await cnKnowledgeOf(m,d.id);if(r.cancel)return null;
     if((m.role==='base'||m.role==='extra')&&(!state.docs.length||state.status==='storage_error'))throw {code:'knowledge_incomplete'};
     if(state.status==='storage_error')throw {code:'knowledge_incomplete'};
-    const docs=state.docs||[],docIssues=Array.from(new Set(docs.flatMap(x=>x.issues||[]))).slice(0,40);
+    const docs=state.docs||[],docIssues=cnIssuesCap(docs.flatMap(x=>x.issues||[]));
     const sourceReview=docs.some(x=>x.sourceProcessingStatus==='review_required')||(!docs.length&&m.role==='pics'&&m.kind==='img'&&(+m.photos||0)>0);
     if(sourceReview)reviewMaterials++;
     if(state.status!=='processed'||docs.some(x=>x.outlineStatus!=='processed'))registryIncomplete++;
@@ -5642,6 +5649,12 @@ function cnKnowledgePlanInner(d,doc){
   });
   if(unresolved.length)h+='<details class="cnlost"><summary>'+T3('Единицы, требующие отдельной проверки','Units needing separate review','Eraldi kontrolli vajavad üksused')+' · '+unresolved.length+'</summary><ul>'+unresolved.map(u=>'<li><code>'+esc(u.id)+'</code> · '+esc(u.type)+' · '+esc(u.extractionStatus)+' / '+esc(u.sourceLinkStatus)+' · '+esc(u.sources.map(s=>(s.materialName||s.materialId)+(s.page?T3(', стр. ',', p. ',', lk ')+s.page:'')).join(' · '))+'</li>').join('')+'</ul></details>';
   return h;
+}
+/* A short mark on the build screen when a material's registry lost part of the findings to a cut-short AI answer. */
+function cnTruncNote(plan){
+  const ms=plan&&plan.sourceAssessment&&plan.sourceAssessment.materials;
+  if(!Array.isArray(ms)||!ms.some(m=>m&&Array.isArray(m.issues)&&m.issues.some(x=>typeof x==='string'&&x.startsWith('outline_truncated'))))return '';
+  return '<div class="cnwarn sm" role="note" data-k="truncated-note">'+esc(T3('Часть найденного в материалах не сохранена: ответ ИИ оборвался.','Part of what was found in the materials was not saved: the AI answer was cut off.','Osa materjalidest leitust jäi salvestamata: TI vastus katkes.'))+'</div>';
 }
 function cnKTestNote(){return '<div class="cnwarn cnktest" role="note">'+esc(T3('Тестовая функция. План и уроки собраны автоматически: источники и смысл не проверены, часть знаний могла не найтись. Не используйте как единственный материал.','Test feature. The plan and lessons are generated automatically: sources and meaning are not verified, and some knowledge may be missed. Do not rely on this as your only material.','Testfunktsioon. Plaan ja õppetunnid on koostatud automaatselt: allikaid ja tähendust pole kontrollitud ning osa teadmisi võis jääda leidmata. Ära kasuta seda ainsa õppematerjalina.'))+'</div>';}
 function cnPlanInner(d){
@@ -6614,7 +6627,7 @@ function cnBldInner(d){
   const bl0=d._plan.bld,sp0=b?b.spent:(bl0&&bl0.spent)||0,est0=b?b.est:sp0+cnBldEst(d);
   const spend=b||sp0>0?(cnKnowledgePlanBlocked(d._plan)?T3('Квота: '+sp0+' из ≈ '+est0+' единиц (по 2 на урок; один AI-вызов на урок)','Quota: '+sp0+' of ≈ '+est0+' units (2 per lesson; one AI call per lesson)','Kvoot: '+sp0+' / ≈ '+est0+' ühikut (2 õppetunni kohta; üks TI-päring õppetunni kohta)'):T3('Израсходовано '+sp0+' из ≈ '+est0+' запросов','Used '+sp0+' of ≈ '+est0+' requests','Kasutatud '+sp0+' / ≈ '+est0+' päringut'))+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):'')+cnUsageText(b&&b.usage):'';
   const nOf=T3('из '+total+' '+(total%10===1&&total%100!==11?'урока':'уроков')+' готово','of '+total+' '+(total===1?'lesson':'lessons')+' ready','/ '+total+' õppetundi valmis');
-  let h=(cnKnowledgePlanBlocked(d._plan)?cnKTestNote():'')+'<div class="cnbsum"><div class="cnbn"><b>'+dn+'</b><span>'+esc(nOf)+'</span></div><span class="cnbbar"><i style="width:'+pct+'%"></i></span><div class="cnbnote">'+esc(note)+'</div>'+(spend?'<div class="cnbnote">'+esc(spend)+'</div>':'')+'</div>';
+  let h=(cnKnowledgePlanBlocked(d._plan)?cnKTestNote()+cnTruncNote(d._plan):'')+'<div class="cnbsum"><div class="cnbn"><b>'+dn+'</b><span>'+esc(nOf)+'</span></div><span class="cnbbar"><i style="width:'+pct+'%"></i></span><div class="cnbnote">'+esc(note)+'</div>'+(spend?'<div class="cnbnote">'+esc(spend)+'</div>':'')+'</div>';
   if(state==='quota')h+='<div class="cnwarn cnerr" role="alert">'+esc(T3('Лимит ИИ для курсов исчерпан'+(left!=null?' — осталось запросов: '+left:'')+'. Готовые уроки сохранены; продолжите, когда лимит обновится.','The AI limit for courses is used up'+(left!=null?' — requests left: '+left:'')+'. Ready lessons are kept; continue when the limit is renewed.','Kursuste TI limiit on otsas'+(left!=null?' – päringuid jäänud: '+left:'')+'. Valmis õppetunnid on salvestatud; jätka, kui limiit uueneb.'))+'</div>';
   if(dn&&!running&&!cnKnowledgePlanBlocked(d._plan))h+='<button class="cnlost" data-cn="refresh">'+T3('Обновить рисунки и рамки','Update the pictures and frames','Uuenda pildid ja raamid')+'</button>';
   if(b&&b.mode==='refresh'&&running)h+='<div class="cnbnote" style="padding:0 4px">'+esc(T3('Обновляю рисунки: '+b.rf.k+' из '+b.rf.n,'Updating the pictures: '+b.rf.k+' of '+b.rf.n,'Uuendan pilte: '+b.rf.k+' / '+b.rf.n))+'</div>';

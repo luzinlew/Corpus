@@ -89,6 +89,12 @@ ok("no whole unit: partial gives nothing (null) → the old path (knowledge_miss
   const old = logic.cnKnowledgeClean(null, blocks, M, { transportError: "invalid_json", truncated: true });
   assert.ok(old.issues.includes("knowledge_missing") && old.issues.includes("outline_truncated")); assert.equal(old.units.length, 0);
 });
+ok("partial: invalid_json WITHOUT truncated:true (spoiled, not cut short) is not read, even with whole units in the text → null", () => {
+  const text = cutInside(full, 5);
+  for (const t of [false, undefined, "true", 1]) assert.equal(partial({ code: "invalid_json", message: "no JSON in the answer", truncated: t, text }, blocks, M), null, String(t));
+  assert.equal(partial({ code: "invalid_json", message: "no JSON in the answer", text }, blocks, M), null);
+  assert.ok(partial(err(text), blocks, M), "truncated:true is read as before");
+});
 ok("salvage: a reply in a ```json fence is read the same way; text over the size limit is not read", () => {
   assert.equal(salvage("```json\n" + cutInside(full, 3)).knowledge.length, 3);
   assert.equal(salvage(cutInside(full, 3) + " ".repeat(200001)), null);
@@ -126,6 +132,12 @@ async function step(answer) {
     assert.equal(none.thrown && none.thrown.code, "invalid_json"); assert.equal(none.calls.length, 1); assert.equal(none.r.spent, 1);
     const d = none.docs[0]; assert.equal(d.units.filter(u => u.extractionStatus === "extracted").length, 0);
     assert.ok(d.issues.includes("knowledge_missing") && d.issues.includes("outline_truncated")); assert.ok(!d.issues.some(x => x.startsWith("outline_truncated_partial")));
+  });
+  const spoiled = await step(() => { throw { code: "invalid_json", message: "no JSON in the answer", truncated: false, text: cutInside(full, 5) }; });
+  ok("step: invalid_json without truncated (spoiled JSON with whole units) → as before: step fails, registry empty, knowledge_missing, NO outline_truncated*, one spent unit", () => {
+    assert.equal(spoiled.thrown && spoiled.thrown.code, "invalid_json"); assert.equal(spoiled.calls.length, 1); assert.equal(spoiled.r.spent, 1);
+    const d = spoiled.docs[0]; assert.equal(d.units.filter(u => u.extractionStatus === "extracted").length, 0);
+    assert.ok(d.issues.includes("knowledge_missing")); assert.ok(!d.issues.some(x => x.startsWith("outline_truncated")), JSON.stringify(d.issues));
   });
   const whole = await step(() => clone(full));
   ok("step (regression): a whole reply gives the same 8 units as cnKnowledgeClean, processed, no truncation issues", () => {

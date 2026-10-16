@@ -528,7 +528,7 @@ async def main():
             await pg.click('.tour [data-tour=end]')
             await pg.wait_for_function("!document.querySelector('#layer .tour')")
             check('tour closes and is remembered', await pg.evaluate('META.tourSeen===1'))
-            await pg.click('[data-act=tour]')
+            await pg.click('[data-act=tour] >> visible=true')
             await pg.wait_for_selector('#layer .tour')
             await pg.click('.tour [data-tour=skip]')
             await pg.wait_for_function("!document.querySelector('#layer .tour')")
@@ -721,15 +721,27 @@ async def main():
                 await pg.evaluate("go({name:'home'});go({name:'calendar'})")
                 D = await pg.evaluate("(()=>{const e=document.querySelector('#app>.page>*');return parseFloat(getComputedStyle(e).animationDuration);})()")
                 check('prefers-reduced-motion: the tab entrance animation has ~0 duration', D <= 0.01, str(D))
-                await pg.emulate_media(reduced_motion=None)
+                await pg.emulate_media(reduced_motion='no-preference')
                 await pg.set_viewport_size({'width': 1440, 'height': 810})
                 for v in ('home', 'library', 'home'):
                     await pg.evaluate("go({name:'%s'})" % v)
                 await pg.wait_for_timeout(800)
-                W = await pg.evaluate("[document.querySelector('.tabwrap').getAnimations().length,document.documentElement.classList.contains('tw-in')]")
-                check('sidebar entrance runs only once: no running animation and no tw-in class after later renders', W == [0, False], json.dumps(W))
+                await pg.evaluate("window.__twIn=1;go({name:'library'})")
+                W = await pg.evaluate("[document.documentElement.classList.contains('tw-in'),document.querySelector('.tabwrap').getAnimations().length]")
+                check('sidebar entrance runs only once: with the flag set, a new render adds no tw-in class and no animation', W == [False, 0], json.dumps(W))
+                await pg.evaluate("window.__twIn=0;render()")
+                W = await pg.evaluate("[document.documentElement.classList.contains('tw-in'),document.querySelector('.tabwrap').getAnimations().length]")
+                check('sidebar entrance: with the flag reset, render adds tw-in and one running animation', W == [True, 1], json.dumps(W))
+                await pg.wait_for_timeout(800)
+                W = await pg.evaluate("[document.documentElement.classList.contains('tw-in'),document.querySelector('.tabwrap').getAnimations().length,window.__twIn]")
+                check('sidebar entrance: the class is removed and the animation ends', W == [False, 0, 1], json.dumps(W))
+                await pg.evaluate("go({name:'library'})")
+                await pg.evaluate("document.documentElement.classList.add('calm');go({name:'home'});go({name:'library'})")
+                C = await pg.evaluate("(()=>{const e=document.querySelector('.dgrid>*');return e?[getComputedStyle(e).animationName,parseFloat(getComputedStyle(e).animationDuration)]:null;})()")
+                check('calm mode: grid items have no entrance animation', C is not None and (C[0] == 'none' or C[1] <= 0.01), json.dumps(C))
             finally:
-                await pg.emulate_media(reduced_motion=None)
+                await pg.emulate_media(reduced_motion='no-preference')
+                await pg.evaluate("document.documentElement.classList.remove('calm')")
                 await pg.set_viewport_size({'width': 390, 'height': 844})
                 await pg.evaluate("go({name:'home'})")
 
@@ -863,6 +875,13 @@ async def main():
                 await pg.evaluate("""(f1=>{S.folders=S.folders.filter(f=>f.id!=='zf2');S.decks=S.decks.filter(d=>d.folderId!=='zf2');S.plates=S.plates.filter(p=>!p.id.startsWith('zp'));
                   go({name:'courses',fid:f1});})(S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link))).id)""")
                 await pg.wait_for_selector('.crs.chome .clrow')
+            try:
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate("(()=>{const r=document.querySelector('.page.crs.chome').getBoundingClientRect();return {w:r.width,l:r.left,r:innerWidth-r.right};})()")
+                check('layout 1440 «Course» page: 700–961px wide and centred in the free area', 700 <= R['w'] <= 961 and abs((R['l'] - 232) - R['r']) < 20, json.dumps(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
 
             # «Calendar», «Statistics», «More» on wide screens
             try:

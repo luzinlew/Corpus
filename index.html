@@ -4703,7 +4703,7 @@ function cnMatHtml(d,m){
   return '<div class="cnf" data-mid="'+esc(m.id)+'"><div class="cnfr"><span class="cnfi">'+(i?'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9.5 9"/></svg>'
       :'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>')+'</span>'+
     '<div class="cnfm"><span class="cnfn" data-noi18n>'+esc(m.name)+'</span><span class="cnfs'+(st[3]?' bad':'')+'">'+esc(st[0])+' · '+esc(st[1])+'</span>'+
-    (st[2]!==null?'<span class="cnpb"><i style="width:'+st[2]+'%"></i></span>':'')+(lost?'<span class="cnfs">'+esc(lost)+'</span>':'')+'</div>'+
+    (st[2]!==null?'<span class="cnpb"><i style="width:'+st[2]+'%"></i></span>':'')+(lost?'<span class="cnfs">'+esc(lost)+'</span>':'')+((m.role==='base'||m.role==='extra')&&m.status==='ready'&&m.olN>CN_OUT.maxChunks?'<span class="cnfs bad">'+esc(cnBigText(m))+'</span>':'')+'</div>'+
     '<button class="cnrm" data-cn="rm" data-mid="'+esc(m.id)+'" aria-label="'+esc(T3('Убрать ','Remove ','Eemalda ')+m.name)+'"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'+
     (retry?'<button class="cnretry" data-cn="retry" data-mid="'+esc(m.id)+'">'+T3('Повторить','Retry','Proovi uuesti')+'</button>':'')+'<div class="cnrg" role="radiogroup" aria-label="'+esc(T3('Роль файла','File role','Faili roll'))+'">'+CN_ROLES.map(r=>'<button role="radio" class="cnr r-'+r+'" aria-checked="'+(m.role===r)+'" data-cn="role" data-mid="'+esc(m.id)+'" data-r="'+r+'">'+cnRoleName(r)+'</button>').join('')+'</div>'+
     '<div class="cnrh">'+cnRoleHint(m.role,m)+'</div>'+cnMatAuditHtml(m)+'</div>';
@@ -4734,7 +4734,7 @@ function cnListHtml(d){
 function cnBarHtml(d){
   const ok=cnPlanOk0(d),left=cnLeft(),est=cnEst(d),ok1=d.mats.filter(m=>m.status!=='error'),pages=ok1.reduce((a,m)=>a+(m.kind==='pdf'&&m.status==='ready'?m.pages||0:0),0),photos=ok1.reduce((a,m)=>a+(m.kind==='img'?m.photos||0:0),0);
   const short=ok&&left!=null&&left<est;
-  const sub=ok?(short?T3('не хватит лимита: нужно ≈'+est+', осталось '+left,'not enough limit: ≈'+est+' needed, '+left+' left','limiit ei piisa: vaja ≈'+est+', jäänud '+left):'≈ '+cnNReq(est)+(left!=null?T3(' · осталось '+left,' · '+left+' left',' · jäänud '+left):'')):T3('нужна готовая «Основа»','a ready “Core” is needed','vaja on valmis „Põhi“');
+  const sub=ok?(short?T3('не хватит лимита: нужно ≈'+est+', осталось '+left,'not enough limit: ≈'+est+' needed, '+left+' left','limiit ei piisa: vaja ≈'+est+', jäänud '+left):'≈ '+cnNReq(est)+(left!=null?T3(' · осталось '+left,' · '+left+' left',' · jäänud '+left):'')):(cnBigMat(d)?cnBigText(cnBigMat(d)):T3('нужна готовая «Основа»','a ready “Core” is needed','vaja on valmis „Põhi“'));
   const main='<button class="cnmain'+(ok?' on':'')+'" data-cn="plan"'+(ok?'':' disabled')+'>'+CN_SPARK+'<span><b>'+(d.planAt?T3('Составить заново','Make it again','Koosta uuesti'):T3('Составить план','Make the plan','Koosta plaan'))+'</b><small>'+esc(sub)+'</small></span></button>';
   return '<div class="cnsum">'+(cnBaseOk(d)?plx(ok1.length,['файл','файла','файлов'],['file','files'],['fail','faili'])+' · '+T3(pages+' стр.',pages+' p.',pages+' lk')+' · '+T3(photos+' фото',photos+' photos',photos+' fotot'):T3('Нужен хотя бы один файл с ролью «Основа»','At least one file with the role “Core” is needed','Vaja on vähemalt üks fail rolliga „Põhi“'))+'</div>'+
     (d.planAt?'<div class="cnbtns"><button class="cnbtn2" data-cn="toplan">'+T3('К плану','To the plan','Plaani juurde')+'</button>'+main+'</div>':main);
@@ -4811,7 +4811,7 @@ const CN_PL={outPages:40,outJson:36000,topics:300,terms:1500,photos:60,labels:80
 /* T-039: запросы outline режутся по ожидаемому размеру ответа. E = символы страницы × k (токенов на символ входа: обычный текст 1.6, список коротких строк 2.7; замеры Haiku, предел ответа 4096).
    Кусок — подряд идущие страницы, пока ΣE ≤ target и страниц ≤ maxPages; страница с E > target идёт одна. Строка «короткая», если она короче shortLine или начинается с маркера;
    страница — «список», если таких строк не меньше listShare. Оборванный кусок спрашивается снова половинами (не больше retryCap запросов-повторов на материал, парами); кусков на материал не больше maxChunks. */
-const CN_OUT={target:3000,maxPages:5,maxChunks:80,retryCap:3,kText:1.6,kList:2.7,shortLine:45,listShare:0.6},CN_OUT_MARK=/^\s*(?:[-–—•·*▪●◦]|\d{1,3}[.)])\s/;
+const CN_OUT={target:3000,maxPages:5,maxChunks:80,retryCap:3,   /* ≤3 запросов-повтора на материал, но они идут парами (две половины): на практике одна пара, 2 запроса */kText:1.6,kList:2.7,shortLine:45,listShare:0.6},CN_OUT_MARK=/^\s*(?:[-–—•·*▪●◦]|\d{1,3}[.)])\s/;
 /* сокращения в начале названия раскрываются: «Proc. coracoideus» = «Processus coracoideus» */
 const CN_ABBR={a:'arteria',aa:'arteriae',v:'vena',vv:'venae',n:'nervus',nn:'nervi',m:'musculus',mm:'musculi',lig:'ligamentum',ligg:'ligamenta',proc:'processus',for:'foramen',art:'articulatio',r:'ramus',gl:'glandula',tub:'tuberculum'};
 const cnNorm=s=>String(s==null?'':s).trim().replace(/^([A-Za-z]{1,4})\.\s*/,(m,a)=>Object.hasOwn(CN_ABBR,a.toLowerCase())?CN_ABBR[a.toLowerCase()]+' ':m).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/æ/gi,'ae').replace(/œ/gi,'oe').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
@@ -4839,7 +4839,10 @@ const cnPhotoName=(m,i)=>{const s=(m.sigs||[])[i],k=typeof s==='string'?s.lastIn
 const cnTextMats=d=>d.mats.filter(m=>(m.role==='base'||m.role==='extra')&&m.status==='ready'&&(m.chunks||[]).length).sort((a,b)=>(a.role==='base'?0:1)-(b.role==='base'?0:1));
 /* ≈ сколько запросов уйдёт: число кусков outline (m.olN — по плотности текста, считается при чтении материала; у старых черновиков — по страницам и символам) и 5 единиц на план */
 const cnEst=d=>cnTextMats(d).reduce((a,m)=>a+(m.olN>0?m.olN:Math.max(1,Math.ceil((m.pages||0)/CN_OUT.maxPages),Math.ceil((m.chars||0)*CN_OUT.kText/CN_OUT.target))),0)+5;
-const cnPlanOk0=d=>d.mats.some(m=>m.role==='base'&&m.status==='ready'&&(m.chunks||[]).length)&&!d.mats.some(m=>{const t=cnT(d.id,m.id);return t.run||t.busy;});
+/* T-039: a material that needs more than CN_OUT.maxChunks outline requests (m.olN, counted while it is read) is flagged on its card and blocks the plan before any request */
+const cnBigMat=d=>cnTextMats(d).find(m=>m.olN>CN_OUT.maxChunks)||null;
+const cnBigText=m=>T3('Материал слишком большой: ≈'+m.olN+' запросов к ИИ, предел '+CN_OUT.maxChunks+'. Разделите файл на части.','The material is too large: ≈'+m.olN+' AI requests, the limit is '+CN_OUT.maxChunks+'. Split the file into parts.','Materjal on liiga suur: ≈'+m.olN+' TI päringut, piir on '+CN_OUT.maxChunks+'. Jaga fail osadeks.');
+const cnPlanOk0=d=>d.mats.some(m=>m.role==='base'&&m.status==='ready'&&(m.chunks||[]).length)&&!cnBigMat(d)&&!d.mats.some(m=>{const t=cnT(d.id,m.id);return t.run||t.busy;});
 /* сколько запросов осталось: курсовой лимит, если он есть, иначе дневной */
 function cnLeft(){
   const W=window.CORPUS_WEB,c=W&&W.aiCourse,a=W&&W.ai;
@@ -5435,6 +5438,9 @@ async function cnStepOutline(d,r){
         const rs=[];sub.set(i,{hs:hs,rs:rs});
         for(const h of hs){const b=await runJob(h);if(r.cancel)return;rs.push(b.rec);if(b.err){failed=failed||b.err;break;}}
         if(failed)return;
+        /* both halves cut short again and together keeping fewer units than the cut chunk itself did: keep the units of the chunk (one variant, never mixed) */
+        const cnt=x=>x&&x.knowledge&&x.knowledge.units?x.knowledge.units.length:0;
+        if(a&&!a.err&&rs.some(x=>x&&x.knowledge&&x.knowledge.issues.indexOf('outline_truncated')>=0)&&cnt(a.rec)>rs.reduce((q,x)=>q+cnt(x),0)){sub.delete(i);res[i]=a.rec;}
         done++;continue;
       }
       res[i]=a.rec;

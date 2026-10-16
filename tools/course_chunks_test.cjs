@@ -28,7 +28,7 @@ const chunksOf = (m, pages) => C("cnOutlineChunks")(withBlocks(m, pages).filter(
 const nums = chunks => clone(chunks.map(c => c.map(p => p.n)));
 
 // ---------- (a) the density of a page ----------
-ok("constants: target 3000 tokens, 5 pages, at most 80 chunks, 3 repeat requests, k 1.6 text / 2.7 list", () => {
+ok("constants: target 3000 tokens, 5 pages, at most 80 chunks, repeat-request cap 3 (made in pairs: in practice one pair, 2 requests, a material), k 1.6 text / 2.7 list", () => {
   assert.deepEqual(clone(OUT).target, 3000); assert.equal(OUT.maxPages, 5); assert.equal(OUT.maxChunks, 80); assert.equal(OUT.retryCap, 3); assert.equal(OUT.kText, 1.6); assert.equal(OUT.kList, 2.7);
 });
 ok("page of running text: 1685..2573 characters of long lines are «text» (k 1.6), E = chars × 1.6", () => {
@@ -140,7 +140,7 @@ async function run(mats, how, pre) {
       calls.push(clone(input)); const blocks = input.pages.flatMap(p => p.blocks), raw = { knowledge: unitsOf(blocks), knowledge_limited: false, topics: [] };
       assert.equal(vm.runInContext("1", context), 1);
       const v = how(input, calls.length);
-      if (v === "ok") return raw; if (v === "cut") throw cutErr(raw, Math.ceil(raw.knowledge.length / 2)); if (v === "cut0") throw cutErr(raw, 0);
+      if (v === "ok") return raw; if (v && v.cut != null) throw cutErr(raw, Math.min(v.cut, raw.knowledge.length - 1)); if (v === "cut") throw cutErr(raw, Math.ceil(raw.knowledge.length / 2)); if (v === "cut0") throw cutErr(raw, 0);
       if (v === "spoiled") throw { code: "invalid_json", message: "no JSON in the answer", truncated: false, text: JSON.stringify(raw).slice(0, 80) };
       throw { code: "upstream_error", message: "500", status: 500 };
     } } } }, S: { db: true } });
@@ -153,6 +153,7 @@ const extracted = docs => docs.flatMap(d => d.units.filter(u => u.extractionStat
 const wholeIds = (m, pages) => { const bl = withBlocks(m, pages).flatMap(p => p.blocks); return clone(logic.cnKnowledgeClean({ knowledge: unitsOf(bl) }, bl, m).units.map(u => u.id)).sort(); };
 const issuesOf = docs => [...new Set(docs.flatMap(d => d.issues))];
 const nPages = i => i.pages.length;
+const firstN = i => i.pages[0].n;
 const eightText = Array.from({ length: 8 }, (_, i) => textPage(i + 1, 300));    // chunks [1..5] [6..8]
 
 (async () => {
@@ -198,6 +199,19 @@ const eightText = Array.from({ length: 8 }, (_, i) => textPage(i + 1, 300));    
     assert.equal(t.r.cache.retries.get(M.id), 2);
     const docs = t.docsOf(M.id), got = issuesOf(docs); assert.ok(got.includes("outline_truncated")); assert.ok(got.some(x => x.startsWith("outline_truncated_partial:")));
     assert.ok(docs.every(d => d.outlineStatus === "incomplete")); assert.ok(extracted(docs).length > 0 && extracted(docs).length < wholeIds(M, eightText).length);
+  });
+
+  // round 2: when both halves are cut short and keep fewer units than the cut chunk itself did, the units of the chunk are kept (not mixed with the halves, no duplicates)
+  t = await run([{ m: M, pages: eightText }], i => firstN(i) >= 6 ? "ok" : nPages(i) === 5 ? { cut: 4 } : { cut: 1 });
+  await okA("step: the halves are cut short and keep 1 + 1 units, the cut chunk had 4 → the 4 units of the chunk are kept (no mixing, no duplicates); 3 requests for the chunk, issues outline_truncated + partial:4", async () => {
+    assert.equal(t.thrown, null); assert.equal(t.calls.length, 4);
+    const docs = t.docsOf(M.id), ids = extracted(docs).map(u => u.id), whole = wholeIds(M, eightText);
+    assert.equal(new Set(ids).size, ids.length); assert.equal(ids.length, 4 + 3); assert.ok(ids.every(id => whole.includes(id)));
+    assert.ok(issuesOf(docs).includes("outline_truncated") && issuesOf(docs).includes("outline_truncated_partial:4"), JSON.stringify(issuesOf(docs)));
+  });
+  t = await run([{ m: M, pages: eightText }], i => firstN(i) >= 6 ? "ok" : nPages(i) === 5 ? { cut: 1 } : { cut: 4 });
+  await okA("step: the halves are cut short and keep more (1 + 2 of their 2 and 3 units) than the chunk did (1) → the units of the halves are used (T-034 salvage of each half)", async () => {
+    const docs = t.docsOf(M.id); assert.equal(extracted(docs).length, 3 + 3); assert.ok(issuesOf(docs).includes("outline_truncated_partial:1") && issuesOf(docs).includes("outline_truncated_partial:2"), JSON.stringify(issuesOf(docs)));
   });
 
   const lists = Array.from({ length: 6 }, (_, i) => blockPage(i + 1, 4, 2300));   // 6 chunks of one page, each with 4 blocks

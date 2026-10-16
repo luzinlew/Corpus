@@ -372,6 +372,7 @@ def chunk_files(d):
         return [(True, 24, 50, 800, 'Topic %d: heat in system %d' % (n, n))] + [(False, 12, 50, 770 - 14 * k, 'Detail %d.%d: the transfer of energy in system number %d is described here at some length for line %d.' % (n, k, n, k)) for k in range(1, 13)]
     pdf_file(d / 'Long pages.pdf', [long_page(n) for n in range(1, 5)])
     pdf_file(d / 'Huge chunks.pdf', [long_page(n) for n in range(1, 82)])
+    pdf_file(d / 'Edge chunks.pdf', [long_page(n) for n in range(1, 81)])
     knowledge_files(d / 'x')
     (d / 'x' / 'Extra reading.pdf').replace(d / 'Extra reading.pdf')
     (d / 'x' / 'Heat notes.pdf').replace(d / 'Heat notes.pdf')
@@ -4824,23 +4825,27 @@ async def main():
             check('chunks: no script errors or failed requests in the browser (cap)', not errs_c, '; '.join(errs_c)[:500])
             await ctx_c.close()
 
-            # --- C: a material of more than 80 chunks is refused before any request ---
+            # --- C: a material of more than 80 chunks is flagged as soon as it is read: a red mark on its card, the plan button is off, nothing is sent; exactly 80 chunks is allowed ---
             urllib.request.urlopen(API + '/__fn')
             ctx_c, pc, errs_c, ai_c, uid_c = await t39_open('chunkbig@test.ee')
             did_c = await t39_draft(pc, 'Liiga suur', ['Huge chunks.pdf'])
-            btn_c = await pc.inner_text('.cnmain')
-            check('chunks: the estimate of a material of 81 chunks is «≈ 86 TI päringut» (81 + 5)', '≈ 86 TI päringut' in btn_c, btn_c)
-            await pc.click('.cnmain')
-            await pc.wait_for_selector('.cnerr', timeout=120000)
-            err_c = {}
+            card_c = {}
             for lg_ in ('et', 'ru', 'en'):
                 await ui_lang(pc, lg_)
-                await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:2})")
-                await pc.wait_for_selector('.cnerr')
-                err_c[lg_] = await pc.inner_text('.cnerr')
-            check('chunks: more than 80 chunks → an explicit error in et / ru / en with the numbers («81», «80»), no request is sent, nothing is charged, no «Retry» button',
-                  len(ai_c) == 0 and used39(uid_c) == 0 and 'liiga suur' in err_c['et'] and 'Huge chunks' in err_c['et'] and '81' in err_c['et'] and '80' in err_c['et'] and 'слишком большой' in err_c['ru'] and 'too large' in err_c['en'] and 'Ничего не списано' in err_c['ru']
-                  and await pc.query_selector('[data-cn=rretry]') is None, json.dumps([len(ai_c), used39(uid_c), err_c], ensure_ascii=False))
+                await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:1})")
+                await pc.wait_for_selector('.cnmain')
+                card_c[lg_] = [await pc.inner_text('.cnf .cnfs.bad'), await pc.inner_text('.cnmain'), await pc.is_disabled('.cnmain')]
+            check('chunks: a material of 81 chunks is flagged right after reading, in et / ru / en: red mark «≈ 81 … 80» on the card, the plan button is off and says the same',
+                  all(card_c[k][2] and '81' in card_c[k][0] and '80' in card_c[k][0] and '81' in card_c[k][1] for k in card_c) and 'liiga suur' in card_c['et'][0] and 'слишком большой' in card_c['ru'][0] and 'too large' in card_c['en'][0], json.dumps(card_c, ensure_ascii=False))
+            await pc.click('.cnmain', force=True)
+            await pc.wait_for_timeout(500)
+            check('chunks: a click on the off button sends nothing: 0 AI requests, 0 units charged, no reading screen', len(ai_c) == 0 and used39(uid_c) == 0 and await pc.query_selector('.cnrd') is None, json.dumps([len(ai_c), used39(uid_c)]))
+            did_c = await t39_draft(pc, 'Piiril', ['Edge chunks.pdf'])
+            await ui_lang(pc, 'et')
+            await pc.evaluate("go({name:'courseNew',did:'" + did_c + "',step:1})")
+            await pc.wait_for_selector('.cnmain')
+            btn_c = await pc.inner_text('.cnmain')
+            check('chunks: exactly 80 chunks is allowed: no red mark, the button is on with «≈ 85 TI päringut»', not await pc.is_disabled('.cnmain') and '≈ 85 TI päringut' in btn_c and await pc.query_selector('.cnf .cnfs.bad') is None, btn_c)
             check('chunks: no script errors or failed requests in the browser (too large)', not errs_c, '; '.join(errs_c)[:500])
             await ctx_c.close()
             # <<< T039

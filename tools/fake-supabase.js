@@ -32,7 +32,7 @@ let FN_DELAY = 0;
 /* how the fake Claude answers a lesson translation (set through /__fn, off again with the next /__fn call): drop — the answer lacks the `terms` table; trunc — it is cut short and says stop_reason max_tokens;
    case — the first letter of every Latin word is made a capital; fail_after=N — from the (N+1)th translation request on it answers 429.
    The same switches work for the course outline, plan and lesson requests (they are counted together with the translations, FN_TR_N): drop — the answer lacks `topics` / `parts`;
-   trunc — cut short with stop_reason max_tokens; fail_after — 429 from the model service */
+   trunc — cut short with stop_reason max_tokens (trunc=outline: only the outline, inside its knowledge list, the whole units of the first half kept); fail_after — 429 from the model service */
 let FN_DROP = false, FN_TRUNC = false, FN_HANG = '', FN_CASE = false, FN_FAIL_AFTER = -1, FN_TR_N = 0;
 let FN_V2L = 0;   // v2lessons=N: the knowledge plan has exactly N lessons (the units spread evenly, in source order); 0: FAKE_V2_PER_LESSON units (default 3) in a lesson
 let FN_STATUS_DELAY = 0;   // statusdelay=ms: the answers of corpus_ai_take / corpus_ai_take_course / corpus_demo_take with p_units=0 (the status the site asks for at start) come that much later
@@ -159,7 +159,7 @@ http.createServer(async (req, res) => {
   if (p === '/__lasttr') { send(res, 200, LAST_TR || {}); return; }   // the last translation request that reached the fake Claude
   if (p === '/__fn') {
     FN_URL = u.searchParams.get('off') === '1' ? '' : FN_URL0; FN_DELAY = +u.searchParams.get('delay') || 0;
-    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan', 'lesson'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = ['plan', 'lesson'].includes(u.searchParams.get('hang')) ? u.searchParams.get('hang') : ''; FN_CASE = u.searchParams.get('case') === '1';
+    FN_DROP = u.searchParams.get('drop') === '1'; FN_TRUNC = ['1', 'plan', 'lesson', 'outline'].includes(u.searchParams.get('trunc')) ? u.searchParams.get('trunc') : false; FN_HANG = ['plan', 'lesson'].includes(u.searchParams.get('hang')) ? u.searchParams.get('hang') : ''; FN_CASE = u.searchParams.get('case') === '1';
     FN_FAIL_AFTER = u.searchParams.has('fail_after') ? +u.searchParams.get('fail_after') : -1; FN_TR_N = 0;
     FN_NOCOURSE = ['1', 'err'].includes(u.searchParams.get('nocourse')) ? u.searchParams.get('nocourse') : '';
     FN_STATUS_DELAY = +u.searchParams.get('statusdelay') || 0; FN_V2L = +u.searchParams.get('v2lessons') || 0;
@@ -388,7 +388,7 @@ http.createServer(async (req, res) => {
       const ans = tr(inp);
       if (FN_DROP && ans && typeof ans === 'object') delete ans.terms;
       text = JSON.stringify(ans);
-      if (FN_TRUNC) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
+      if (FN_TRUNC && FN_TRUNC !== 'outline') { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }
     } else if ((om || pm || lm) && at > 0) {
       FN_TR_N++;
       LAST_TR = { model: body.model, max_tokens: body.max_tokens, system: body.system, turns: body.messages.length, said, thinking: body.thinking };
@@ -434,6 +434,12 @@ http.createServer(async (req, res) => {
           knowledge, knowledge_limited: false,
         };
         if (FN_DROP) delete ans.topics;
+        if (FN_TRUNC === 'outline' && knowledge.length) {
+          /* trunc=outline: the knowledge comes first (as the v3 prompt asks) and the reply is cut inside the unit after the first half, stop_reason max_tokens:
+             the whole units before the cut are ceil(n/2) */
+          const keep = Math.ceil(knowledge.length / 2), head = JSON.stringify({ knowledge: knowledge.slice(0, keep) }).length - 2 + 1;
+          text = JSON.stringify({ knowledge, knowledge_limited: false, topics: ans.topics }).slice(0, head + 12); stop = 'max_tokens';
+        }
       } else if (inp.kind === 'knowledge-v1') {
         /* plan v2: every unit of the registry exactly once; a lesson holds at most FAKE_V2_PER_LESSON (default 3) units in source order, a part at most 3 lessons; the title is the beginning of the first unit */
         const per = +(process.env.FAKE_V2_PER_LESSON || 3), ids = (inp.knowledge || []).map((u) => u.id), label = (u) => String(typeof u.content === 'string' ? u.content : JSON.stringify(u.content)).slice(0, 50);
@@ -460,8 +466,12 @@ http.createServer(async (req, res) => {
         ans = { parts };
         if (FN_DROP) delete ans.parts;
       }
-      text = JSON.stringify(ans);
-      if (FN_TRUNC && (FN_TRUNC === '1' || (FN_TRUNC === 'plan' && pm) || (FN_TRUNC === 'lesson' && lm))) { text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; }   // trunc=plan cuts only the plan, trunc=lesson only a lesson
+      if (!(FN_TRUNC === 'outline' && om && stop === 'max_tokens')) text = JSON.stringify(ans);
+      if (FN_TRUNC && (FN_TRUNC === '1' || (FN_TRUNC === 'plan' && pm) || (FN_TRUNC === 'lesson' && lm))) {
+        /* trunc=1 cuts an outline before its first whole knowledge unit (nothing to keep: the app shows the old error; trunc=outline keeps some), the rest in half */
+        const k = om ? text.indexOf('"knowledge":[') : -1;
+        text = text.slice(0, k >= 0 ? Math.min(Math.floor(text.length / 2), k + 13 + 12) : Math.floor(text.length / 2)); stop = 'max_tokens';
+      }   // trunc=plan cuts only the plan, trunc=lesson only a lesson
     } else text = body.system ? JSON.stringify({ ok: true, model: body.model, images: imgs, turns: body.messages.length, thinking: think || null })
       : 'Answer from ' + body.model + ' (' + imgs + ' images) to: ' + said.slice(0, 40);
     send(res, 200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: stop, usage: { input_tokens: 10, output_tokens: 10 } });

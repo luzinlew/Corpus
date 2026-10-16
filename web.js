@@ -616,7 +616,7 @@
     sample.json = async function (input, opts) {
       var j = await ask(input, opts, true);
       var p = parseLoose(j.text);
-      if (j.truncated || !p.ok) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON in the answer', text: j.text };
+      if (j.truncated || !p.ok) throw { code: 'invalid_json', message: j.truncated ? 'the answer was cut short' : 'no JSON in the answer', truncated: !!j.truncated, text: j.text };
       return p.v;
     };
     sample.limits = async function () {

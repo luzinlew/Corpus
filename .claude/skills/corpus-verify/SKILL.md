@@ -19,6 +19,7 @@ description: Как собрать и проверить Corpus — build.py --c
    - `node tools/course_discovery_test.cjs` → `DISCOVERY SYNTHETIC PASSED:`
    - `node tools/course_replay_test.cjs` → `DISCOVERY/CONTEXT/VISUAL TESTS PASSED` и `BUILD RESUME TESTS PASSED`
    - `node tools/course_limits_test.cjs` → `COURSE LIMITS TESTS PASSED`
+   - `node tools/course_truncated_test.cjs` → `ALL TRUNCATED-OUTLINE TESTS PASSED`
    - `node tools/pdf_visual_test.mjs` → `PDF VISUAL REGRESSION TESTS PASSED`
    Предупреждение `ExperimentalWarning: stripTypeScriptTypes` — норма. Режимы на реальных данных (`--evidence`, путь к evidence) здесь не нужны.
 6. После: повторить п.3 и `git status --short` — тест не оставляет файлов.

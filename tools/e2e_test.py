@@ -599,6 +599,32 @@ async def main():
             await pg.click('[data-act=folderOn]')
             check('folder switched back on', (await pg.evaluate('(()=>{const c=globalCounts();return c.new+c.learn+c.review;})()')) == n_on and not await pg.evaluate('!!S.folders[0].off'))
 
+            # folder swipe: the delete button grows with the finger (no red showing through the glass at rest), follows it 1:1 from where the drag starts, and snaps open or shut
+            await pg.evaluate("go({name:'library'})")
+            await pg.wait_for_selector('.folder-swipe .deck')
+            sw = """async (steps) => {
+              const row = document.querySelector('.folder-swipe'), main = row.querySelector('.deck'), r = main.getBoundingClientRect();
+              const y = r.y + r.height / 2, x0 = r.x + r.width - 60, out = [];
+              const fire = (type, x, t) => { const e = new Event(type, {bubbles: true, cancelable: true}); const pt = {clientX: x, clientY: y, identifier: 1};
+                Object.defineProperty(e, 'touches', {value: type === 'touchend' ? [] : [pt]}); Object.defineProperty(e, 'timeStamp', {value: t}); main.dispatchEvent(e); };
+              let t = 1000; fire('touchstart', x0, t);
+              for (const dx of steps) { t += 16; fire('touchmove', x0 + dx, t);
+                out.push([main.style.transform, getComputedStyle(row.querySelector('.folder-trash')).width]); }
+              t += 16; fire('touchend', 0, t);
+              await new Promise(r => setTimeout(r, 450));
+              return {out, open: main.getAttribute('aria-expanded') === 'true', tx: new DOMMatrix(getComputedStyle(main).transform).m41, tw: row.querySelector('.folder-trash').getBoundingClientRect().width};
+            }"""
+            rest = await pg.evaluate("getComputedStyle(document.querySelector('.folder-trash')).width")
+            check('folder swipe: at rest the delete button has no width (nothing red under the card)', rest == '0px', rest)
+            r1 = await pg.evaluate(sw, [-4, -12, -24, -36, -48, -60])
+            check('folder swipe: the card follows the finger from where the drag starts (no jump)', r1['out'][0][0] == '' and r1['out'][2][0] == 'translate3d(-12px, 0px, 0px)', json.dumps(r1['out']))
+            check('folder swipe: past half way it snaps open, the button is a full pill', r1['open'] and r1['tx'] == -80 and abs(r1['tw'] - 72) < 1, json.dumps(r1))
+            await pg.evaluate("document.querySelector('.folder-swipe').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
+            await pg.wait_for_timeout(450)
+            r2 = await pg.evaluate(sw, [-4, -12, -20, -24, -26, -28])
+            check('folder swipe: a short slow drag springs back shut', not r2['open'] and r2['tx'] == 0 and r2['tw'] == 0, json.dumps(r2))
+            await pg.evaluate("go({name:'home'})")
+
             # grading: the drag ring goes with touch gestures; with gestures off the plain buttons are back
             await pg.evaluate("go({name:'home'})")
             await pg.evaluate('startGlobalStudy()')
@@ -608,6 +634,22 @@ async def main():
             plain = await pg.evaluate("!document.querySelector('#panel .ring')&&!!document.querySelector('#panel .btn[data-act=reveal]')")
             check('gestures on: grade ring; off: plain buttons', ring and plain)
             await pg.evaluate("META.swipe=true;go({name:'home'})")
+            # wrong typed answer in a near-square window (split view): the grade ring shrinks so the panel keeps to about half the height
+            await pg.set_viewport_size({'width': 820, 'height': 640})
+            await pg.evaluate("go({name:'home'})")
+            await pg.evaluate('startGlobalStudy()')
+            await pg.wait_for_selector('#panel .ring')
+            await pg.evaluate("SS.cm='type';SS.phase='answer';SS.result='wrong';SS.typed='margo superior petrosae';updStudy()")
+            sq = await pg.evaluate("(()=>{const p=document.querySelector('#panel'),r=document.querySelector('#panel .ring');return {ph:p.offsetHeight,H:app.clientHeight,z:parseFloat(r.style.zoom)||1,wide:app.classList.contains('wide')};})()")
+            check('square window: the answer panel takes at most 60% of the height, the ring is smaller than usual', not sq['wide'] and sq['ph'] <= sq['H'] * 0.6 and sq['z'] < 1, json.dumps(sq))
+            await pg.set_viewport_size({'width': 390, 'height': 844})
+            # typed answer: words stay apart, only the wrong part of a word is marked, a missing word is one plate
+            dw = await pg.evaluate("[diffHtml('margo superior petrosae','Margo superior partis petrosae'),diffHtml('processus styloideus','Proc. styloideus'),diffHtml('proc.styloideus','Proc. styloideus'),diffHtml('foo','Margo')]")
+            check('typed diff: a missing word is one plate between the words, letters are not scattered',
+                  dw[0].count('class="gap wd"') == 1 and dw[0].startswith('margo superior <mark class="gap wd"') and dw[0].endswith('</mark> petrosae'), dw[0])
+            check('typed diff: «processus» against «Proc.» marks the tail of the word only, a missing space is a single gap',
+                  dw[1].startswith('proc<s>essus</s><mark>.</mark> styloideus') and dw[2].count('class="gap"') == 1 and '<s>' not in dw[2], json.dumps(dw[1:3]))
+            check('typed diff: an unrelated word is struck out whole and the right one is shown as a plate', dw[3].startswith('<s>foo</s> <mark class="gap wd"'), dw[3])
 
             # strict mode: no Kostik and no fact of the day
             await pg.evaluate("META.calm=true;applyLook();go({name:'home'})")
@@ -2959,7 +3001,7 @@ async def main():
             await pg.click('[data-cn=rretry]')
             await pg.wait_for_selector('.cnph', timeout=120000)
             check('plan: «Proovi uuesti» goes on from where it stopped: the first outline answer is not asked again (outline, plan), then step 3', tasks_of(ai_p[n3:]) == ['outline', 'plan'], json.dumps(tasks_of(ai_p[n3:])))
-            for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short')):
+            for mode, word in (('drop=1', 'dropped'), ('trunc=1', 'cut short before any whole knowledge unit')):
                 urllib.request.urlopen(API + '/__fn?' + mode)
                 await replan_go()
                 await pg.wait_for_selector('.cnerr', timeout=120000)
@@ -4389,6 +4431,92 @@ async def main():
             check('release: no script errors or failed requests in the browser', not errs_r, '; '.join(errs_r)[:500])
             await ctx_r.close()
             # <<< T032R
+
+            # >>> T034
+            # ---------- T-034: an outline reply cut short at max_tokens keeps the units that were whole before the cut; no retry, no extra charge ----------
+            knowledge_files(tmp / 'kn34')
+            KN34 = tmp / 'kn34'
+            urllib.request.urlopen(API + '/__fn?v2lessons=3&trunc=outline')   # both outline replies are cut inside their knowledge list: Core keeps 4 of 8 units, Extra 3 of 6
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            ctx_t, pt, errs_t = await open_ctx(legacy=False)
+            await pt.goto(SITE + '?create=1&i=' + INVITE)
+            await pt.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pt.fill('input[name=email]', 'truncated@test.ee')
+            await pt.fill('input[name=password]', 'kolju2026')
+            await pt.click('.cw-go')
+            await app_ready(pt)
+            await ui_lang(pt, 'et')
+            ai_t = watch_ai(pt)
+            uid_t = await pt.evaluate('CORPUS_WEB.uid')
+            mine_t = lambda s, coll: [r for r in s['docs'] if r['coll'] == coll and r['owner'] == uid_t]
+            used_t = lambda: json.loads(urllib.request.urlopen(API + '/__course').read())['used'].get(uid_t, 0)
+            await pt.evaluate("go({name:'courses'})")
+            await pt.wait_for_selector('.cnnew')
+            await pt.click('.cnnew')
+            await pt.wait_for_selector('.cnw')
+            did_t = await pt.evaluate('view.did')
+            await pt.fill('#cnName', 'Katkenud')
+            await pt.press('#cnName', 'Tab')
+            await pt.set_input_files('#cnFile', [str(KN34 / 'Heat notes.pdf'), str(KN34 / 'Extra reading.pdf')])
+            await pt.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            await pt.click('.cnmain')
+            await pt.wait_for_selector('.cnph', timeout=120000)
+            st = await state_when(lambda s: any(r['coll'] == 'cplan' for r in mine_t(s, 'cplan')) and len([r for r in mine_t(s, 'ctext') if '.ku1.' in r['id']]) == 2 and any(r['data'].get('planAt') for r in mine_t(s, 'cdraft')))
+            check('truncated outline: the plan is made from what was kept: outline ×2 (each cut short) and the plan once, no retry; 2 + 5 = 7 units paid',
+                  [c.get('task') for c in ai_t] == ['outline', 'outline', 'plan'] and used_t() == 7, json.dumps([[c.get('task') for c in ai_t], used_t()]))
+            mats_t = {m['name']: m['id'] for m in mine_t(st, 'cdraft')[0]['data']['mats']}
+            kus_t = {v['materialId']: v for v in (r['data'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'])}
+            ku_t = {n: (len([u for u in kus_t[i]['units'] if u['extractionStatus'] == 'extracted']), kus_t[i]['outlineStatus'], sorted(x for x in kus_t[i]['issues'] if x.startswith(('outline_', 'knowledge_missing')))) for n, i in mats_t.items()}
+            check('truncated outline: registry Core 4 units, Extra 3 (the whole ones before the cut), both incomplete with outline_truncated + outline_truncated_partial:N, no knowledge_missing',
+                  ku_t == {'Heat notes.pdf': (4, 'incomplete', ['outline_truncated', 'outline_truncated_partial:4']), 'Extra reading.pdf': (3, 'incomplete', ['outline_truncated', 'outline_truncated_partial:3'])}, json.dumps(ku_t))
+            cp_t = mine_t(st, 'cplan')[0]['data']
+            ids_t = sorted(u['id'] for v in kus_t.values() for u in v['units'] if u['extractionStatus'] == 'extracted')
+            check('truncated outline: the knowledge plan (v2) covers exactly the 7 kept units: expected 7 = planned 7, missing/duplicates/unknown 0, 3 lessons',
+                  cp_t.get('planVersion') == 2 and cp_t['coverage']['expected'] == 7 == cp_t['coverage']['planned'] and cp_t['coverage']['missing'] == cp_t['coverage']['duplicates'] == cp_t['coverage']['unknown'] == 0
+                  and sorted(i for p_ in cp_t['parts'] for l in p_['lessons'] for i in l['knowledgeIds']) == ids_t and sum(len(p_['lessons']) for p_ in cp_t['parts']) == 3, json.dumps(cp_t['coverage']))
+            warn_t = {}
+            for lg_ in ('ru', 'en', 'et'):
+                await ui_lang(pt, lg_)
+                await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:3})")
+                await pt.wait_for_selector('.cnbtns [data-cn=build] b')
+                warn_t[lg_] = await pt.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            msg_t = {'ru': 'Ответ ИИ оборвался: принята только часть найденного, остальное не сохранено. Проверьте материал или составьте план заново.',
+                     'en': 'The AI answer was cut short: only part of what was found was accepted, the rest was not saved. Check the material or make the plan again.',
+                     'et': 'TI vastus katkes: vastu võeti ainult osa leitust, ülejäänut ei salvestatud. Kontrolli materjali või koosta plaan uuesti.'}
+            check('truncated outline: the plan screen warns about both materials in ru / en / et («Ответ ИИ оборвался…», «The AI answer was cut short…», «TI vastus katkes…»)',
+                  all(len(warn_t[k]) == 2 and all(w.endswith(': ' + msg_t[k]) for w in warn_t[k]) and any(w.startswith('Heat notes') for w in warn_t[k]) for k in msg_t), json.dumps(warn_t, ensure_ascii=False))
+            # after a reload the warning is read back from the saved registry / plan
+            await pt.reload()
+            await app_ready(pt)
+            await ui_lang(pt, 'et')
+            await pt.click('.tabbar [data-v=courses]')
+            await pt.wait_for_selector('.crs .cnd')
+            await pt.click('.cnd .cndgo')
+            await pt.wait_for_selector('.cnbtns [data-cn=build] b', timeout=60000)
+            warn_r = await pt.evaluate("[...document.querySelectorAll('.cnwarn[data-k=truncated-partial]')].map(x=>x.innerText)")
+            check('truncated outline: after a page reload and reopening the plan the warning is still there for both materials (read from the saved registry and plan)',
+                  len(warn_r) == 2 and all(w.endswith(': ' + msg_t['et']) for w in warn_r) and any(w.startswith('Heat notes') for w in warn_r) and any(w.startswith('Extra reading') for w in warn_r), json.dumps(warn_r, ensure_ascii=False))
+            n_t = len(ai_t)
+            await pt.click('.cnbtns [data-cn=build]')
+            await pt.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=90000)
+            st = await state_when(lambda s: len(mine_t(s, 'plates')) == 3 and all(not r['data']['bld'].get('run') for r in mine_t(s, 'cplan')))
+            note_msg = {'ru': 'Часть найденного в материалах не сохранена: ответ ИИ оборвался.', 'en': 'Part of what was found in the materials was not saved: the AI answer was cut off.', 'et': 'Osa materjalidest leitust jäi salvestamata: TI vastus katkes.'}
+            note_t = {}
+            for lg_ in ('et', 'ru', 'en'):
+                if lg_ != 'et':
+                    await ui_lang(pt, lg_)
+                await pt.evaluate("go({name:'courseNew',did:'" + did_t + "',step:4})")
+                await pt.wait_for_selector('#cnBd .cnktest')
+                note_t[lg_] = await pt.evaluate("[...document.querySelectorAll('#cnBd .cnwarn[data-k=truncated-note]')].map(x=>x.innerText)")
+            check('truncated outline: the course build screen shows the short mark «part of the findings was not saved» in et / ru / en, once, next to the test-feature note',
+                  all(note_t[k] == [note_msg[k]] for k in note_msg), json.dumps(note_t, ensure_ascii=False))
+            built_t = sorted(i for r in mine_t(st, 'plates') for i in r['data']['knowledgeIds'])
+            check('truncated outline: the lessons (v2) are built from the kept units: 3 lesson requests and nothing else (no outline again), 3 plates with the 7 units, 3 × 2 = 6 more units paid',
+                  [c.get('task') for c in ai_t[n_t:]] == ['lesson'] * 3 and built_t == ids_t and used_t() == 7 + 6, json.dumps([[c.get('task') for c in ai_t[n_t:]], len(built_t), used_t()]))
+            check('truncated outline: no script errors or failed requests in the browser', not errs_t, '; '.join(errs_t)[:500])
+            urllib.request.urlopen(API + '/__fn')
+            await ctx_t.close()
+            # <<< T034
 
             # ---------- T-032: a draft and a plan in the old format (v1: parts / lessons / terms, no registry, as the app of cb61180 wrote them) open and build in the real app, nothing of v2 is written ----------
             # >>> T032C

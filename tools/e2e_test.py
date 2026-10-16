@@ -1360,9 +1360,47 @@ async def main():
                 await pg.evaluate("go({name:'courses'})")
                 soon = await pg.inner_text('#crSoon')
                 check(f'courses closed for a friend ({lang}): «in development» screen, no import / new-course buttons', txt in soon and await pg.evaluate("!document.querySelector('.crs [data-act=importPick],.crs [data-act=starter],.cnnew')"), soon.replace('\n', ' | ')[:120])
+            # T-038: «Request beta access» is a plain mailto: link with the account e-mail and a fixed text
+            from urllib.parse import unquote
+            await pg.evaluate("localStorage.removeItem('corpus.create');META.create=false;0")
+            my_mail = await pg.evaluate('CORPUS_WEB.email')
+            await pg.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+            for lang, btn, subj, hello, mline in (('et', 'Taotle beetajuurdepääsu', 'Corpus: kursuste beetatesti taotlus', 'Tere!', 'Minu e-post Corpuses: '),
+                                                  ('en', 'Request beta access', 'Corpus: request for the courses beta', 'Hello!', 'My e-mail in Corpus: '),
+                                                  ('ru', 'Запросить бета-тест', 'Corpus: запрос на бета-тест курсов', 'Здравствуйте!', 'Моя почта в Corpus: ')):
+                await ui_lang(pg, lang)
+                await pg.evaluate("go({name:'courses'})")
+                lk = await pg.evaluate("(()=>{const a=document.querySelector('#crSoon a.btn.primary');return a?{h:a.getAttribute('href'),t:a.textContent.trim()}:null})()")
+                ok = bool(lk) and lk['h'].startswith('mailto:contact@corpusapp.ee?') and btn in lk['t']
+                if ok:
+                    q = lk['h'].split('?', 1)[1]
+                    parts = dict(p.split('=', 1) for p in q.split('&'))
+                    sj, bd = unquote(parts['subject']), unquote(parts['body'])
+                    ok = sj == subj and hello in bd and (mline + my_mail + '\n') in bd and 'undefined' not in lk['h'] and \
+                        not any(w in bd for w in ('.png', '.jpg', '.pdf', 'Deck', 'deck'))
+                check(f'beta request ({lang}): mailto link with the account e-mail and the fixed text', ok, json.dumps(lk, ensure_ascii=False)[:300])
+            await ui_lang(pg, 'et')
+            await pg.evaluate("go({name:'courses'})")
+            await pg.click('#crSoon [data-act=crCopyMail]')
+            await pg.wait_for_function("Array.from(document.querySelectorAll('.toast')).some(t=>/Aadress kopeeritud/.test(t.textContent))", timeout=5000)
+            check('beta request: «copy address» puts contact@corpusapp.ee in the clipboard and shows a toast', await pg.evaluate('navigator.clipboard.readText()') == 'contact@corpusapp.ee')
+            check('beta request: no «new course» button without the flag', await pg.evaluate("!document.querySelector('.cnnew,[data-act=cnNew]')") and await pg.evaluate("!cnOn()"))
+            # no e-mail (guest-like) → the link is not broken
+            gh = await pg.evaluate("(()=>{const W=window.CORPUS_WEB,e=W.email;W.email='';const h=crBetaHref();W.email=e;return h})()")
+            check('beta request: without an e-mail the link has no «undefined» and no e-mail line', gh.startswith('mailto:contact@corpusapp.ee?') and 'undefined' not in gh and 'Minu%20e-post' not in gh, gh[:200])
+            # with the flag the tab opens, without a reload
+            await pg.evaluate("localStorage.setItem('corpus.create','1');go({name:'courses'})")
+            check('beta request: with the ?create=1 flag the «in development» screen is gone and «new course» is there',
+                  await pg.evaluate("!document.querySelector('#crSoon')") and await pg.evaluate("!!document.querySelector('.cnnew')"))
+            await pg.evaluate("localStorage.removeItem('corpus.create');META.create=false;go({name:'courses'})")
+            check('beta request: flag removed → closed again', await pg.evaluate("!!document.querySelector('#crSoon')"))
             await ui_lang(pg, 'et')
             await pg.evaluate("window.__TEST_COURSES__=true;go({name:'courses'})")
             check('courses open again when the flag is set (the admin case)', await pg.evaluate("!document.querySelector('#crSoon')"))
+            # the admin never sees the «in development» screen
+            await pg.evaluate("window.__TEST_COURSES__=false;CORPUS_WEB.admin=true;go({name:'courses'})")
+            check('beta request: the admin does not see «in development»', await pg.evaluate("!document.querySelector('#crSoon')"))
+            await pg.evaluate("CORPUS_WEB.admin=false;window.__TEST_COURSES__=true;0")
             await pg.evaluate("go({name:'settings'})")
             # ---------- introduction: a new photo is shown 6 labels at a time before they are learned ----------
             ch = await pg.evaluate("[0,1,2,6,7,13].map(n=>introChunks(Array.from({length:n},(_,i)=>i),INTRO_CHUNK).map(g=>g.length))")

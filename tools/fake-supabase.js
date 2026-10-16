@@ -133,6 +133,41 @@ function multipartFile(buf, ctype) {
   return found;
 }
 
+/* ---------- weekly rating (the rules of supabase/rating.sql) ---------- */
+const RT = { mode: '', today: '', profiles: new Map(), weeks: new Map(), people: new Map(), calls: { submit: 0, get: 0, set_profile: 0, delete_mine: 0 }, submits: [] };   // mode: '' | 'missing' (PGRST202 for all four) | 'offline' (the connection is dropped)
+const rtToday = () => RT.today || new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Tallinn' });
+const rtWeekStart = (today) => { const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+const rtEmail = (uid) => { const u = byId(uid); return u ? u.email : (RT.people.get(uid) || {}).email || ''; };
+function rtName(uid) {
+  const pr = RT.profiles.get(uid) || {};
+  if (pr.mode === 'alias' && pr.alias) return pr.alias;
+  if (!pr.asked) return 'Студент';
+  const toks = rtEmail(uid).split('@')[0].split(/[-._+0-9]+/).map((x) => x.replace(/[^\p{L}]/gu, '')).filter(Boolean);
+  if (!toks.length) return 'Студент';
+  const t1 = Array.from(toks[0]).slice(0, 20).join(''), t2 = toks[1];
+  const up = (x) => x.charAt(0).toUpperCase();
+  return up(t1) + t1.slice(1).toLowerCase() + (t2 === undefined ? '' : ' ' + up(t2) + '.');
+}
+function rtRanked(metric, ws) {
+  const rows = [];
+  for (const [k, w] of RT.weeks) {
+    if (w.week_start !== ws) continue;
+    const pr = RT.profiles.get(w.user_id);
+    if ((pr ? pr.mode : 'real') === 'hidden') continue;
+    if (metric === 'points' ? !(w.points > 0) : !(w.answers >= 100 && w.active_days >= 2)) continue;
+    rows.push(w);
+  }
+  const share = (w) => (metric === 'accuracy' ? w.correct : w.answers - w.correct);   // numerator over w.answers; accuracy: more is better, errors: less is better
+  rows.sort((a, b) => {
+    let c;
+    if (metric === 'points') c = b.points - a.points;
+    else c = metric === 'accuracy' ? share(b) * a.answers - share(a) * b.answers : share(a) * b.answers - share(b) * a.answers;
+    return c || b.answers - a.answers || (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0);
+  });
+  return rows.map((w, i) => ({ rn: i + 1, user_id: w.user_id, answers: w.answers, points: w.points,
+    val: metric === 'points' ? w.points : Math.round(share(w) * 1000 / w.answers) / 10 }));
+}
+
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   const p = u.pathname;
@@ -149,6 +184,23 @@ http.createServer(async (req, res) => {
     if (u.searchParams.get('reset') === '1') Object.assign(Q, Q0);
     for (const k of Object.keys(Q)) if (u.searchParams.has(k)) Q[k] = +u.searchParams.get(k);
     send(res, 200, Q); return;
+  }
+  if (p === '/__rating') {   // ?mode=missing|offline|'' ; ?today=YYYY-MM-DD ; ?reset=1 ; POST a JSON array of other people to seed the current week: {email|name, mode, asked, answers, correct, active_days, points}; answers with the state
+    if (u.searchParams.get('reset') === '1') { RT.profiles.clear(); RT.weeks.clear(); RT.people.clear(); RT.submits.length = 0; RT.mode = ''; RT.today = ''; for (const k of Object.keys(RT.calls)) RT.calls[k] = 0; }
+    if (u.searchParams.has('mode')) RT.mode = u.searchParams.get('mode');
+    if (u.searchParams.has('today')) RT.today = u.searchParams.get('today');
+    if (req.method === 'POST' && Array.isArray(body)) {
+      const ws = rtWeekStart(rtToday());
+      body.forEach((x, i) => {
+        const real = x.email && users.get(String(x.email).toLowerCase());   // an existing account: its week is set, its profile only when asked to
+        const id = real ? real.id : 'seed-' + (RT.people.size + 1).toString().padStart(4, '0') + '-' + i;
+        if (!real) RT.people.set(id, { email: x.email || '' });
+        if (!real || x.mode !== undefined || x.name !== undefined || x.asked !== undefined) RT.profiles.set(id, { mode: x.mode || (x.name ? 'alias' : 'real'), alias: x.name || null, asked: x.asked !== undefined ? !!x.asked : true });
+        if (x.answers !== undefined) RT.weeks.set(id + '|' + ws, { user_id: id, week_start: ws, answers: x.answers | 0, correct: x.correct | 0, active_days: x.active_days === undefined ? 2 : x.active_days | 0, points: x.points === undefined ? Math.min(x.correct | 0, 150) : x.points | 0 });
+      });
+    }
+    send(res, 200, { mode: RT.mode, today: rtToday(), week_start: rtWeekStart(rtToday()), calls: RT.calls, submits: RT.submits,
+      profiles: Array.from(RT.profiles.entries()).map(([id, v]) => ({ id, email: rtEmail(id), ...v })), weeks: Array.from(RT.weeks.values()) }); return;
   }
   if (p === '/__course') {   // ?free=N: the course allowance per person; ?global=N: the site-wide course cap per day; ?off=<email>: daily_limit 0 for that person (?off= alone: for nobody); ?limit=N: the daily limit of everybody (?limit= alone: back to FAKE_AI_LIMIT); answers all that and what was used
     if (u.searchParams.has('free')) COURSE_FREE = +u.searchParams.get('free');
@@ -324,6 +376,60 @@ http.createServer(async (req, res) => {
     aiUsed.set(k, used + n); send(res, 200, { ok: true, plan: 'demo', limit: LIM, used: used + n }); return;
   }
 
+  /* ---------- rpc: weekly rating (supabase/rating.sql) ---------- */
+  if (/^\/rest\/v1\/rpc\/corpus_rating_(submit|get|set_profile|delete_mine)$/.test(p) && req.method === 'POST') {
+    const fn = p.split('corpus_rating_')[1], uid = uidOf(req);
+    if (RT.mode === 'missing') { send(res, 404, { code: 'PGRST202', details: 'Searched for the function public.corpus_rating_' + fn + ', but no matches were found in the schema cache.', hint: null, message: 'Could not find the function public.corpus_rating_' + fn + ' in the schema cache' }); return; }
+    if (RT.mode === 'offline') { req.socket.destroy(); return; }
+    RT.calls[fn]++;
+    if (!uid) { send(res, 401, { code: '42501', message: 'not_signed_in' }); return; }
+    const today = rtToday(), ws = rtWeekStart(today), b = body || {};
+    if (fn === 'submit') {
+      RT.submits.push(b.p_days);
+      const days = b.p_days;
+      if (!days || typeof days !== 'object' || Array.isArray(days) || JSON.stringify(days).length > 16384 || Object.keys(days).length > 31) { send(res, 204); return; }
+      let ta = 0, tc = 0, td = 0, tp = 0, valid = 0;
+      for (const [k, v] of Object.entries(days)) {
+        if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(k) || !v || typeof v !== 'object' || typeof v.n !== 'number' || typeof v.ok !== 'number') continue;
+        const dt = new Date(k + 'T00:00:00Z');
+        if (isNaN(dt) || dt.toISOString().slice(0, 10) !== k || k < ws || k > today) continue;
+        const n0 = Math.max(Math.floor(v.n), 0), o0 = Math.max(Math.floor(v.ok), 0), n = Math.min(n0, 400);
+        const o = Math.min(n0 > 400 ? Math.floor(o0 * 400 / n0) : o0, n);
+        ta += n; tc += o; tp += Math.min(o, 150); if (n > 0) td++; valid++;
+      }
+      if (!valid) { send(res, 204); return; }
+      if (!RT.profiles.has(uid)) RT.profiles.set(uid, { mode: 'real', alias: null, asked: false });
+      const key = uid + '|' + ws, old = RT.weeks.get(key);
+      if (!old || ta >= old.answers) RT.weeks.set(key, { user_id: uid, week_start: ws, answers: ta, correct: tc, active_days: td, points: tp });
+      const cut = new Date(today + 'T00:00:00Z'); cut.setUTCDate(cut.getUTCDate() - 56);
+      for (const [k, w] of RT.weeks) if (w.week_start < cut.toISOString().slice(0, 10)) RT.weeks.delete(k);
+      send(res, 204); return;
+    }
+    if (fn === 'set_profile') {
+      const mode = b.p_mode;
+      if (!['real', 'alias', 'hidden'].includes(mode)) { send(res, 400, { code: '22023', message: 'bad_mode', details: null, hint: null }); return; }
+      let a = null;
+      if (mode === 'alias') {
+        a = typeof b.p_alias === 'string' ? b.p_alias.trim() : null;
+        if (a === null || Array.from(a).length < 2 || Array.from(a).length > 20 || !/^[\p{L}\p{N} ._-]+$/u.test(a) || !/[\p{L}\p{N}]/u.test(a)) { send(res, 400, { code: '22023', message: 'bad_alias', details: null, hint: null }); return; }
+      }
+      RT.profiles.set(uid, { mode, alias: a, asked: true });
+      send(res, 200, { mode, alias: a, name: rtName(uid) }); return;
+    }
+    if (fn === 'delete_mine') {
+      for (const [k, w] of RT.weeks) if (w.user_id === uid) RT.weeks.delete(k);
+      RT.profiles.set(uid, { mode: 'hidden', alias: null, asked: true });
+      send(res, 204); return;
+    }
+    const metric = b.p_metric === undefined ? 'points' : b.p_metric;
+    if (!['points', 'accuracy', 'errors'].includes(metric)) { send(res, 400, { code: '22023', message: 'bad_metric', details: null, hint: null }); return; }
+    const pr = RT.profiles.get(uid) || { mode: 'real', asked: false }, w = RT.weeks.get(uid + '|' + ws);
+    const r = rtRanked(metric, ws), me = r.find((x) => x.user_id === uid);
+    const item = (x) => ({ rank: x.rn, name: rtName(x.user_id), value: x.val, me: x.user_id === uid });
+    send(res, 200, { week_start: ws, metric, min_answers: 100, min_days: 2, total: r.length,
+      me: { rank: me ? me.rn : null, value: me ? me.val : null, answers: w ? w.answers : 0, points: w ? w.points : 0, eligible: !!me, mode: pr.mode, asked: !!pr.asked, name: rtName(uid) },
+      top: r.filter((x) => x.rn <= 10).map(item), around: me ? r.filter((x) => x.rn >= me.rn - 3 && x.rn <= me.rn + 3).map(item) : [] }); return;
+  }
   if (p === '/rest/v1/rpc/corpus_week_award' && req.method === 'POST') { send(res, 200, { week: null }); return; }
   /* ---------- rpc: corpus_ping / corpus_site_stats (as in supabase/stats.sql) ---------- */
   const isAdmin = (uid) => { const u = byId(uid); return !!u && ADMINS.includes(u.email.toLowerCase()); };

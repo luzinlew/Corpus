@@ -103,6 +103,7 @@
     /* signed out elsewhere (or the session was revoked): start over at the sign-in screen */
     sb.auth.onAuthStateChange(function (ev) { if (ev === 'SIGNED_OUT' && !leaving) setTimeout(function () { location.reload(); }, 0); });
     W.shares = mkShares();
+    W.rating = mkRating();
     if (aiOn) W.courseAI = mkCourseAI();
     else aiP.then(function (st) { if (st) lateAi(true); });   // the status came after the wait: switch AI on without a reload
     return { db: mkDb(session.user.id), assets: mkAssets(), downloads: mkDownloads(), user: mkUser(session.user), sample: aiOn ? mkSample() : null };
@@ -419,6 +420,31 @@
         var r = await sb.from('shares').delete().eq('owner', W.uid).eq('src', String(src));
         if (r.error) throw shareFail(r);
       }
+    });
+  }
+
+  /* ---------- weekly rating (supabase/rating.sql): nothing is called on load, only when the app asks ---------- */
+  function mkRating() {
+    function fail(res, thrown) {
+      var e = (res && res.error) || thrown || {}, m = String(e.message || ''), c = String(e.code || '');
+      if (thrown && !res) return { code: 'offline', message: m || 'network error' };
+      if (c === 'PGRST202' || c === '42883' || c === '404' || (res && res.status === 404) || /could not find the function/i.test(m)) return { code: 'unavailable', message: m };
+      if (/bad_alias/.test(m)) return { code: 'bad_alias', message: m };
+      if (/bad_mode/.test(m)) return { code: 'bad_mode', message: m };
+      if (/failed to fetch|networkerror|load failed|network request/i.test(m) || (res && res.status === 0)) return { code: 'offline', message: m };
+      return { code: 'error', message: m || 'error' };
+    }
+    async function call(fn, args) {
+      var r;
+      try { r = await sb.rpc(fn, args); } catch (e) { throw fail(null, e); }
+      if (r.error) throw fail(r);
+      return r.data;
+    }
+    return Object.freeze({
+      submit: function (days) { return call('corpus_rating_submit', { p_days: days || {} }); },
+      get: function (metric) { return call('corpus_rating_get', { p_metric: String(metric || 'points') }); },
+      setProfile: function (mode, alias) { return call('corpus_rating_set_profile', { p_mode: String(mode), p_alias: alias == null ? null : String(alias) }); },
+      deleteMine: function () { return call('corpus_rating_delete_mine', {}); }
     });
   }
 

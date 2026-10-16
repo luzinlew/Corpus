@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="web.css?v=8a909949eb">
 <script src="config.js?v=d007ae7e35"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=7d9342f383"></script>
+<script src="web.js?v=b098b1f08d"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -206,6 +206,25 @@ button:disabled{cursor:default;opacity:.38}
 .stat span{font-size:12.5px;color:var(--ink2);line-height:1.3;display:block}
 .sbox{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
 .sbox h3{margin:0;font-size:14.5px;font-weight:600}
+.rate-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-4px -6px 8px 0}
+.rate-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.rate-chip{flex:1 1 auto;min-height:40px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface2);color:var(--ink2);font-weight:600;font-size:13.5px;min-width:0}
+.rate-chip.on{background:var(--surface);color:var(--ink);border-color:var(--primary);box-shadow:inset 0 0 0 1px var(--primary)}
+.rate-me{margin:0 0 4px;font-size:14px;line-height:1.4;overflow-wrap:anywhere}
+.rate-hint,.rate-note{margin:0 0 6px;overflow-wrap:anywhere}
+.rate-list{list-style:none;margin:8px 0 0;padding:0}
+.rate-r{display:flex;align-items:center;gap:10px;min-height:40px;padding:4px 8px;border-radius:10px;font-size:14.5px}
+.rate-r.me{background:var(--surface2);box-shadow:inset 0 0 0 1.5px var(--primary);font-weight:600}
+.rate-n{flex:none;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:600;color:var(--ink2);font-variant-numeric:tabular-nums}
+.rate-n.m1,.rate-n.m2,.rate-n.m3{background:var(--surface2);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink3)}
+.rate-n.m1{box-shadow:inset 0 0 0 1.5px #C9A227}
+.rate-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rate-v{flex:none;font-variant-numeric:tabular-nums;color:var(--ink2)}
+.rate-gap{text-align:center;color:var(--ink3);line-height:1;padding:2px 0}
+.rate-sk{min-height:40px;display:flex;align-items:center;color:var(--ink3);font-size:14px;animation:ratePulse 1.4s ease-in-out infinite}
+@keyframes ratePulse{50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){.rate-sk{animation:none}}
+.rate-ch{display:flex;flex-direction:column;gap:8px}
 .sbar{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;margin:12px 0 10px;background:var(--surface2)}
 .sbar i{display:block;height:100%}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink2)}
@@ -1207,6 +1226,7 @@ const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
 I18N_DICT.push(["Активность", "Activity", "Aktiivsus"]);
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
 I18N_DICT.push(["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"],["Больше не предлагать","Don’t suggest again","Ära paku enam"],["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]);
+I18N_DICT.push(["Рейтинг недели","Weekly ranking","Nädala edetabel"],["Верные","Correct","Õiged"],["Подготовлен","Prepared","Ettevalmistatud"],["Меньше ошибок","Fewer mistakes","Vähem vigu"],["Ответь на карточки, и ты появишься в таблице","Answer some cards and you will appear in the table","Vasta kaartidele ja ilmud tabelisse"],["Загрузка…","Loading…","Laadin…"],["Нет связи","No connection","Ühendust pole"],["Пока в таблице никого нет","Nobody is in the table yet","Tabelis pole veel kedagi"],["Ты скрыт из рейтинга","You are hidden from the ranking","Sa oled edetabelist peidetud"],["Вернуться в рейтинг","Back to the ranking","Tagasi edetabelisse"],["Как показывать тебя в рейтинге?","How should we show you in the ranking?","Kuidas sind edetabelis näidata?"],["Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.","Until you choose, others see you as “Student”. You can switch the ranking off at any time.","Kuni sa ei vali, näevad teised sind kui „Üliõpilast“. Edetabeli saab igal ajal välja lülitada."],["По имени из почты","By my email name","E-posti nime järgi"],["Придумать псевдоним…","Choose a nickname…","Mõtle välja hüüdnimi…"],["Скрыть меня","Hide me","Peida mind"],["Показывать по имени из почты","Show me by my email name","Näita mind e-posti nime järgi"],["Псевдоним…","Nickname…","Hüüdnimi…"],["Удалить мои данные рейтинга","Delete my ranking data","Kustuta minu edetabeli andmed"],["Удалить мои данные рейтинга?","Delete my ranking data?","Kas kustutada minu edetabeli andmed?"],["Результаты этой недели будут удалены, а тебя не будет в таблицах, пока ты снова не выберешь, как показываться.","This week’s results will be deleted and you will stay out of the tables until you choose how to be shown again.","Selle nädala tulemused kustutatakse ja sind pole tabelites, kuni valid uuesti, kuidas end näidata."],["Псевдоним","Nickname","Hüüdnimi"],["2–20 символов: буквы, цифры, пробел . _ -","2–20 characters: letters, digits, space . _ -","2–20 märki: tähed, numbrid, tühik . _ -"]);
 I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
 I18N_DICT.push(
   ['Смахните влево или нажмите стрелку влево, чтобы открыть удаление','Swipe left or press Left Arrow to reveal Delete','Kustutamise avamiseks pühi vasakule või vajuta vasaknoolt'],
@@ -2009,13 +2029,136 @@ SCREENS.library={
   },
   mount(){mountImgFallbacks();mountFolderSwipes();}
 };
+/* ---------- weekly rating (CORPUS_WEB.rating ↔ supabase/rating.sql). Only on the site and not for guests: in the claude.ai artifact CORPUS_WEB is absent and none of this does anything ---------- */
+const RATE={metric:'points',res:null,err:'',seq:0,off:false,asked:false,sent:0};
+function rateApi(){const W=window.CORPUS_WEB;return W&&W.rating&&!W.guest&&!crGuest()?W.rating:null;}
+function rateWeekDays(){   // only the current week (Monday to today), {'YYYY-MM-DD':{n,ok}}
+  const all=dayStats(S.decks.map(d=>d.id)),mon=dayKey(addDays(Date.now(),-((new Date().getDay()+6)%7))),td=dayKey(),out={};
+  for(const k in all){if(/^\d{4}-\d{2}-\d{2}$/.test(k)&&k>=mon&&k<=td&&(all[k].n|0)>0)out[k]={n:all[k].n|0,ok:Math.min(all[k].ok|0,all[k].n|0)};}
+  return out;
+}
+/* fire and forget: at most once in 10 minutes, never for a hidden person, silent on errors; "unavailable" (no functions in the database) stops it for the session */
+function rateSubmit(){
+  const a=rateApi();if(!a||RATE.off||!S.ready||S.loadErr||META.ratingMode==='hidden')return;
+  const key='corpus.ratingAt.'+String(window.CORPUS_WEB.uid||'');let last=RATE.sent;   // the time of the last send lives in localStorage (in memory only when it is blocked)
+  try{last=+localStorage.getItem(key)||0;}catch(e){}
+  const now=Date.now();if(now>=last&&now-last<600000)return;
+  const days=rateWeekDays();if(!Object.keys(days).length)return;
+  RATE.sent=now;try{localStorage.setItem(key,String(now));}catch(e){}
+  const undo=()=>{RATE.sent=0;try{if(last)localStorage.setItem(key,String(last));else localStorage.removeItem(key);}catch(e){}};
+  try{a.submit(days).catch(e=>{if(e&&e.code==='unavailable')RATE.off=true;else undo();});}catch(e){undo();}
+}
+function rateNum(v,pct){
+  const x=Number(v);if(!isFinite(x))return '—';
+  if(!pct)return String(Math.round(x));
+  const t=String(Math.round(x*10)/10);return (LANG==='en'?t:t.replace('.',','))+' %';
+}
+function rateName(n){const t=String(n==null?'':n);return t==='Студент'?T3('Студент','Student','Üliõpilane'):t;}
+function rateRowHtml(x,pct){
+  const me=!!x.me,rk=x.rank|0;
+  return '<li class="rate-r'+(me?' me':'')+'"'+(me?' aria-current="true"':'')+'><span class="rate-n'+(rk>=1&&rk<=3?' m'+rk:'')+'">'+rk+'</span><span class="rate-nm" data-noi18n>'+esc(rateName(x.name))+'</span><span class="rate-v">'+rateNum(x.value,pct)+'</span></li>';
+}
+function rateBodyHtml(r){
+  const me=r.me||{},pct=RATE.metric!=='points',mn=r.min_answers||100,md=r.min_days||2;let line='',hint='';
+  if(me.eligible){
+    line=T3('Твоё место: '+me.rank+' из '+r.total,'Your place: '+me.rank+' of '+r.total,'Sinu koht: '+me.rank+' / '+r.total);
+    if(!pct&&me.rank>1){const up=(r.around||[]).find(x=>x.rank===me.rank-1);if(up)hint=T3('До следующего места: '+(Math.round(up.value-me.value)+1),'To the next place: '+(Math.round(up.value-me.value)+1),'Järgmise kohani: '+(Math.round(up.value-me.value)+1));}
+  }else if(!pct)line='Ответь на карточки, и ты появишься в таблице';
+  else{const n=me.answers|0;line=T3('Нужно '+mn+' ответов и '+md+' дня занятий — пока у тебя '+n+' '+plural(n,'ответ','ответа','ответов'),'You need '+mn+' answers on '+md+' different days — so far you have '+n+' '+(n===1?'answer':'answers'),'Vaja on '+mn+' vastust '+md+' päeval — praegu on sul '+n+' '+(n===1?'vastus':'vastust'));}
+  const top=(r.top||[]).slice(0,10),seen=new Set(top.map(x=>x.rank));
+  const tail=me.eligible&&!seen.has(me.rank)?(r.around||[]).filter(x=>!seen.has(x.rank)):[];
+  let rows=top.map(x=>rateRowHtml(x,pct)).join('');
+  if(tail.length){if(top.length&&tail[0].rank>top[top.length-1].rank+1)rows+='<li class="rate-gap" aria-hidden="true">…</li>';rows+=tail.map(x=>rateRowHtml(x,pct)).join('');}
+  return '<p class="rate-me">'+esc(line)+'</p>'+(hint?'<p class="rate-hint muted sm">'+esc(hint)+'</p>':'')+
+    (rows?'<ol class="rate-list">'+rows+'</ol>':'<p class="muted sm rate-note">Пока в таблице никого нет</p>');
+}
+function rateInner(){
+  const r=RATE.res,me=r&&r.me,hidden=!!(me&&me.asked&&me.mode==='hidden');
+  const head='<div class="rate-h"><h3>Рейтинг недели</h3><button type="button" class="ibtn plain" data-act="rateGear" aria-label="'+T3('Настройки рейтинга','Ranking settings','Edetabeli seaded')+'" title="'+T3('Настройки рейтинга','Ranking settings','Edetabeli seaded')+'">'+ic('gear',20)+'</button></div>';
+  if(hidden)return head+'<p class="rate-me">Ты скрыт из рейтинга</p><button type="button" class="btn line" data-act="rateBack">Вернуться в рейтинг</button>';
+  const names={points:T3('Верные за неделю','Correct this week','Õiged sel nädalal'),accuracy:T3('Подготовлен — доля верных ответов','Prepared — share of correct answers','Ettevalmistatud — õigete vastuste osakaal'),errors:T3('Меньше ошибок — доля ошибок, меньше лучше','Fewer mistakes — share of mistakes, lower is better','Vähem vigu — vigade osakaal, väiksem on parem')};
+  const chips='<div class="rate-chips" role="group" aria-label="'+T3('Таблица','Table','Tabel')+'">'+[['points','Верные'],['accuracy','Подготовлен'],['errors','Меньше ошибок']].map(c=>'<button type="button" class="rate-chip'+(c[0]===RATE.metric?' on':'')+'" data-act="rateMetric" data-v="'+c[0]+'" aria-pressed="'+(c[0]===RATE.metric)+'" aria-label="'+esc(names[c[0]])+'">'+c[1]+'</button>').join('')+'</div>';
+  return head+chips+(RATE.err?'<p class="muted sm rate-note">Нет связи</p>':!r?'<div class="rate-sk" role="status" aria-busy="true">Загрузка…</div>':rateBodyHtml(r));
+}
+function rateBoxHtml(){return rateApi()&&!RATE.off?'<section class="sbox" id="rateBox">'+rateInner()+'</section>':'';}
+function ratePaint(){
+  const b=$('#rateBox');if(!b)return;
+  const f=document.activeElement&&b.contains(document.activeElement)?document.activeElement:null,fa=f&&f.dataset.act,fv=f&&f.dataset.v;
+  b.innerHTML=rateInner();
+  if(fa){const n=b.querySelector('[data-act="'+fa+'"]'+(fv?'[data-v="'+fv+'"]':''));if(n)n.focus({preventScroll:true});}
+}
+function rateLoad(){
+  const a=rateApi();if(!a||RATE.off)return;
+  const m=RATE.metric,seq=++RATE.seq;
+  a.get(m).then(r=>{
+    if(seq!==RATE.seq)return;
+    RATE.res=r;RATE.err='';
+    const mm=r&&r.me&&r.me.asked?r.me.mode:null;if(mm&&META.ratingMode!==mm){META.ratingMode=mm;persistMeta();}
+    ratePaint();rateMaybeAsk(r);
+  },e=>{
+    if(seq!==RATE.seq)return;
+    if(e&&e.code==='unavailable'){RATE.off=true;const b=$('#rateBox');if(b)b.remove();return;}
+    RATE.err='offline';RATE.res=null;ratePaint();
+  });
+}
+function rateMaybeAsk(r){   // the first visit: ask once per session how to show the person (the tests switch it off unless __RATE_TEST__)
+  if(RATE.asked||!r||!r.me||r.me.asked!==false||(window.__TEST__&&!window.__RATE_TEST__))return;
+  if(view.name!=='globalStats'||layer.firstChild||!$('#rateBox'))return;
+  RATE.asked=true;rateAsk();
+}
+function rateFail(e){
+  const c=e&&e.code;
+  toast(c==='offline'?T3('Нет связи','No connection','Ühendust pole'):c==='unavailable'?T3('Рейтинг пока недоступен','The ranking is not available yet','Edetabel pole veel saadaval'):T3('Не получилось. Попробуйте ещё раз','Something went wrong. Try again','Ei õnnestunud. Proovi uuesti'));
+}
+function rateApplied(r){
+  const m=r&&r.mode;if(m){META.ratingMode=m;persistMeta();}
+  const n=String((r&&r.name)||'');
+  toast(m==='hidden'?T3('Ты скрыт из рейтинга','You are hidden from the ranking','Sa oled edetabelist peidetud'):T3('Тебя показывают как «'+n+'»','You are shown as “'+n+'”','Sind näidatakse nimega „'+n+'“'),4000);
+  rateLoad();
+}
+async function rateSet(mode){
+  const a=rateApi();if(!a)return false;
+  try{rateApplied(await a.setProfile(mode));return true;}catch(e){rateFail(e);return false;}
+}
+async function rateAlias(){
+  const a=rateApi();if(!a)return false;
+  let val='',err=false;
+  for(;;){
+    const v=await promptDialog({title:'Псевдоним',text:err?T3('Не подходит. 2–20 символов: буквы, цифры, пробел . _ -','Not accepted. 2–20 characters: letters, digits, space . _ -','Ei sobi. 2–20 märki: tähed, numbrid, tühik . _ -'):'2–20 символов: буквы, цифры, пробел . _ -',value:val});
+    if(v==null)return false;
+    try{rateApplied(await a.setProfile('alias',v));return true;}
+    catch(e){if(e&&e.code==='bad_alias'){val=v;err=true;continue;}rateFail(e);return false;}
+  }
+}
+async function rateChoose(v){
+  if(v==='real')return rateSet('real');
+  if(v==='hidden')return rateSet('hidden');
+  if(v==='alias')return rateAlias();
+}
+function rateAsk(){
+  const html='<div class="dlg"><h3>Как показывать тебя в рейтинге?</h3><p>Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.</p>'+
+    '<div class="rate-ch"><button type="button" class="btn primary block" data-s="real">По имени из почты</button><button type="button" class="btn line block" data-s="alias">Придумать псевдоним…</button><button type="button" class="btn line block" data-s="hidden">Скрыть меня</button><button type="button" class="btn line block" data-s="">Позже</button></div></div>';
+  return showOverlay(html,ov=>{$$('[data-s]',ov).forEach(b=>b.onclick=()=>dismissOverlay(b.dataset.s||null));}).then(v=>v?rateChoose(v):false);
+}
+async function rateGear(){
+  const r=RATE.res,me=r&&r.me,md=me&&me.asked?me.mode:null;
+  const v=await actionSheet('Как показывать тебя в рейтинге?',[{v:'real',label:'Показывать по имени из почты',on:md==='real'},{v:'alias',label:'Псевдоним…',on:md==='alias'},{v:'hidden',label:'Скрыть меня',on:md==='hidden'},{v:'del',label:'Удалить мои данные рейтинга',danger:true}]);
+  if(!v)return;
+  if(v!=='del'){await rateChoose(v);return;}
+  const ok=await confirmDialog({title:'Удалить мои данные рейтинга?',text:'Результаты этой недели будут удалены, а тебя не будет в таблицах, пока ты снова не выберешь, как показываться.',ok:'Удалить'});
+  if(!ok)return;
+  const a=rateApi();if(!a)return;
+  try{await a.deleteMine();META.ratingMode='hidden';persistMeta();toast(T3('Данные рейтинга удалены, ты скрыт','Ranking data deleted, you are hidden','Edetabeli andmed on kustutatud, sa oled peidetud'),4000);rateLoad();}
+  catch(e){rateFail(e);}
+}
 SCREENS.globalStats={
   html(){
     const ids=S.decks.map(d=>d.id);
-    return '<div class="page tabbed"><header class="hhead"><div class="h1t">Статистика</div></header>'+
+    return '<div class="page tabbed"><header class="hhead"><div class="h1t">Статистика</div></header>'+rateBoxHtml()+
       (ids.length?statsHtml(ids):'<div class="empty"><p>Статистика появится, когда вы создадите колоду и начнёте заучивать карточки.</p></div>')+
       '</div>';
-  }
+  },
+  mount(){rateLoad();}
 };
 
 /* ---------- deck ---------- */
@@ -2697,6 +2840,7 @@ function studyPanel(){
 function sessHardList(){const m={};(SS.log||[]).forEach((x,i)=>{if(!x.ok){const e=m[x.id]||(m[x.id]={id:x.id,n:0,i:0});e.n++;e.i=i;}});return Object.values(m).filter(e=>{const c=cardById(e.id);return c&&!cardExcluded(c);}).sort((a,b)=>b.n-a.n||b.i-a.i).slice(0,5);}
 function sessSummary(){
   const L=SS.log||[];if(!L.length)return {html:'',hard:0};
+  rateSubmit();
   const ok=L.filter(x=>x.ok).length,sk=streakOf(dayStats(sessionDeckIds())),hard=sessHardList();
   return {hard:hard.length,html:'<div class="sumrow"><div class="sumc"><b>'+L.length+'</b><span>ответов</span></div><div class="sumc"><b>'+Math.round(ok/L.length*100)+'%</b><span>верно</span></div>'+(sk>0?'<div class="sumc"><b>'+sk+'</b><span>серия, дн.</span></div>':'')+'</div>'+
     (hard.length?'<div class="sumhead">Чаще всего ошибались</div><ul class="sumhard">'+hard.map(e=>'<li><span data-noi18n>'+esc(cardTitle(cardById(e.id)))+'</span><i>×'+e.n+'</i></li>').join('')+'</ul>':'')};
@@ -9664,6 +9808,9 @@ const A={
   deckBack:()=>{const d=deckById(view.deckId);go(d&&d.folderId?{name:'folder',folderId:d.folderId}:{name:'library'});},
   openFolder:el=>go({name:'folder',folderId:el.dataset.id}),
   goCal:()=>{CAL.y=null;go({name:'calendar'});},
+  rateMetric:el=>{const v=el.dataset.v;if(!['points','accuracy','errors'].includes(v)||v===RATE.metric&&RATE.res)return;RATE.metric=v;RATE.res=null;RATE.err='';ratePaint();rateLoad();},
+  rateGear:()=>{rateGear();},
+  rateBack:()=>{rateAsk();},
   calNav:el=>{const d=+el.dataset.d;let m=CAL.m+d,y=CAL.y;if(m<0){m=11;y--;}if(m>11){m=0;y++;}CAL.m=m;CAL.y=y;render();},
   calToday:()=>{const t=new Date();CAL.y=t.getFullYear();CAL.m=t.getMonth();CAL.sel=dayKey();render();},
   calDay:el=>{CAL.sel=el.dataset.v;render();},
@@ -9697,7 +9844,7 @@ const A={
   lesson:()=>lessonStart(view.deckId),
   crBack:()=>crHome(),
   crList:()=>go({name:'courses',fid:'-'}),
-  studyExit:()=>{CH.pin=null;if(SS)SS.nudge=null;if(SS&&SS.hard){const hf=SS.hardFolderId||null;SS=Object.assign({},{zoom:SS.zoom});go(hf?{name:'hard',folderId:hf}:{name:'hard'});return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
+  studyExit:()=>{rateSubmit();CH.pin=null;if(SS)SS.nudge=null;if(SS&&SS.hard){const hf=SS.hardFolderId||null;SS=Object.assign({},{zoom:SS.zoom});go(hf?{name:'hard',folderId:hf}:{name:'hard'});return;}const did=SS?SS.deckId:null;const fid=SS?SS.folderId:null;const xid=SS?SS.examId:null;SS=Object.assign({},{zoom:SS?SS.zoom:1});if(xid){go({name:'calendar'});return;}go(fid?{name:'folder',folderId:fid}:(did?{name:'deck',deckId:did,tab:'photos'}:{name:'home'}));},
   studyUndo:()=>undoStudy(),
   introNext:()=>introGo(1),
   introPrev:()=>introGo(-1),
@@ -9844,7 +9991,7 @@ async function bootData(){
   if(S.db){
     try{
       const g=await Promise.all(['decks','plates','terms','stats','folders','packs','exams'].map(n=>S.db.collection(n).get().catch(e=>{if(n==='exams')return {docs:[]};throw e;})));
-      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','aiSeen','aiNudge','aiNudgeOff','intro','coursePrio','courseLast','create'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
+      try{const m=await S.db.collection('meta').doc('settings').get();if(m.exists){const md=m.data()||{};META.lastBackup=md.lastBackup||0;if(md.hintAfter!=null)META.hintAfter=md.hintAfter;if(md.hintShows!=null)META.hintShows=md.hintShows;if(md.mode)META.mode=md.mode;['calm','theme','fs','autoRate','swipe','tipSwipe','tipKeys','autoSpeak','sessLimit','seeThrough','speakOn','algo','retention','autoOcr','tips','tipN','latFix','tourSeen','remDays','remTime','remShown','remNudge','pushOn','pushNudge','aiSeen','aiNudge','aiNudgeOff','intro','coursePrio','courseLast','create','ratingMode'].forEach(k=>{if(md[k]!=null)META[k]=md[k];});
         {const lc=META.courseLast;if(lc!==undefined&&!(lc&&typeof lc==='object'&&typeof lc.pid==='string'&&lc.pid.length<=100&&LSKEYS.indexOf(lc.step)>=0))delete META.courseLast;   // saved data is not trusted
         if(META.coursePrio!==undefined&&[1,2,3].indexOf(META.coursePrio)<0)delete META.coursePrio;}
         applyLook();}}catch(e){}
@@ -9867,6 +10014,7 @@ async function bootData(){
     W0.onAward=award;if(W0.award){const a=W0.award;W0.award=null;setTimeout(()=>award(a),1500);}
     if(W0.startView&&SCREENS[W0.startView]&&!S.loadErr){const v=W0.startView;W0.clearStartView();CAL.y=null;go({name:v});}}}
   if(META.pushOn)pushSyncSoon(4000);
+  if(rateApi())setTimeout(rateSubmit,2500);
   if(!S.loadErr)setTimeout(()=>{if(!window.__TEST__||window.__NUDGE_TEST__)examNudge();},1200);
   if(S.decks.length&&!S.exams.length&&META.tourSeen&&!window.__TEST__)setTimeout(()=>{if(!layer.firstChild&&view.name==='home')featTip('calTip','Новое: календарь контрольных — укажите дату, и Corpus распределит карточки до неё',['Открыть',()=>go({name:'calendar'})],8000);},4500);
   S.cards.filter(c=>c._mig).forEach(c=>{delete c._mig;persist('terms',c.id);});
@@ -9905,6 +10053,7 @@ if(window.__TEST__){
   window.cramMenu=cramMenu;window.cramMenuFolder=cramMenuFolder;window.pickPlates=pickPlates;window.plateMenu=plateMenu;window.dismissOverlay=dismissOverlay;
   window.applyLook=applyLook;window.ocrWorker=ocrWorker;window.ocrClean=ocrClean;window.edAuto=edAuto;window.edOCR=edOCR;window.createCard=createCard;window.parsePairs=parsePairs;window.STG=STG;window.loadImage=loadImage;window.toCanvas=toCanvas;window.rotateCanvas=rotateCanvas;window.__setCR=o=>{CR=o;};window.plateUrl=plateUrl;window.deckCounts=deckCounts;window.createArrow=createArrow;window.setArrow=setArrow;window.autoTail=autoTail;window.isArrow=isArrow;window.studyMasks=studyMasks;window.edMasks=edMasks;window.cropApply=cropApply;window.openPractice=openPractice;window.edDelete=edDelete;window.edUndo=edUndo;window.setupCard=setupCard;window.META=META;window.scheduleFSRS=scheduleFSRS;window.scheduleSM2=scheduleSM2;window.fState=fState;window.fIvl=fIvl;window.fR=fR;window.fMem=fMem;window.fForgetS=fForgetS;window.fRecallS=fRecallS;window.fShortS=fShortS;window.fNextD=fNextD;window.fInitD=fInitD;window.fInitS=fInitS;window.retrievability=retrievability;window.importFile=importFile;window.addNote=addNote;window.notesOfDeck=notesOfDeck;window.tImport=tImport;window.tEdit=tEdit;window.aOf=aOf;window.qOf=qOf;window.setupCard=setupCard;window.distractors=distractors;window.buildExport=buildExport;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.startGlobalStudy=startGlobalStudy;window.globalCounts=globalCounts;window.folderCounts=folderCounts;
   Object.defineProperty(window,'RATING',{get:()=>RATING});
+  Object.defineProperty(window,'RATE',{get:()=>RATE});window.rateSubmit=rateSubmit;window.rateLoad=rateLoad;window.rateApi=rateApi;window.rateAsk=rateAsk;window.dayKey=dayKey;window.addDays=addDays;window.setLang=setLang;   // rating tests
   window.grpKey=grpKey;window.grpMates=grpMates;window.uniqGrp=uniqGrp;window.edUngrp=edUngrp;window.sessCounts=sessCounts;window.hardCards=hardCards;window.hardN=hardN;window.hardHtml=hardHtml;window.applyRating=applyRating;window.hintAfter=hintAfter;window.studyHard=studyHard;window.I18N_DICT=I18N_DICT;window.lexPhrase=lexPhrase;window.lexNearest=lexNearest;window.lexBestDist=lexBestDist;window.latFix=latFix;window.lexLoad=lexLoad;window.LEX=LEX;window.ocrDist=ocrDist;window.OCR=OCR;window.detectLabels=detectLabels;window.ocrOne=ocrOne;window.autoRead=autoRead;window.featTip=featTip;window.setFeat=setFeat;window.OCR_AUTO=OCR_AUTO;window.TIP_SEEN=TIP_SEEN;window.scheduleAuto=scheduleAuto;window.confetti=confetti;
 }
 boot();

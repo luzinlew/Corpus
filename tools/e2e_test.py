@@ -500,6 +500,8 @@ async def main():
                 pg.on('response', lambda r: r.status >= 400 and not ('/auth/v1/token' in r.url or '/auth/v1/signup' in r.url)
                       and not ('/functions/v1/corpus-ai' in r.url and (r.status in (404, 429) or (r.status in (502, 504) and refusal_window['on'])))   # provoked: function off, daily limit; the model service refuses (only inside refusal_window)
                       and not ('/rpc/corpus_share_open' in r.url and r.status == 404)             # provoked: a wrong share code
+                      and not ('/rpc/corpus_rating_' in r.url and r.status == 404)               # provoked: supabase/rating.sql not run (PGRST202), the rating block hides itself
+                      and not ('/rpc/corpus_rating_set_profile' in r.url and r.status == 400)    # provoked: a bad nickname (bad_alias)
                       and not (quota_window['on'] and r.status in (400, 413, 503))                 # provoked: the account limits (see «limits» below)
                       and errs.append(f'http {r.status}: {r.url}'))
                 return ctx, pg, errs
@@ -5051,6 +5053,296 @@ async def main():
             await ctx_o.close()
             # <<< T032C
             # <<< T018
+
+            # ---------- weekly rating (T-041b): the block on «Statistics», sending the week, the first-visit question, three tables, hidden, missing functions ----------
+            def rt_api(q='', seed=None):
+                req = urllib.request.Request(API + '/__rating' + q, json.dumps(seed).encode() if seed is not None else None, {'Content-Type': 'application/json'}, method='POST' if seed is not None else 'GET')
+                return json.loads(urllib.request.urlopen(req).read())
+
+            async def rt_cyr(pg, scope):
+                """Cyrillic text left in the scope (not counting people's names, which are not translated), also in aria-label / title / placeholder."""
+                return await pg.evaluate("""(sel)=>{const out=[],re=/[А-Яа-яЁё]/;
+                  document.querySelectorAll(sel).forEach(root=>{
+                    const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT);let n;
+                    while((n=w.nextNode())){
+                      if(n.nodeType===3){const p=n.parentElement;if(p&&!p.closest('[data-noi18n]')&&re.test(n.data))out.push(n.data.trim());}
+                      else if(!n.closest('[data-noi18n]'))for(const a of ['aria-label','title','placeholder']){const v=n.getAttribute(a);if(v&&re.test(v))out.push(a+'='+v);}
+                    }});
+                  return out;}""", scope)
+
+            async def rt_rows(pg):
+                return await pg.evaluate("[...document.querySelectorAll('#rateBox .rate-list li')].map(li=>li.classList.contains('rate-gap')?'…':[li.querySelector('.rate-n').textContent,li.querySelector('.rate-nm').textContent,li.querySelector('.rate-v').textContent,li.classList.contains('me')?'me':''].join('|'))")
+
+            rt_api('?reset=1')
+            names = ['<img src=x onerror=window.__xss=9>', 'Очень-длинное-имя-студента-аааааааааааа']
+            others = []
+            for i in range(1, 13):
+                others.append({'name': f'Nimi{i:02d}', 'mode': 'alias', 'answers': 200, 'correct': 200 - 2 * i, 'active_days': 3, 'points': 1300 - 50 * i})
+            others.append({'email': 'secret.person@x.ee', 'asked': False, 'answers': 200, 'correct': 199, 'active_days': 3, 'points': 1290})
+            others.append({'name': names[0], 'answers': 200, 'correct': 190, 'active_days': 3, 'points': 1240})
+            others.append({'email': 'hidden.one@x.ee', 'mode': 'hidden', 'answers': 400, 'correct': 400, 'active_days': 4, 'points': 5000})
+            others.append({'name': names[1], 'answers': 150, 'correct': 140, 'active_days': 1, 'points': 140})
+            rt_api('', others)
+            ctx_t, pg, errs_t = await open_ctx()
+            await ctx_t.add_init_script("try{localStorage.setItem('corpus.lang','ru');}catch(e){};window.__RATE_TEST__=true;")
+            rq = []
+            pg.on('request', lambda r: 'corpus_rating_' in r.url and rq.append(r.url.split('corpus_rating_')[1]))
+            await pg.goto(SITE + '?i=' + INVITE)
+            await pg.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pg.fill('input[name=email]', 'rate@test.ee')
+            await pg.fill('input[name=password]', 'kolju2026')
+            await pg.click('.cw-go')
+            await app_ready(pg)
+            await pg.wait_for_timeout(3200)
+            check('rating: nothing is called on load (no days yet, the screen is not open)', rq == [], json.dumps(rq))
+            check('rating: CORPUS_WEB.rating has the four calls and is frozen', await pg.evaluate("(()=>{const r=CORPUS_WEB.rating;return Object.isFrozen(r)&&['submit','get','setProfile','deleteMine'].every(k=>typeof r[k]==='function')})()"))
+            tday = await pg.evaluate('dayKey()')
+            rt_api('?today=' + tday)
+            # the days of the app: today, and two days of the previous week that must never be sent
+            await pg.evaluate("""(()=>{S.decks.push({id:'rd1',name:'Rating',newPerDay:20,mode:'hideAll',createdAt:Date.now()});
+              const d={};d[dayKey()]={n:30,ok:24};d[dayKey(addDays(Date.now(),-8))]={n:50,ok:50};d[dayKey(addDays(Date.now(),-30))]={n:20,ok:20};
+              S.stats.rd1={id:'rd1',days:d};})()""")
+            await pg.evaluate("try{localStorage.removeItem('corpus.ratingAt.'+CORPUS_WEB.uid)}catch(e){};rateSubmit()")
+            for _ in range(40):
+                if rt_api()['submits']:
+                    break
+                await pg.wait_for_timeout(100)
+            sb = rt_api()['submits']
+            check('rating: the first send has only the days of this week, as YYYY-MM-DD → {n, ok}', len(sb) == 1 and sb[0] == {tday: {'n': 30, 'ok': 24}}, json.dumps(sb))
+            await pg.evaluate('rateSubmit()')
+            await pg.wait_for_timeout(500)
+            check('rating: not more often than once in 10 minutes', len(rt_api()['submits']) == 1 and rq.count('submit') == 1, json.dumps(rq))
+            await pg.evaluate("localStorage.setItem('corpus.ratingAt.'+CORPUS_WEB.uid,String(Date.now()-11*60000));rateSubmit()")
+            for _ in range(40):
+                if len(rt_api()['submits']) > 1:
+                    break
+                await pg.wait_for_timeout(100)
+            check('rating: after 10 minutes it sends again', len(rt_api()['submits']) == 2)
+            # a long session: finishing it sends too (the throttle is shorter than the wait here, so only the call itself is checked)
+            check('rating: the end of a session and the app start call rateSubmit', await pg.evaluate("/rateSubmit/.test(String(A.studyExit))&&/rateSubmit/.test(String(sessSummary))"))
+            mine = [w for w in rt_api()['weeks'] if w['answers'] == 30]
+            check('rating: the server has the week (30 answers, 24 correct, 1 day)', len(mine) == 1 and mine[0]['correct'] == 24 and mine[0]['active_days'] == 1 and mine[0]['points'] == 24, json.dumps(mine))
+
+            # --- the screen: the first-visit question, once per session; «Later» saves nothing ---
+            rq.clear()
+            await pg.evaluate("go({name:'globalStats'})")
+            await pg.wait_for_selector('#layer .dlg .rate-ch', timeout=8000)
+            check('rating: the block «Рейтинг недели» is on Statistics for a signed-in person', await pg.evaluate("!!document.querySelector('#app #rateBox h3')&&document.querySelector('#rateBox h3').textContent==='Рейтинг недели'"))
+            dtxt = await pg.inner_text('#layer .dlg')
+            check('rating: first visit asks «Как показывать тебя в рейтинге?» with the explanation and four buttons', 'Как показывать тебя в рейтинге?' in dtxt and 'другие видят тебя как «Студент»' in dtxt and 'отключить в любой момент' in dtxt
+                  and await pg.eval_on_selector_all('#layer .rate-ch button', 'els => els.map(e => e.textContent)') == ['По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже'], dtxt)
+            rws = await rt_rows(pg)
+            check('rating: until the person answers, others show as «Студент» (no e-mail name), hidden people are absent', any('|Студент|' in r for r in rws) and not any('Secret' in r or 'secret' in r.lower() or 'Hidden' in r for r in rws), json.dumps(rws, ensure_ascii=False))
+            check('rating: a name with markup is text, not an element', await pg.evaluate("document.querySelectorAll('#rateBox img').length===0&&!window.__xss") and any('<img src=x' in r for r in rws))
+            await pg.click('#layer [data-s=""]')
+            await pg.wait_for_function("!document.querySelector('#layer .dlg')")
+            prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: «Позже» does not save the answer (asked stays false)', len(prof) == 1 and prof[0]['asked'] is False, json.dumps(prof))
+            await pg.evaluate("go({name:'home'})")
+            await pg.evaluate("go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox .rate-list')
+            await pg.wait_for_timeout(500)
+            check('rating: the question comes once per session', not await pg.query_selector('#layer .dlg'))
+            await pg.reload()
+            await app_ready(pg)
+            await pg.evaluate("go({name:'globalStats'})")
+            await pg.wait_for_selector('#layer .dlg .rate-ch', timeout=8000)
+            check('rating: after «Позже» the next visit asks again', True)
+            await pg.click('#layer [data-s="alias"]')
+            await pg.wait_for_selector('#dlgIn')
+            for bad in ['x', 'a<b>c', 'a' * 21]:
+                await pg.fill('#dlgIn', bad)
+                await pg.click('#layer [data-s="1"]')
+                await pg.wait_for_function("document.querySelector('#layer .dlg p')&&document.querySelector('#layer .dlg p').textContent.indexOf('Не подходит')===0", timeout=5000)
+            ptxt = await pg.inner_text('#layer .dlg p')
+            prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: a bad nickname shows «2–20 символов: буквы, цифры, пробел . _ -» and saves nothing', '2–20 символов: буквы, цифры, пробел . _ -' in ptxt and prof[0]['asked'] is False, ptxt)
+            await pg.fill('#dlgIn', 'Rate Me')
+            await pg.click('#layer [data-s="1"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Тебя показывают как «Rate Me»')", timeout=5000)
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: a good nickname is saved, the toast names it and my row carries it', prof[0]['mode'] == 'alias' and prof[0]['alias'] == 'Rate Me' and prof[0]['asked'] is True
+                  and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Rate Me'"))
+            rws = await rt_rows(pg)
+            check('rating: «Верные»: top 10, then «…», then me with the places around (16 people, I am 16th with 24 points)',
+                  len(rws) == 15 and rws[10] == '…' and rws[-1] == '16|Rate Me|24|me' and rws[-2].startswith('15|' + names[1] + '|140') and rws[0].startswith('1|Студент|1290'), json.dumps(rws, ensure_ascii=False))
+            me_line = await pg.inner_text('#rateBox .rate-me')
+            hint = await pg.inner_text('#rateBox .rate-hint')
+            check('rating: «Твоё место: 16 из 16» and the hint to the next place (140 − 24 + 1 = 117)', me_line == 'Твоё место: 16 из 16' and hint == 'До следующего места: 117', me_line + ' / ' + hint)
+            check('rating: the first three have badges, my row is marked', await pg.evaluate("['m1','m2','m3'].every((c,i)=>document.querySelectorAll('#rateBox .rate-n')[i].classList.contains(c))&&document.querySelectorAll('#rateBox .rate-r.me[aria-current]').length===1"))
+            # --- the other two tables: I am not in them yet (30 answers, 1 day) ---
+            await pg.click('#rateBox [data-v=accuracy]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-v=accuracy]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-me')&&/Нужно/.test(document.querySelector('#rateBox .rate-me').textContent)", timeout=5000)
+            check('rating: «Подготовлен» for someone with too few answers explains it («Нужно 100 ответов и 2 дня занятий — пока у тебя 30 ответов»)',
+                  await pg.inner_text('#rateBox .rate-me') == 'Нужно 100 ответов и 2 дня занятий — пока у тебя 30 ответов' and not await pg.query_selector('#rateBox .rate-hint') and not await pg.query_selector('#rateBox .rate-r.me')
+                  and await pg.evaluate("document.querySelector('#rateBox [data-v=points]').getAttribute('aria-pressed')==='false'"))
+            # translations of this state and of the dialogs, English and Estonian
+            async def rt_sweep(tag, scope='#rateBox'):
+                left = await rt_cyr(pg, scope)
+                check(f'rating {tag}: nothing is left untranslated', left == [], json.dumps(left, ensure_ascii=False))
+            for lg, head in (('en', 'Weekly ranking'), ('et', 'Nädala edetabel')):
+                await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
+                await pg.wait_for_selector('#rateBox .rate-me')
+                check(f'rating {lg}: heading, chips and the explanation are translated', await pg.evaluate("document.querySelector('#rateBox h3').textContent") == head)
+                await rt_sweep(f'{lg} too few answers')
+            await pg.evaluate("setLang('ru',false);go({name:'home'});go({name:'globalStats'})")
+            # --- I become eligible (seeded: 200 answers, 177 correct, 2 days, 177 points): the share tables, ranks, highlight ---
+            rt_api('', [{'email': 'rate@test.ee', 'answers': 200, 'correct': 177, 'active_days': 2, 'points': 177}])
+            await pg.evaluate("go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            await pg.click('#rateBox [data-v=points]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-v=points]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-hint')", timeout=5000)
+            check('rating: «Верные» after more answers: I am 15th of 16, the hint counts to the person above (700 − 177 + 1 = 524)',
+                  await pg.inner_text('#rateBox .rate-me') == 'Твоё место: 15 из 16' and await pg.inner_text('#rateBox .rate-hint') == 'До следующего места: 524')
+            await pg.click('#rateBox [data-v=accuracy]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-v=accuracy]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-r.me')", timeout=5000)
+            rws = await rt_rows(pg)
+            check('rating: «Подготовлен» is ranked by the share of correct answers (exact), shown as a percentage; I am 14th of 15 with 88,5 %; no place-hint here',
+                  len(rws) == 15 and rws[0] == '1|Студент|99,5 %|' and rws[13] == '14|Rate Me|88,5 %|me' and rws[14].startswith('15|Nimi12|88 %') and not await pg.query_selector('#rateBox .rate-hint') and '…' not in rws, json.dumps(rws, ensure_ascii=False))
+            await pg.click('#rateBox [data-v=errors]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-v=errors]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-r.me')", timeout=5000)
+            rws = await rt_rows(pg)
+            check('rating: «Меньше ошибок» ranks fewer mistakes higher: 0,5 % first, I am 14th with 11,5 %',
+                  rws[0] == '1|Студент|0,5 %|' and rws[13] == '14|Rate Me|11,5 %|me' and await pg.inner_text('#rateBox .rate-me') == 'Твоё место: 14 из 15', json.dumps(rws, ensure_ascii=False))
+            # a slow answer for a table that was left must not overwrite the table that was chosen after it
+            async def slow_acc(route):
+                if '"accuracy"' in (route.request.post_data or ''):
+                    await asyncio.sleep(1.2)
+                await route.continue_()
+            await pg.route('**/rpc/corpus_rating_get', slow_acc)
+            await pg.click('#rateBox [data-v=accuracy]')
+            await pg.click('#rateBox [data-v=errors]')
+            await pg.wait_for_timeout(2200)
+            check('rating: a late answer of an earlier table is dropped (the chosen table stays)', await pg.evaluate("RATE.metric==='errors'&&RATE.res.metric==='errors'&&document.querySelector('#rateBox [data-v=errors]').getAttribute('aria-pressed')==='true'&&/11,5 %/.test(document.querySelector('#rateBox .rate-r.me .rate-v').textContent)"))
+            await pg.unroute('**/rpc/corpus_rating_get')
+            # --- layout at 390 px ---
+            lay = await pg.evaluate("""(()=>{const b=document.getElementById('rateBox'),de=document.documentElement;
+              const small=[...b.querySelectorAll('button')].filter(x=>x.getBoundingClientRect().height<40||x.getBoundingClientRect().width<40).map(x=>x.dataset.act+':'+x.textContent);
+              return {w:window.innerWidth,doc:de.scrollWidth,box:b.scrollWidth<=b.clientWidth,over:[...b.querySelectorAll('*')].filter(e=>e.getBoundingClientRect().right>b.getBoundingClientRect().right+1).length,small,labels:[...b.querySelectorAll('button')].every(x=>x.getAttribute('aria-label')||x.textContent.trim())}})()""")
+            check('rating: at 390 px nothing scrolls sideways, all buttons are at least 40 px, the gear has an aria-label',
+                  lay['w'] == 390 and lay['doc'] <= 390 and lay['box'] and lay['over'] == 0 and lay['small'] == [] and lay['labels'] and bool(await pg.get_attribute('#rateBox [data-act=rateGear]', 'aria-label')), json.dumps(lay))
+            # --- translations of the lists, the sheet and the dialogs ---
+            for lg in ('en', 'et'):
+                await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
+                await pg.wait_for_selector('#rateBox .rate-r.me')
+                await rt_sweep(f'{lg} list')
+                check(f'rating {lg}: «Student» for the unnamed, the place line is translated', 'Üliõpilane' in await pg.inner_text('#rateBox') if lg == 'et' else 'Student' in await pg.inner_text('#rateBox'))
+                await pg.click('#rateBox [data-act=rateGear]')
+                await pg.wait_for_selector('#layer .sitem')
+                await rt_sweep(f'{lg} settings sheet', '#layer')
+                await pg.click('#layer .sitem.danger')
+                await pg.wait_for_selector('#layer .dlg')
+                await rt_sweep(f'{lg} delete confirmation', '#layer')
+                await pg.click('#layer .dlg [data-s="0"]')
+                await pg.evaluate('void rateAsk()')
+                await pg.wait_for_selector('#layer .rate-ch')
+                await rt_sweep(f'{lg} first-visit dialog', '#layer')
+                await pg.click('#layer [data-s="alias"]')
+                await pg.wait_for_selector('#dlgIn')
+                await rt_sweep(f'{lg} nickname dialog', '#layer')
+                await pg.click('#layer .dlg [data-s="0"]')
+            await pg.evaluate("setLang('ru',false);go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            # the dictionary has the new strings (I18N_DICT is not reachable from the page: read the source)
+            src = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
+            need = ['Рейтинг недели', 'Верные', 'Подготовлен', 'Меньше ошибок', 'Ответь на карточки, и ты появишься в таблице', 'Загрузка…', 'Нет связи', 'Пока в таблице никого нет', 'Ты скрыт из рейтинга', 'Вернуться в рейтинг',
+                    'Как показывать тебя в рейтинге?', 'Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже',
+                    'Показывать по имени из почты', 'Псевдоним…', 'Удалить мои данные рейтинга', 'Удалить мои данные рейтинга?', 'Псевдоним', '2–20 символов: буквы, цифры, пробел . _ -']
+            lost = [k for k in need if not re.search(r'\["' + re.escape(k) + r'"\s*,\s*"[^"]+"\s*,\s*"[^"]+"\]', src)]
+            check('rating: every new interface string has an [ru, en, et] entry in I18N_DICT', lost == [], json.dumps(lost, ensure_ascii=False))
+
+            # --- hidden: the block says so, nothing more is sent; coming back; deleting my data ---
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            items = await pg.eval_on_selector_all('#layer .sitem', 'els => els.map(e => [e.textContent.trim(), e.classList.contains("on")])')
+            check('rating: the gear offers name / nickname / hide / delete, the current choice is ticked', [i[0] for i in items] == ['Показывать по имени из почты', 'Псевдоним…', 'Скрыть меня', 'Удалить мои данные рейтинга', 'Отмена'] and [i[1] for i in items] == [False, True, False, False, False], json.dumps(items, ensure_ascii=False))
+            await pg.click('#layer [data-s="hidden"]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-act=rateBack]')", timeout=5000)
+            check('rating: hidden → «Ты скрыт из рейтинга» and the button to come back, no tables', await pg.inner_text('#rateBox .rate-me') == 'Ты скрыт из рейтинга' and not await pg.query_selector('#rateBox .rate-list') and not await pg.query_selector('#rateBox .rate-chips')
+                  and await pg.evaluate("META.ratingMode==='hidden'"))
+            for lg in ('en', 'et'):
+                await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
+                await pg.wait_for_selector('#rateBox [data-act=rateBack]')
+                await rt_sweep(f'{lg} hidden')
+            await pg.evaluate("setLang('ru',false);go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox [data-act=rateBack]')
+            rq.clear()
+            await pg.evaluate("localStorage.setItem('corpus.ratingAt.'+CORPUS_WEB.uid,String(Date.now()-11*60000));S.decks.some(d=>d.id==='rd1')||S.decks.push({id:'rd1',name:'Rating',newPerDay:20,mode:'hideAll',createdAt:Date.now()});S.stats.rd1={id:'rd1',days:{[dayKey()]:{n:35,ok:25}}};rateSubmit()")
+            await pg.wait_for_timeout(800)
+            check('rating: a hidden person sends nothing (no new submit request)', 'submit' not in rq, json.dumps(rq))
+            await pg.click('#rateBox [data-act=rateBack]')
+            await pg.wait_for_selector('#layer .rate-ch')
+            await pg.click('#layer [data-s="real"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Тебя показывают как «Rate»')", timeout=5000)
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: coming back by the e-mail name shows «Rate» (from rate@test.ee), my row is back', prof[0]['mode'] == 'real' and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Rate'"))
+            my_id = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee'][0]['id']
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            await pg.click('#layer [data-s="del"]')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer .dlg [data-s="0"]')
+            check('rating: «Удалить мои данные» asks first; «Отмена» deletes nothing', any(w['user_id'] == my_id for w in rt_api()['weeks']))
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            await pg.click('#layer [data-s="del"]')
+            await pg.wait_for_selector('#layer .dlg')
+            await pg.click('#layer .dlg [data-s="1"]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-act=rateBack]')", timeout=5000)
+            st_r = rt_api()
+            prof = [p for p in st_r['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: deleting removes my week, leaves me hidden and asked, and the block says «Ты скрыт»', prof[0]['mode'] == 'hidden' and prof[0]['asked'] is True and not any(w['user_id'] == my_id for w in st_r['weeks']) and await pg.evaluate("META.ratingMode==='hidden'"))
+
+            # --- the connection drops: «Нет связи», the block stays, a chip retries ---
+            await pg.evaluate("go({name:'home'})")
+            await pg.route('**/rpc/corpus_rating_get', lambda route: route.abort('aborted'))
+            await pg.evaluate("RATE.res=null;go({name:'globalStats'})")
+            await pg.wait_for_function("document.querySelector('#rateBox .rate-note')&&document.querySelector('#rateBox .rate-note').textContent==='Нет связи'", timeout=8000)
+            check('rating: without a connection the block shows «Нет связи» and stays', True)
+            await pg.unroute('**/rpc/corpus_rating_get')
+            await pg.click('#rateBox [data-v=accuracy]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-act=rateBack]')||document.querySelector('#rateBox .rate-list')", timeout=8000)
+            check('rating: a tap on a chip after the connection is back loads again', True)
+
+            # --- the artifact (no CORPUS_WEB) sees no block ---
+            await pg.evaluate("go({name:'home'});window.__w=window.CORPUS_WEB;window.CORPUS_WEB=undefined;go({name:'globalStats'})")
+            await pg.wait_for_selector('#app .h1t')
+            check('rating: without CORPUS_WEB (the claude.ai artifact) there is no block and nothing breaks', not await pg.query_selector('#rateBox') and await pg.evaluate('(rateSubmit(),rateApi()===null)'))
+            await pg.evaluate("window.CORPUS_WEB=window.__w;0")
+
+            # --- the functions are not in the database (supabase/rating.sql not run): no block, no console errors, no more calls ---
+            rt_api('?mode=missing')
+            n_err = len(errs_t)
+            rq.clear()
+            await pg.reload()
+            await app_ready(pg)
+            await pg.evaluate("localStorage.removeItem('corpus.ratingAt.'+CORPUS_WEB.uid);go({name:'globalStats'})")
+            await pg.wait_for_function("RATE.off===true", timeout=8000)
+            await pg.wait_for_timeout(300)
+            check('rating: functions missing (PGRST202) → the block is gone', not await pg.query_selector('#rateBox'))
+            rq.clear()
+            await pg.evaluate("S.decks.length||S.decks.push({id:'rd1',name:'Rating',newPerDay:20,mode:'hideAll',createdAt:Date.now()});S.stats.rd1={id:'rd1',days:{[dayKey()]:{n:3,ok:2}}};rateSubmit();rateLoad();go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_timeout(700)
+            check('rating: …and nothing is called again in this session', rq == [] and not await pg.query_selector('#rateBox'), json.dumps(rq))
+            check('rating: …without errors in the console', errs_t[n_err:] == [], '; '.join(errs_t[n_err:])[:300])
+            rt_api('?mode=')
+            # --- a guest sees no block ---
+            check('rating: no script errors on the way', errs_t == [], '; '.join(errs_t)[:400])
+            await ctx_t.close()
+            ctx_t, pg, errs_t = await open_ctx()
+            rq = []
+            pg.on('request', lambda r: 'corpus_rating_' in r.url and rq.append(r.url))
+            await pg.goto(SITE)
+            await pg.wait_for_selector('.cw-guest-btn')
+            await pg.click('.cw-guest-btn')
+            await app_ready(pg)
+            await pg.evaluate("S.decks.push({id:'gr1',name:'Gost',newPerDay:20,mode:'hideAll',createdAt:1});S.stats.gr1={id:'gr1',days:{[dayKey()]:{n:10,ok:9}}};rateSubmit();go({name:'globalStats'})")
+            await pg.wait_for_selector('#app .h1t')
+            await pg.wait_for_timeout(3200)
+            check('rating: a guest has no block, no rating calls, CORPUS_WEB.rating is not there', not await pg.query_selector('#rateBox') and rq == [] and await pg.evaluate('CORPUS_WEB.rating===undefined'), json.dumps(rq))
+            await ctx_t.close()
 
             # ---------- guest: look around without an account, nothing reaches the server ----------
             ctx, pg, errs_g = await open_ctx()

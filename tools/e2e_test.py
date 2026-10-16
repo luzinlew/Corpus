@@ -1477,6 +1477,46 @@ async def main():
             check('hard deck: card dropped out of hardCards and recorded lapsesBase', await pg.evaluate("hardCards(S.decks.map(d=>d.id)).length===0 && cardById(window._hc).miss===0"))
             await pg.evaluate("A.studyHome();go({name:'library'})")
             check('hard deck: tile gone again after the card left', await pg.evaluate("!document.querySelector('.deck.hardrow')"))
+            # lapses-only difficulty is counted and shown (Statistics list)
+            await pg.evaluate("(()=>{const c=cardById(window._hc);c.lapses=3;c.miss=0;delete c.lapsesBase;c.hardOk=0;persist('terms',c.id);})()")
+            check('hard deck: stats list counts lapses (3, not 0)', await pg.evaluate("(()=>{const h=hardHtml([cardById(window._hc).deckId]);return h.includes('3 ошибки')&&!h.includes('0 ошибок')&&h.includes('openHardDeck');})()"))
+            check('hard deck: hardN/weakness ignore lapses before lapsesBase', await pg.evaluate("(()=>{const c=cardById(window._hc);const w1=weakness(c);c.lapsesBase=3;const w2=weakness(c);const n=hardN(c);c.lapsesBase=0;delete c.lapsesBase;return n===0&&w2<w1;})()"))
+            # leaving the list clears the hint snooze: new mistakes ask for a hint again
+            hs = await pg.evaluate("""(()=>{const c=cardById(window._hc),d=deckById(c.deckId);c.lapses=0;c.miss=3;c.hintSnooze=6;c.hardOk=2;c.type='review';delete c.lapsesBase;
+              applyRating(c,3,d);const left=[c.miss,c.hintSnooze===undefined,c.hardOk,hardN(c)];
+              for(let i=0;i<3;i++)c.miss++;
+              return {left,ask:c.miss>=hintAfter()&&c.miss>=(c.hintSnooze||0)};})()""")
+            check('hard deck: leaving clears hintSnooze → hint asked again after new mistakes', hs['left'] == [0, True, 0, 0] and hs['ask'] is True, json.dumps(hs))
+            # undo in a hard session restores hardOk / miss / lapsesBase
+            await pg.evaluate("(()=>{const c=cardById(window._hc);c.miss=2;c.hardOk=1;c.lapses=0;delete c.lapsesBase;c.type='review';c.due=Date.now()+86400000*3;persist('terms',c.id);})()")
+            await pg.evaluate("studyHard(null)")
+            await pg.wait_for_selector('.full.study')
+            await pg.evaluate('doReveal()')
+            await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
+            await pg.evaluate("RATING=false;rate(3)")
+            await asyncio.sleep(0.5)
+            check('hard deck: answer moved the chain', await pg.evaluate("cardById(window._hc).hardOk===2"))
+            await pg.evaluate("undoStudy()")
+            await asyncio.sleep(0.3)
+            check('hard deck: undo restores hardOk and miss', await pg.evaluate("(()=>{const c=cardById(window._hc);return c.hardOk===1&&c.miss===2&&c.lapsesBase===undefined;})()"))
+            # the end screen of a hard session: own title, no «repeat hard» button
+            await pg.evaluate("SS.log=[{id:window._hc,ok:false}];SS.cramQueue=[];SS.phase='answer';RATING=false;rate(3)")
+            await asyncio.sleep(0.5)
+            check('hard deck: end screen has no «repeat hard» button and its own title', await pg.evaluate("!document.querySelector('[data-act=sessHard]') && /Трудные пройдены|Rasked läbitud|Hard cards done/.test(document.querySelector('.donebox h2').textContent)"))
+            await pg.evaluate("A.studyExit()")
+            check('hard deck: closing a hard session returns to the hard screen', await pg.evaluate("view.name==='hard'"))
+            # folder: tile inside the folder, back button leads to the folder; folder switched off → global tile hidden
+            await pg.evaluate("(()=>{const f=S.folders[0],d=deckById(cardById(window._hc).deckId);window._d0=d.folderId||'';d.folderId=f.id;persist('decks',d.id);go({name:'folder',folderId:f.id});})()")
+            check('hard deck: tile inside the folder', await pg.evaluate("!!document.querySelector('.deck.hardrow[data-folder]') && document.querySelector('.deck.hardrow').dataset.folder===S.folders[0].id"))
+            await pg.click('.deck.hardrow')
+            await pg.wait_for_selector('.hardscreen')
+            await pg.click('[data-act=openFolderBack]')
+            await pg.wait_for_function("view.name==='folder'", timeout=5000)
+            check('hard deck: «back» from a folder hard deck leads to the folder', True)
+            await pg.evaluate("(()=>{S.folders[0].off=true;persist('folders',S.folders[0].id);go({name:'library'});})()")
+            check('hard deck: hard card in a switched-off folder → global tile hidden', await pg.evaluate("!document.querySelector('.deck.hardrow')"))
+            await pg.evaluate("(()=>{const f=S.folders[0];delete f.off;persist('folders',f.id);const c=cardById(window._hc),d=deckById(c.deckId);if(window._d0)d.folderId=window._d0;else delete d.folderId;persist('decks',d.id);c.miss=0;c.lapses=0;c.hardOk=0;delete c.lapsesBase;persist('terms',c.id);go({name:'library'});})()")
+            check('hard deck: strings are translated (et, en)', await pg.evaluate("['Учить трудные','Собираются автоматически','Трудные пройдены','Открыть «Трудные»'].every(k=>I18N_DICT.some(e=>e[0]===k&&e[1]&&e[2]))"))
             check('summary: a session without answers shows no summary', await pg.evaluate("(()=>{const o=SS;SS={log:[],deckIds:[]};const r=sessSummary();SS=o;return r.html===''&&r.hard===0;})()"))
 
             # ---------- a course in another language: translated once by the AI, kept on the photo, shown in the reader's language ----------

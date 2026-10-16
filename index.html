@@ -1942,8 +1942,8 @@ SCREENS.library={
     const items=S.folders.map(f=>({t:'folder',o:f})).concat(topDecks.map(d=>({t:'deck',o:d})));
     items.sort((a,b)=>((a.o.createdAt||0)-(b.o.createdAt||0)));
     const rows=items.map(it=>it.t==='folder'?folderRowHtml(it.o):deckRowHtml(it.o)).join('');
-    return '<div class="page tabbed"><header class="hhead"><div class="h1t">Колоды</div><button class="ibtn" data-act="addMenu" aria-label="Добавить">'+ic('plus')+'</button></header>'+
-      (S.decks.length||S.folders.length?rows+'<button class="btn line block" data-act="addMenu" style="margin-top:6px">'+ic('plus',18)+'Новая колода или папка</button>':
+    return '<div class="page tabbed"><header class="hhead"><div class="h1t">Колоды'+(S.decks.length?'<span class="hcount">'+S.decks.length+'</span>':'')+'</div><button class="ibtn" data-act="addMenu" aria-label="Добавить">'+ic('plus')+'</button></header>'+
+      (S.decks.length||S.folders.length?'<div class="dgrid">'+rows+'<button class="btn line block" data-act="addMenu" style="margin-top:6px">'+ic('plus',18)+'Новая колода или папка</button></div>':
         '<div class="empty"><div class="demo" aria-hidden="true"><span class="demo-line"></span><span class="demo-mask">?</span></div>'+
         '<div class="h2" style="color:var(--ink)">Пока нет колод</div><p style="margin:6px auto 0;max-width:360px;line-height:1.55">Создайте колоду, сфотографируйте страницу атласа и закройте подписи рамками.</p>'+
         '<button class="btn primary" data-act="newDeck">'+ic('plus',18)+'Создать колоду</button>'+(starterBtn()?'<div style="margin-top:8px">'+starterBtn()+'</div>':'')+'</div>')+
@@ -8323,7 +8323,7 @@ function settingsBody(){
       '<p class="muted sm" style="text-align:center">'+pl(S.decks.length,'колода','колоды','колод')+', '+pl(np,'фото','фото','фото')+', '+pl(nc,'карточка','карточки','карточек')+'</p>';
 }
 SCREENS.settings={
-  html(){return '<div class="page tabbed"><header class="hhead"><div class="h1t">Ещё</div></header>'+
+  html(){return '<div class="page tabbed more"><header class="hhead"><div class="h1t">Ещё</div></header>'+
     (window.CORPUS_WEB&&window.CORPUS_WEB.admin?'<section class="overview" id="siteStats"><div class="h2">Статистика сайта</div><p class="muted sm" style="margin:6px 0 0">Загружаю…</p></section>':'')+
     settingsBody()+'</div>';},
   mount(){
@@ -10081,6 +10081,54 @@ html.vkb .panel{padding-bottom:12px}
   .page.svhome{padding-top:30px;padding-left:40px;padding-right:40px}
   .svtoday{gap:48px;padding:26px 44px}
 }
+/* ===== вкладки ≥600: рамка, сетка колод и курсов ===== */
+.hhead .hcount{margin-left:10px;font-size:16px;font-weight:700;color:var(--ink3)}
+@media (min-width:600px){
+  .dgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .dgrid>.deck,.dgrid>.folder-swipe{margin-bottom:0;min-width:0}
+  .dgrid>.btn.block{grid-column:1/-1;margin-top:0!important}
+  .dgrid .folder-swipe>.deck{background:var(--surface)}
+  .dgrid .deck{border-radius:20px}
+  .dgrid .folder-swipe{display:grid;border-radius:20px}
+  .ccards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+}
+@media (min-width:600px) and (max-width:899px){
+  .page.tabbed:not(.more):not(.svhome){padding-left:32px;padding-right:32px;padding-top:28px}
+}
+@media (min-width:900px){
+  .page.tabbed:not(.more):not(.svhome){max-width:1280px;padding-top:26px;padding-left:28px;padding-right:28px}
+  .page.tabbed:not(.more) .hhead .h1t{font-size:32px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
+  .page.tabbed:not(.more) .hhead .hcount{font-size:16px;font-weight:700;letter-spacing:0}
+  .dgrid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+  .dgrid .deck{background:var(--glass);border-color:var(--glass-line)}
+  .ccard{gap:14px;padding:10px 10px 18px}
+  .ccov{height:150px}
+  .ccard>.cbar{height:8px;background:var(--primary-soft)}
+  .ccard>.cbar i{background:var(--primary)}
+  .page.crs.chome{max-width:960px}
+  .full.clesson{max-width:960px}
+}
+@media (min-width:1100px){
+  .page.tabbed:not(.more):not(.svhome){padding-top:30px;padding-left:40px;padding-right:40px}
+  .ccards{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (min-width:900px) and (hover:hover){
+  html:not(.calm) .ccard{transition:transform .2s ease,box-shadow .2s ease}
+  html:not(.calm) .ccard:hover{transform:translateY(-2px)}
+}
+@keyframes gridIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>*{animation:gridIn .42s cubic-bezier(.2,.9,.25,1) backwards}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(1){animation-delay:0.035s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(2){animation-delay:0.07s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(3){animation-delay:0.105s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(4){animation-delay:0.14s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(5){animation-delay:0.175s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(6){animation-delay:0.21s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(7){animation-delay:0.245s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(8){animation-delay:0.28s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(9){animation-delay:0.315s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(10){animation-delay:0.35s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards)>:nth-child(n+11){animation-delay:.35s}
 </style>
 </body>
 </html>

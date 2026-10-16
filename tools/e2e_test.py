@@ -733,6 +733,31 @@ async def main():
                 await pg.set_viewport_size({'width': 390, 'height': 844})
                 await pg.evaluate("go({name:'home'})")
 
+            # «Decks» tab on a wide screen: the same frame as «Home», the rows become a grid of cards, a counter by the title
+            lib_js = """(()=>{const g=document.querySelector('.dgrid'),pg=document.querySelector('.page.tabbed'),h=document.querySelector('.hhead .h1t');
+              const c=document.querySelector('.hhead .hcount');
+              return {page:pg?pg.getBoundingClientRect().width:null,disp:g?getComputedStyle(g).display:null,cols:g?getComputedStyle(g).gridTemplateColumns.split(' ').length:0,
+                deck:!!document.querySelector('.dgrid .deck'),count:c?c.textContent:null,n:S.decks.length,h1:h?parseFloat(getComputedStyle(h).fontSize):0};})()"""
+            try:
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.evaluate("go({name:'library'})")
+                await pg.wait_for_selector('.dgrid .deck')
+                L = await pg.evaluate(lib_js)
+                check('layout 1440 «Decks»: page 1200–1280px, ≥3 card columns, a counter with the number of decks next to a 32px title',
+                      1200 <= L['page'] <= 1281 and L['disp'] == 'grid' and L['cols'] >= 3 and L['count'] == str(L['n']) and L['h1'] == 32, json.dumps(L))
+                await pg.set_viewport_size({'width': 1700, 'height': 900})
+                L = await pg.evaluate(lib_js)
+                check('layout 1700 «Decks»: the page stops at 1280px', 1279 <= L['page'] <= 1281, json.dumps(L))
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                L = await pg.evaluate(lib_js)
+                check('layout 1000 «Decks»: ≥2 card columns', L['cols'] >= 2, json.dumps(L))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                L = await pg.evaluate(lib_js)
+                check('layout 390 «Decks»: a single column of rows', L['disp'] != 'grid' or L['cols'] == 1, json.dumps(L))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("go({name:'home'})")
+
             # share the folder → a file with the photo inside
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
@@ -817,6 +842,27 @@ async def main():
             await pg.wait_for_selector('.crs.chome .cpart >> nth=1 >> button.cph')
             await pg.click('.crs.chome .cpart >> nth=1 >> button.cph')   # the part with the lesson is opened by its own heading
             await pg.wait_for_function("document.querySelectorAll('.crs.chome .clrow').length===2")
+
+            # list of courses on a wide screen: a grid (a second course is a copy made in memory only)
+            try:
+                await pg.evaluate("""(()=>{const f=S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link)));S.folders.push({id:'zf2',name:'Kopia',mode:'hideAll',createdAt:Date.now()+100});
+                  S.decks.filter(d=>d.folderId===f.id).forEach(d=>{S.decks.push(Object.assign({},d,{id:'zd'+d.id,folderId:'zf2'}));
+                    S.plates.filter(p=>p.deckId===d.id).forEach(p=>S.plates.push(Object.assign({},p,{id:'zp'+p.id,deckId:'zd'+d.id})));});go({name:'courses'});})()""")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.ccards .ccard')
+                R = await pg.evaluate("({n:document.querySelectorAll('.ccard').length,cols:getComputedStyle(document.querySelector('.ccards')).gridTemplateColumns.split(' ').length,w:document.querySelector('.page.tabbed').getBoundingClientRect().width})")
+                check('layout 1440 «Courses»: two courses in a grid of ≥3 columns inside the 1280px frame', R['n'] == 2 and R['cols'] >= 3 and R['w'] <= 1281, json.dumps(R))
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                R = await pg.evaluate("getComputedStyle(document.querySelector('.ccards')).gridTemplateColumns.split(' ').length")
+                check('layout 1000 «Courses»: two columns', R == 2, str(R))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                R = await pg.evaluate("getComputedStyle(document.querySelector('.ccards')).gridTemplateColumns.split(' ').length")
+                check('layout 390 «Courses»: one column', R == 1, str(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("""(f1=>{S.folders=S.folders.filter(f=>f.id!=='zf2');S.decks=S.decks.filter(d=>d.folderId!=='zf2');S.plates=S.plates.filter(p=>!p.id.startsWith('zp'));
+                  go({name:'courses',fid:f1});})(S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link))).id)""")
+                await pg.wait_for_selector('.crs.chome .clrow')
 
             # the lesson of the first photo
             await pg.click('.crs.chome .clrow >> nth=0')

@@ -440,6 +440,16 @@ http.createServer(async (req, res) => {
           const keep = Math.ceil(knowledge.length / 2), head = JSON.stringify({ knowledge: knowledge.slice(0, keep) }).length - 2 + 1;
           text = JSON.stringify({ knowledge, knowledge_limited: false, topics: ans.topics }).slice(0, head + 12); stop = 'max_tokens';
         }
+      } else if (inp.kind === 'knowledge-groups-v1') {
+        /* plan by groups (T-037): every group of the request exactly once, in the order given; a lesson holds FAKE_V2_PER_LESSON groups (default 3), or the groups spread evenly over v2lessons=N lessons; a part at most 3 lessons;
+           the title is the beginning of the first fragment of its first group */
+        const per = +(process.env.FAKE_V2_PER_LESSON || 3), gs = inp.groups || [], n = gs.length, lessons = [];
+        const cuts = FN_V2L > 0 ? Array.from({ length: Math.min(FN_V2L, n) + 1 }, (_, i) => Math.floor(i * n / Math.min(FN_V2L, n))) : Array.from({ length: Math.ceil(n / per) + 1 }, (_, i) => Math.min(i * per, n));
+        for (let k = 0; k + 1 < cuts.length; k++) lessons.push({ title: (lessons.length + 1) + '. ' + String((gs[cuts[k]].t || [])[0] || 'Group ' + gs[cuts[k]].id).slice(0, 50), groups: gs.slice(cuts[k], cuts[k + 1]).map((g) => g.id), rationale: 'Kept in source order, lesson ' + (lessons.length + 1) + '.' });
+        const parts = [];
+        for (let i = 0; i < lessons.length; i += 3) parts.push({ name: 'Part ' + (parts.length + 1), lessons: lessons.slice(i, i + 3) });
+        ans = { parts };
+        if (FN_DROP) delete ans.parts;
       } else if (inp.kind === 'knowledge-v1') {
         /* plan v2: every unit of the registry exactly once; a lesson holds at most FAKE_V2_PER_LESSON (default 3) units in source order, a part at most 3 lessons; the title is the beginning of the first unit */
         const per = +(process.env.FAKE_V2_PER_LESSON || 3), ids = (inp.knowledge || []).map((u) => u.id), label = (u) => String(typeof u.content === 'string' ? u.content : JSON.stringify(u.content)).slice(0, 50);

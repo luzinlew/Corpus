@@ -654,8 +654,11 @@ async def main():
             await pg.evaluate('startGlobalStudy()')
             await pg.wait_for_selector('#panel .ring')
             await pg.evaluate("SS.cm='type';SS.phase='answer';SS.result='wrong';SS.typed='margo superior petrosae';updStudy()")
-            sq = await pg.evaluate("(()=>{const p=document.querySelector('#panel'),r=document.querySelector('#panel .ring');return {ph:p.offsetHeight,H:app.clientHeight,z:parseFloat(r.style.zoom)||1,wide:app.classList.contains('wide')};})()")
-            check('square window: the answer panel takes at most 60% of the height, the ring is smaller than usual', not sq['wide'] and sq['ph'] <= sq['H'] * 0.6 and sq['z'] < 1, json.dumps(sq))
+            sq = await pg.evaluate("(()=>{const p=document.querySelector('#panel'),r=document.querySelector('#panel .ring');return {ph:p.offsetHeight,H:app.clientHeight,z:parseFloat(r.dataset.k)||1,wide:app.classList.contains('wide')};})()")
+            check('square window: the answer panel takes at most half the height, the ring is smaller than usual', not sq['wide'] and sq['ph'] <= sq['H'] * 0.5 and sq['z'] < 1, json.dumps(sq))
+            if os.environ.get('CORPUS_SHOT'):
+                await asyncio.sleep(1.2)
+                await pg.screenshot(path=os.environ['CORPUS_SHOT'])
             await pg.set_viewport_size({'width': 390, 'height': 844})
             # typed answer: words stay apart, only the wrong part of a word is marked, a missing word is one plate
             dw = await pg.evaluate("[diffHtml('margo superior petrosae','Margo superior partis petrosae'),diffHtml('processus styloideus','Proc. styloideus'),diffHtml('proc.styloideus','Proc. styloideus'),diffHtml('foo','Margo')]")

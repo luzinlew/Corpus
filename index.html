@@ -1957,18 +1957,18 @@ function ringHtml(c,ask){
 /* кольцо не должно съедать картинку: если панель с ответом занимает больше половины высоты (узкое окно, split view), кольцо уменьшается */
 function fitRing(){
   const r=$('#panel .rate.ring');if(!r)return;
-  r.style.zoom='';
+  r.style.transform=r.style.transformOrigin=r.style.marginBottom='';r.dataset.k='';
   const p=$('#panel'),H=app.clientHeight;if(!p||!H||app.classList.contains('wide'))return;
   const h0=r.offsetHeight;if(!h0)return;
-  const k=clamp((H*0.5-(p.offsetHeight-h0))/h0,0.7,1);
-  if(k<0.99)r.style.zoom=k.toFixed(3);
+  const k=clamp((H*0.42-(p.offsetHeight-h0))/h0,0.72,1);
+  if(k<0.99){r.dataset.k=k.toFixed(3);r.style.transform='scale('+k.toFixed(3)+')';r.style.transformOrigin='50% 0';r.style.marginBottom=(-h0*(1-k)).toFixed(1)+'px';}
 }
 function bindRing(){
   const k=$('#ringKnob');if(!k||k.dataset.b)return;k.dataset.b='1';
   const ring=k.closest('.ring');let d=null;
   const arm=r=>{ring.querySelectorAll('.rs').forEach(b=>b.classList.toggle('armed',!!r&&b.classList.contains('r'+r)));};
   k.addEventListener('pointerdown',e=>{if(!SS||SS.phase!=='answer')return;e.preventDefault();d={x:e.clientX,y:e.clientY,r:0};try{k.setPointerCapture(e.pointerId);}catch(_){}k.classList.add('drag');});
-  k.addEventListener('pointermove',e=>{if(!d)return;const kz=parseFloat(ring.style.zoom)||1;let dx=(e.clientX-d.x)/kz,dy=(e.clientY-d.y)/kz;const L=Math.hypot(dx,dy),M=Math.max(40,ring.clientWidth*0.27);if(L>M){dx=dx/L*M;dy=dy/L*M;}
+  k.addEventListener('pointermove',e=>{if(!d)return;const kz=parseFloat(ring.dataset.k)||1;let dx=(e.clientX-d.x)/kz,dy=(e.clientY-d.y)/kz;const L=Math.hypot(dx,dy),M=Math.max(40,ring.clientWidth*0.27);if(L>M){dx=dx/L*M;dy=dy/L*M;}
     k.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px)';
     let r=0;const ax=Math.abs(dx),ay=Math.abs(dy);if(Math.max(ax,ay)>M*0.45)r=ax>ay?(dx>0?3:1):(dy<0?4:2);if(SS.cram&&r)r=r<=2?1:3;
     if(r!==d.r){d.r=r;arm(r);}});

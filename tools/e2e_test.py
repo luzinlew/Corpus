@@ -864,6 +864,50 @@ async def main():
                   go({name:'courses',fid:f1});})(S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link))).id)""")
                 await pg.wait_for_selector('.crs.chome .clrow')
 
+            # «Calendar», «Statistics», «More» on wide screens
+            try:
+                await pg.evaluate("""(()=>{const dk=n=>{const d=new Date(Date.now()+n*864e5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};const t=Date.now();[3,9].forEach((n,i)=>S.exams.push({id:'zx'+i,title:'Kontrolltoo '+i,date:dk(n),folderIds:[],deckIds:[],createdAt:t+i}));go({name:'calendar'});})()""")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.calbox .calgrid .cday:not(.out)')
+                await pg.wait_for_timeout(700)
+                CJS = """()=>{const g=document.querySelector('.calgrid').getBoundingClientRect(),d=document.querySelector('.cdaybox').getBoundingClientRect(),c=document.querySelector('.cday:not(.out)').getBoundingClientRect();
+                  return {disp:getComputedStyle(document.querySelector('.calbox')).display,cols:getComputedStyle(document.querySelector('.calbox')).gridTemplateColumns.split(' ').length,
+                  gr:g.right,gb:g.bottom,dl:d.left,dt:d.top,dw:d.width,ch:c.height,page:document.querySelector('.page.tabbed').getBoundingClientRect().width,nex:document.querySelectorAll('.exgrid .excard').length}}"""
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(CJS)
+                check('layout 1440 «Calendar»: month grid left, day panel (280–340px) right of it, day cells ≥70px high, upcoming tests in a grid',
+                      R['disp'] == 'grid' and R['cols'] >= 2 and R['dl'] > R['gr'] - 4 and 280 <= R['dw'] <= 340 and R['ch'] >= 70 and R['nex'] >= 2, json.dumps(R))
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(CJS)
+                check('layout 1000 «Calendar»: two columns', R['cols'] >= 2 and R['dl'] > R['gr'] - 4 and R['ch'] >= 70, json.dumps(R))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(CJS)
+                check('layout 390 «Calendar»: one column, day panel under the grid', R['cols'] == 1 and R['dt'] >= R['gb'] - 4, json.dumps(R))
+                await pg.evaluate("go({name:'globalStats'})")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.gstats .stat')
+                await pg.wait_for_timeout(700)
+                SJS = "()=>({cols:getComputedStyle(document.querySelector('.gstats')).gridTemplateColumns.split(' ').length,tiles:getComputedStyle(document.querySelector('.gstats .stat-grid')).gridTemplateColumns.split(' ').length,page:document.querySelector('.page.tabbed').getBoundingClientRect().width})"
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(SJS)
+                check('layout 1440 «Statistics»: 1200–1281px frame, ≥2 columns, three tiles in a row', 1200 <= R['page'] <= 1281 and R['cols'] >= 2 and R['tiles'] == 3, json.dumps(R))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(SJS)
+                check('layout 390 «Statistics»: one column', R['cols'] == 1, json.dumps(R))
+                await pg.evaluate("go({name:'settings'})")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.page.more .overview')
+                await pg.wait_for_timeout(700)
+                R = await pg.evaluate("document.querySelector('.page.more').getBoundingClientRect().width")
+                check('layout 1440 «More»: page centred, 700–1081px wide', 700 <= R <= 1081, str(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("""(f1=>{S.exams=S.exams.filter(e=>!e.id.startsWith('zx'));go({name:'courses',fid:f1});})(S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link))).id)""")
+                await pg.wait_for_selector('.crs.chome .clrow')
+
             # the lesson of the first photo
             await pg.click('.crs.chome .clrow >> nth=0')
             await pg.wait_for_selector('.clesson .kbubble')

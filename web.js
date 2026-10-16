@@ -120,7 +120,7 @@
   function today() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
   function ping() {
     pingDay = today();
-    sb.rpc('corpus_ping').then(function (r) { if (r && r.data && r.data.admin) W.admin = true; }, function () {});
+    sb.rpc('corpus_ping').then(function (r) { if (r && r.data && r.data.admin && !W.admin) { W.admin = true; try { window.dispatchEvent(new Event('corpus-admin')); } catch (e) {} } }, function () {});
     weekAward();
   }
   /* weekly reward (supabase/reward.sql): the winner of last week is told once */

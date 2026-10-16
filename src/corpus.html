@@ -361,6 +361,7 @@ button:disabled{cursor:default;opacity:.38}
 .diff s{color:var(--bad);text-decoration-thickness:1.5px}
 .diff mark{color:var(--ink);background:var(--warn-soft);border-radius:3px;padding:0 1px}
 .diff mark.gap{padding:0 3px;font-weight:700}
+.diff mark.gap.wd{padding:0 5px;letter-spacing:.08em;border-radius:6px}
 .diff-k{text-align:center;font-size:12px;color:var(--ink2);margin-top:2px}
 .hintline{font:italic 500 16px/1.35 'Source Serif 4',Georgia,serif;color:var(--ink3);text-align:center;margin:-4px 0 10px}
 .hintline b{font:600 12px 'Onest',system-ui,sans-serif;color:var(--ink3);font-style:normal;letter-spacing:.3px;margin-right:6px}
@@ -987,10 +988,53 @@ function diffOps(a,b){
   }
   return ops.reverse();
 }
+/* «Вы ввели»: сравнение по словам — слова остаются на месте, правки видны только внутри слова;
+   лишнее слово зачёркнуто, пропущенное — пустая плашка. Побуквенный разбор — только внутри пары похожих слов. */
+function diffChars(a,b){
+  return diffOps(a,b).map(o=>o[0]==='eq'?esc(o[1]):o[0]==='sub'?'<s>'+esc(o[1])+'</s><mark>'+esc(o[2])+'</mark>':o[0]==='del'?'<s>'+esc(o[1])+'</s>':/[\p{L}\p{N}\s]/u.test(o[2])?'<mark class="gap" title="'+esc(o[2])+'">_</mark>':'<mark class="gap">'+esc(o[2])+'</mark>').join('').replace(/<\/s><s>/g,'');
+}
+/* сокращение с точкой: «proc.» ~ «processus» */
+function isAbbr(x,y){
+  const [sh,lg]=x.length<=y.length?[x,y]:[y,x];
+  return /\.$/.test(sh)&&sh.length>=2&&/^[\p{L}\p{N}]+$/u.test(lg)&&lg.startsWith(sh.slice(0,-1));
+}
+function diffAbbr(x,y){
+  const gap=c=>'<mark class="gap" title="'+esc(c)+'">_</mark>';
+  if(x.length<y.length){const st=x.slice(0,-1);return esc(st)+y.slice(st.length).split('').map(gap).join('')+'<s>.</s>';}
+  const st=y.slice(0,-1);return esc(st)+'<s>'+esc(x.slice(st.length))+'</s><mark>.</mark>';
+}
+function diffWordCost(x,y){
+  if(x===y)return 0;
+  if(isAbbr(x,y))return 0.3;
+  const s=lev(x,y)/Math.max(x.length,y.length);
+  return s<=0.5?s:Infinity;
+}
 function diffHtml(typed,correct){
-  const a=String(typed).toLowerCase().replace(/\s+/g,' ').trim(),b=String(correct).toLowerCase().replace(/\s+/g,' ').trim();
-  if(!a)return '';
-  return diffOps(a,b).map(o=>o[0]==='eq'?esc(o[1]):o[0]==='sub'?'<s>'+esc(o[1])+'</s><mark>'+esc(o[2])+'</mark>':o[0]==='del'?'<s>'+esc(o[1])+'</s>':'<mark class="gap" title="'+esc(o[2])+'">_</mark>').join('');
+  const A=String(typed).toLowerCase().split(/\s+/).filter(Boolean),B=String(correct).toLowerCase().split(/\s+/).filter(Boolean);
+  if(!A.length)return '';
+  if(A.length!==B.length&&lev(A.join(' '),B.join(' '))<=2)return diffChars(A.join(' '),B.join(' '));   /* слипшиеся или лишние пробелы */
+  const m=A.length,n=B.length,D=[];
+  for(let i=0;i<=m;i++){D[i]=new Array(n+1);D[i][0]=i;}
+  for(let j=0;j<=n;j++)D[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)D[i][j]=Math.min(D[i-1][j]+1,D[i][j-1]+1,D[i-1][j-1]+diffWordCost(A[i-1],B[j-1]));
+  const ops=[];let i=m,j=n;
+  while(i>0||j>0){
+    if(i>0&&j>0&&Math.abs(D[i][j]-(D[i-1][j-1]+diffWordCost(A[i-1],B[j-1])))<1e-9){ops.push(['pair',A[i-1],B[j-1]]);i--;j--;}
+    else if(i>0&&Math.abs(D[i][j]-(D[i-1][j]+1))<1e-9){ops.push(['extra',A[i-1]]);i--;}
+    else{ops.push(['miss',B[j-1]]);j--;}
+  }
+  ops.reverse();
+  const out=[];
+  const gapW=w=>'<mark class="gap wd" title="'+esc(w)+'">'+'_'.repeat(Math.max(1,Math.min(w.length,10)))+'</mark>';
+  for(let k=0;k<ops.length;){
+    if(ops[k][0]==='pair'){out.push(ops[k][1]===ops[k][2]?esc(ops[k][1]):isAbbr(ops[k][1],ops[k][2])?diffAbbr(ops[k][1],ops[k][2]):diffChars(ops[k][1],ops[k][2]));k++;continue;}
+    const ex=[],ms=[];
+    while(k<ops.length&&ops[k][0]!=='pair'){(ops[k][0]==='extra'?ex:ms).push(ops[k][1]);k++;}
+    const ja=ex.join(' '),jb=ms.join(' ');
+    if(ex.length&&ms.length&&lev(ja,jb)/Math.max(ja.length,jb.length)<=0.35)out.push(diffChars(ja,jb));
+    else{ex.forEach(w=>out.push('<s>'+esc(w)+'</s>'));ms.forEach(w=>out.push(gapW(w)));}
+  }
+  return out.join(' ');
 }
 function checkAnswer(input,answer){
   const a=norm(input),b=norm(answer);
@@ -1896,12 +1940,21 @@ function ringHtml(c,ask){
     :'<button class="ring-knob" id="ringKnob" aria-label="'+T3('Потяните к нужной оценке','Drag toward a grade','Lohista hinde poole')+'" data-noi18n><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M10 5l2-2 2 2M10 19l2 2 2-2M5 10l-2 2 2 2M19 10l2 2-2 2"/></svg></button>';
   return '<div class="rate ring '+(ask?'ask':'ans')+(cram?' cram':'')+'"><span class="ring-disc" aria-hidden="true"></span>'+rs+knob+'</div>';
 }
+/* кольцо не должно съедать картинку: если панель с ответом занимает больше половины высоты (узкое окно, split view), кольцо уменьшается */
+function fitRing(){
+  const r=$('#panel .rate.ring');if(!r)return;
+  r.style.zoom='';
+  const p=$('#panel'),H=app.clientHeight;if(!p||!H||app.classList.contains('wide'))return;
+  const h0=r.offsetHeight;if(!h0)return;
+  const k=clamp((H*0.5-(p.offsetHeight-h0))/h0,0.7,1);
+  if(k<0.99)r.style.zoom=k.toFixed(3);
+}
 function bindRing(){
   const k=$('#ringKnob');if(!k||k.dataset.b)return;k.dataset.b='1';
   const ring=k.closest('.ring');let d=null;
   const arm=r=>{ring.querySelectorAll('.rs').forEach(b=>b.classList.toggle('armed',!!r&&b.classList.contains('r'+r)));};
   k.addEventListener('pointerdown',e=>{if(!SS||SS.phase!=='answer')return;e.preventDefault();d={x:e.clientX,y:e.clientY,r:0};try{k.setPointerCapture(e.pointerId);}catch(_){}k.classList.add('drag');});
-  k.addEventListener('pointermove',e=>{if(!d)return;let dx=e.clientX-d.x,dy=e.clientY-d.y;const L=Math.hypot(dx,dy),M=Math.max(40,ring.clientWidth*0.27);if(L>M){dx=dx/L*M;dy=dy/L*M;}
+  k.addEventListener('pointermove',e=>{if(!d)return;const kz=parseFloat(ring.style.zoom)||1;let dx=(e.clientX-d.x)/kz,dy=(e.clientY-d.y)/kz;const L=Math.hypot(dx,dy),M=Math.max(40,ring.clientWidth*0.27);if(L>M){dx=dx/L*M;dy=dy/L*M;}
     k.style.transform='translate('+dx.toFixed(1)+'px,'+dy.toFixed(1)+'px)';
     let r=0;const ax=Math.abs(dx),ay=Math.abs(dy);if(Math.max(ax,ay)>M*0.45)r=ax>ay?(dx>0?3:1):(dy<0?4:2);if(SS.cram&&r)r=r<=2?1:3;
     if(r!==d.r){d.r=r;arm(r);}});
@@ -2659,7 +2712,7 @@ SCREENS.study={
 function updStudy(){
   const m=$('#masks'),p=$('#panel'),k=$('#scounts'),u=$('#undoBtn'),tc=$('#tcard');
   if(tc){const fresh=tc.dataset.id!==SS.cur;tc.innerHTML=textCardHtml();mountImgFallbacks();if(fresh){tc.dataset.id=SS.cur;tc.classList.remove('tc-in');void tc.offsetWidth;tc.classList.add('tc-in');}}
-  if(m)m.innerHTML=studyMasks();if(p){p.innerHTML=studyPanel();bindRing();}const kp=$('#kprog');if(kp)kp.innerHTML=kprogHtml();if(k)k.innerHTML=countsBar();if(u)u.disabled=!SS.undo.length;
+  if(m)m.innerHTML=studyMasks();if(p){p.innerHTML=studyPanel();bindRing();fitRing();layoutStage();}const kp=$('#kprog');if(kp)kp.innerHTML=kprogHtml();if(k)k.innerHTML=countsBar();if(u)u.disabled=!SS.undo.length;
   if(SS.phase==='ask'&&SS.cm==='type'&&!CH.open){const i=$('#typeIn');if(i)setTimeout(()=>i.focus(),30);}
   chatSync();
 }
@@ -4153,8 +4206,17 @@ function crHomeHtml(f,multi){
         'The pictures come from study materials and are only for your own learning. Do not share the course file. Names and importance were found automatically, there may be mistakes.',
         'Pildid on õppematerjalidest ja on siin ainult sinu isiklikuks õppimiseks. Ära jaga kursuse faili. Nimed ja tähtsus on tuvastatud automaatselt, vigu võib esineda.')+'</p></div></details></div>';
 }
+/* the courses tab is still being built: on the website only the admin (corpus_ping → CORPUS_WEB.admin) sees it; the claude.ai artifact has no CORPUS_WEB and stays open */
+const crLocked=()=>!!(window.CORPUS_WEB&&!window.CORPUS_WEB.admin&&!window.__TEST_COURSES__);
+window.addEventListener('corpus-admin',()=>{if(view&&(view.name==='courses'||view.name==='courseLesson'||view.name==='courseNew'))go({name:'courses'});});
+function crSoonHtml(){
+  return '<div class="page tabbed crs"><header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div></header><div class="sv-empty" id="crSoon">'+kostik(60,'hi','kk-float')+'<div class="kbubble big"><b>'+
+    T3('Функция в разработке','This feature is in development','Funktsioon on arenduses')+'</b><br>'+
+    T3('Курсы пока недоступны. Мы ещё доделываем их и откроем позже.','Courses are not available yet. We are still finishing them and will open them later.','Kursused pole veel saadaval. Viimistleme neid veel ja avame hiljem.')+'</div></div></div>';
+}
 SCREENS.courses={
   html(){
+    if(crLocked())return crSoonHtml();
     const fs=crFolders(),f=fs.find(x=>x.id===view.fid)||(fs.length===1?fs[0]:null);
     if(f)return crHomeHtml(f,fs.length>1);
     const head='<header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div>'+cnNewBtn()+'</header>'+cnDraftsHtml();
@@ -4171,6 +4233,7 @@ SCREENS.courses={
         (due?'<span class="cpill due">'+ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+due+'</span>':started?'<span class="cpill done">'+ic('check',13)+T3('Всё повторено','All repeated','Kõik korratud')+'</span>':'<span class="cpill new">'+T3('Не начат','Not started','Alustamata')+'</span>')+'</span>'+crBar(dn,ls.length)+'</button>';}).join('')+'</div></div>';
   },
   mount(){
+    if(crLocked())return;
     mountImgFallbacks();cnMountCourses();
     const from=()=>({name:'courses',fid:view.fid});
     document.querySelectorAll('.crs .clrow').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from()));
@@ -9249,7 +9312,7 @@ function applyLook(){
   r.classList.toggle('calm',!!META.calm);r.style.setProperty('--fs',String(META.fs||1));
 }
 function studyWide(){const w=app.clientWidth,h=app.clientHeight;return w>=880&&w>h*1.12;}
-function applyStudyLayout(){app.classList.toggle('wide',view.name==='study'&&!!(SS&&SS.cur)&&studyWide());}
+function applyStudyLayout(){app.classList.toggle('wide',view.name==='study'&&!!(SS&&SS.cur)&&studyWide());if(view.name==='study')fitRing();}
 function revealMode(){return !!SS&&(SS.cm==='hideAll'||SS.cm==='hideOne');}
 /* auto-advance: a correct answer in choice / type / find rates itself "good" */
 const AUTO_MS=1500;

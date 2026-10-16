@@ -3,16 +3,23 @@
 -- What it adds: one shared leaderboard for all students. The week runs Monday to Sunday by Tallinn time and starts from zero every
 -- Monday. Everybody takes part by default and can switch to a nickname or hide (the site asks once, on first visit).
 --   * the app sends its per-day counts, {"YYYY-MM-DD": {"n": answers, "ok": correct}}, for the current week only;
---   * a day counts at most 400 answers; for the "correct this week" table at most 150 correct answers a day (the cap);
+--   * a day counts at most 400 answers (if more are sent, the correct ones are scaled down in proportion); for the "correct this
+--     week" table at most 150 correct answers a day (the cap);
 --   * three tables: correct this week (points) / prepared (share of correct) / fewer mistakes (share of wrong); the two shares need
---     at least 100 answers in the week;
+--     at least 100 answers in the week on at least 2 different days; they are ranked by the exact share, rounded only for display;
+--   * a submit with no valid day writes nothing, and a submit never lowers the week's answers (an out-of-date device cannot reset it);
 --   * hidden people are not in any table; the table never shows an email or a user id, only a display name;
+--   * after delete_mine the person stays hidden until they choose again;
 --   * rows older than 8 weeks are deleted on every submit.
 -- Nothing is readable from the tables directly (RLS on, no policies, no grants): everything goes through the functions below.
 -- The old version of the site does not call them, so it keeps working as before.
 --
--- Display name: the nickname if chosen; otherwise taken from the email's local part, split on . _ - + and digits:
---   lev.luzin@x.ee -> "Lev L.", luzinlew@gmail.com -> "Luzinlew"; no letters -> "Студент".
+-- Display name: the nickname if chosen; otherwise, ONLY after the person has answered "how to show me" (asked), taken from the email's
+-- local part, split on . _ - + and digits, letters only:  lev.luzin@x.ee -> "Lev L.", luzinlew@gmail.com -> "Luzinlew".
+-- Before that answer, and when there are no letters, the name is "Студент": nobody shows up under an email name unasked.
+--
+-- Check before running (read-only). Letters like õ ä ö ü ж must count as letters, otherwise their names and nicknames are refused:
+--   show lc_ctype; select upper('õ'), 'ж' ~ '[[:alpha:]]';     -- expected: 'Õ' and true
 --
 -- To remove everything this file adds: supabase/rating_rollback.sql (the rating results are lost).
 
@@ -52,14 +59,16 @@ revoke execute on function private.rating_today() from public, anon, authenticat
 -- Display name. Never returns the email itself.
 create or replace function private.rating_name(p_uid uuid) returns text
 language plpgsql stable security definer set search_path = '' as $$
-declare m text; a text; em text; toks text[]; t1 text; t2 text;
+declare m text; a text; asked boolean; em text; toks text[]; t1 text; t2 text;
 begin
-  select p.mode, p.alias into m, a from public.rating_profile p where p.user_id = p_uid;
+  select p.mode, p.alias, p.asked into m, a, asked from public.rating_profile p where p.user_id = p_uid;
   if m = 'alias' and a is not null and a <> '' then return a; end if;
+  if not coalesce(asked, false) then return 'Студент'; end if;
   select u.email into em from auth.users u where u.id = p_uid;
-  select array_agg(s.x order by s.ord) into toks
-    from regexp_split_to_table(split_part(coalesce(em, ''), '@', 1), '[-._+0-9]+') with ordinality s(x, ord)
-   where s.x ~ '[[:alpha:]]';
+  select array_agg(s.t order by s.ord) into toks
+    from (select regexp_replace(x, '[^[:alpha:]]', '', 'g') as t, ord
+            from regexp_split_to_table(split_part(coalesce(em, ''), '@', 1), '[-._+0-9]+') with ordinality r(x, ord)) s
+   where s.t <> '';
   if toks is null then return 'Студент'; end if;
   t1 := left(toks[1], 20);
   t2 := toks[2];
@@ -67,13 +76,18 @@ begin
 end $$;
 revoke execute on function private.rating_name(uuid) from public, anon, authenticated;
 
--- The ranked table of one week for one metric; only people who are in it (not hidden, enough answers).
+-- The ranked table of one week for one metric; only people who are in it (not hidden, enough answers on enough days).
+-- Sorted by the exact value (k), val is rounded for display only.
 create or replace function private.rating_ranked(p_metric text, p_week date)
 returns table (rn bigint, user_id uuid, val numeric, answers int, points int)
 language sql stable security definer set search_path = '' as $$
-  select row_number() over (order by case when p_metric = 'errors' then c.val else -c.val end, c.answers desc, c.user_id),
-         c.user_id, c.val, c.answers, c.points
+  select row_number() over (order by c.k, c.answers desc, c.user_id), c.user_id, c.val, c.answers, c.points
     from (select w.user_id, w.answers, w.points,
+                 case p_metric
+                   when 'points'   then -w.points::numeric
+                   when 'accuracy' then -(w.correct::numeric / w.answers)
+                   else                 (w.answers - w.correct)::numeric / w.answers
+                 end as k,
                  case p_metric
                    when 'points'   then w.points::numeric
                    when 'accuracy' then round(w.correct * 100.0 / w.answers, 1)
@@ -81,19 +95,21 @@ language sql stable security definer set search_path = '' as $$
                  end as val
             from public.rating_week w left join public.rating_profile p on p.user_id = w.user_id
            where w.week_start = p_week and coalesce(p.mode, 'real') <> 'hidden'
-             and case when p_metric = 'points' then w.points > 0 else w.answers >= 100 end) c
+             and case when p_metric = 'points' then w.points > 0 else w.answers >= 100 and w.active_days >= 2 end) c
 $$;
 revoke execute on function private.rating_ranked(text, date) from public, anon, authenticated;
 
--- 1. Send my counts for the current week (replaces my row, does not add to it).
+-- 1. Send my counts for the current week (replaces my row, never lowers the answers; does nothing if no day is valid).
 create or replace function public.corpus_rating_submit(p_days jsonb) returns void
 language plpgsql security definer set search_path = '' as $$
-declare uid uuid := auth.uid(); today date := private.rating_today(); ws date := date_trunc('week', private.rating_today())::date;
-        k text; v jsonb; d date; n numeric; o numeric; ta int := 0; tc int := 0; td int := 0; tp int := 0;
+declare uid uuid := auth.uid(); today date := private.rating_today(); ws date := date_trunc('week', today::timestamp)::date;
+        k text; v jsonb; d date; n0 numeric; o0 numeric; n numeric; o numeric;
+        ta int := 0; tc int := 0; td int := 0; tp int := 0; valid int := 0;
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
   if p_days is null or jsonb_typeof(p_days) <> 'object' then return; end if;
-  if (select count(*) from jsonb_object_keys(p_days)) > 366 then return; end if;     -- not what the app sends
+  if pg_column_size(p_days) > 16384 then return; end if;                              -- not what the app sends
+  if (select count(*) from jsonb_object_keys(p_days)) > 31 then return; end if;
   for k, v in select e.key, e.value from jsonb_each(p_days) e loop
     begin
       if k !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' or coalesce(jsonb_typeof(v), '') <> 'object'
@@ -102,20 +118,25 @@ begin
       end if;
       d := k::date;
       if d < ws or d > today then continue; end if;
-      n := least(greatest(floor((v ->> 'n')::numeric), 0), 400);
-      o := least(greatest(floor((v ->> 'ok')::numeric), 0), n);
+      n0 := greatest(floor((v ->> 'n')::numeric), 0);
+      o0 := greatest(floor((v ->> 'ok')::numeric), 0);
+      n := least(n0, 400);
+      o := least(case when n0 > 400 then floor(o0 * 400 / n0) else o0 end, n);          -- more than 400: keep the share of correct
       ta := ta + n::int; tc := tc + o::int; tp := tp + least(o, 150)::int;
       if n > 0 then td := td + 1; end if;
+      valid := valid + 1;
     exception when others then
       null;                                                                          -- a malformed day is skipped
     end;
   end loop;
+  if valid = 0 then return; end if;
   insert into public.rating_profile (user_id) values (uid) on conflict (user_id) do nothing;
   insert into public.rating_week (user_id, week_start, answers, correct, active_days, points, updated_at)
     values (uid, ws, ta, tc, td, tp, now())
   on conflict (user_id, week_start) do update
     set answers = excluded.answers, correct = excluded.correct, active_days = excluded.active_days,
-        points = excluded.points, updated_at = excluded.updated_at;
+        points = excluded.points, updated_at = excluded.updated_at
+    where excluded.answers >= public.rating_week.answers;                            -- an out-of-date device cannot lower the week
   delete from public.rating_week where week_start < today - 56;
 end $$;
 revoke execute on function public.corpus_rating_submit(jsonb) from public, anon;
@@ -130,7 +151,7 @@ begin
   if p_mode is null or p_mode not in ('real', 'alias', 'hidden') then raise exception 'bad_mode' using errcode = '22023'; end if;
   if p_mode = 'alias' then
     a := btrim(p_alias);
-    if a is null or char_length(a) not between 2 and 20 or a !~ '^[[:alnum:] ._-]+$' then
+    if a is null or char_length(a) not between 2 and 20 or a !~ '^[[:alnum:] ._-]+$' or a !~ '[[:alnum:]]' then
       raise exception 'bad_alias' using errcode = '22023';
     end if;
   end if;
@@ -141,28 +162,28 @@ end $$;
 revoke execute on function public.corpus_rating_set_profile(text, text) from public, anon;
 grant execute on function public.corpus_rating_set_profile(text, text) to authenticated;
 
--- 3. A table: top 10, and me with three people above and below.
+-- 3. A table: top 10, and me with three people above and below. The table is ranked once per call.
 create or replace function public.corpus_rating_get(p_metric text default 'points') returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare uid uuid := auth.uid(); ws date; v_mode text; v_asked boolean; v_ans int; v_pts int;
-        v_rn bigint; v_val numeric; v_tot bigint; v_top jsonb; v_around jsonb := '[]'::jsonb;
+declare uid uuid := auth.uid(); today date := private.rating_today(); ws date := date_trunc('week', today::timestamp)::date;
+        v_mode text; v_asked boolean; v_ans int; v_pts int;
+        v_rn bigint; v_val numeric; v_tot bigint; v_top jsonb; v_around jsonb;
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
   if p_metric is null or p_metric not in ('points', 'accuracy', 'errors') then raise exception 'bad_metric' using errcode = '22023'; end if;
-  ws := date_trunc('week', private.rating_today())::date;
   select p.mode, p.asked into v_mode, v_asked from public.rating_profile p where p.user_id = uid;
   v_mode := coalesce(v_mode, 'real'); v_asked := coalesce(v_asked, false);
   select w.answers, w.points into v_ans, v_pts from public.rating_week w where w.user_id = uid and w.week_start = ws;
   v_ans := coalesce(v_ans, 0); v_pts := coalesce(v_pts, 0);
-  select count(*), max(r.rn) filter (where r.user_id = uid), max(r.val) filter (where r.user_id = uid)
-    into v_tot, v_rn, v_val from private.rating_ranked(p_metric, ws) r;
-  select coalesce(jsonb_agg(jsonb_build_object('rank', t.rn, 'name', private.rating_name(t.user_id), 'value', t.val, 'me', t.user_id = uid) order by t.rn), '[]'::jsonb)
-    into v_top from private.rating_ranked(p_metric, ws) t where t.rn <= 10;
-  if v_rn is not null then
-    select coalesce(jsonb_agg(jsonb_build_object('rank', t.rn, 'name', private.rating_name(t.user_id), 'value', t.val, 'me', t.user_id = uid) order by t.rn), '[]'::jsonb)
-      into v_around from private.rating_ranked(p_metric, ws) t where t.rn between v_rn - 3 and v_rn + 3;
-  end if;
-  return jsonb_build_object('week_start', ws, 'metric', p_metric, 'min_answers', 100, 'total', v_tot,
+  with r as materialized (select * from private.rating_ranked(p_metric, ws)),
+       me as (select r.rn, r.val from r where r.user_id = uid)
+  select (select count(*) from r), (select me.rn from me), (select me.val from me),
+         coalesce((select jsonb_agg(jsonb_build_object('rank', t.rn, 'name', private.rating_name(t.user_id), 'value', t.val, 'me', t.user_id = uid) order by t.rn)
+                     from r t where t.rn <= 10), '[]'::jsonb),
+         coalesce((select jsonb_agg(jsonb_build_object('rank', t.rn, 'name', private.rating_name(t.user_id), 'value', t.val, 'me', t.user_id = uid) order by t.rn)
+                     from r t where t.rn between (select me.rn from me) - 3 and (select me.rn from me) + 3), '[]'::jsonb)
+    into v_tot, v_rn, v_val, v_top, v_around;
+  return jsonb_build_object('week_start', ws, 'metric', p_metric, 'min_answers', 100, 'min_days', 2, 'total', v_tot,
     'me', jsonb_build_object('rank', v_rn, 'value', v_val, 'answers', v_ans, 'points', v_pts, 'eligible', v_rn is not null,
                              'mode', v_mode, 'asked', v_asked, 'name', private.rating_name(uid)),
     'top', v_top, 'around', v_around);
@@ -170,14 +191,15 @@ end $$;
 revoke execute on function public.corpus_rating_get(text) from public, anon;
 grant execute on function public.corpus_rating_get(text) to authenticated;
 
--- 4. Delete everything the rating knows about me.
+-- 4. Forget my results. The person stays hidden (and asked) until they choose again, so the next submit does not publish them.
 create or replace function public.corpus_rating_delete_mine() returns void
 language plpgsql security definer set search_path = '' as $$
 declare uid uuid := auth.uid();
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
   delete from public.rating_week where user_id = uid;
-  delete from public.rating_profile where user_id = uid;
+  insert into public.rating_profile (user_id, mode, alias, asked, updated_at) values (uid, 'hidden', null, true, now())
+  on conflict (user_id) do update set mode = 'hidden', alias = null, asked = true, updated_at = now();
 end $$;
 revoke execute on function public.corpus_rating_delete_mine() from public, anon;
 grant execute on function public.corpus_rating_delete_mine() to authenticated;

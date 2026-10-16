@@ -599,6 +599,32 @@ async def main():
             await pg.click('[data-act=folderOn]')
             check('folder switched back on', (await pg.evaluate('(()=>{const c=globalCounts();return c.new+c.learn+c.review;})()')) == n_on and not await pg.evaluate('!!S.folders[0].off'))
 
+            # folder swipe: the delete button grows with the finger (no red showing through the glass at rest), follows it 1:1 from where the drag starts, and snaps open or shut
+            await pg.evaluate("go({name:'library'})")
+            await pg.wait_for_selector('.folder-swipe .deck')
+            sw = """async (steps) => {
+              const row = document.querySelector('.folder-swipe'), main = row.querySelector('.deck'), r = main.getBoundingClientRect();
+              const y = r.y + r.height / 2, x0 = r.x + r.width - 60, out = [];
+              const fire = (type, x, t) => { const e = new Event(type, {bubbles: true, cancelable: true}); const pt = {clientX: x, clientY: y, identifier: 1};
+                Object.defineProperty(e, 'touches', {value: type === 'touchend' ? [] : [pt]}); Object.defineProperty(e, 'timeStamp', {value: t}); main.dispatchEvent(e); };
+              let t = 1000; fire('touchstart', x0, t);
+              for (const dx of steps) { t += 16; fire('touchmove', x0 + dx, t);
+                out.push([main.style.transform, getComputedStyle(row.querySelector('.folder-trash')).width]); }
+              t += 16; fire('touchend', 0, t);
+              await new Promise(r => setTimeout(r, 450));
+              return {out, open: main.getAttribute('aria-expanded') === 'true', tx: new DOMMatrix(getComputedStyle(main).transform).m41, tw: row.querySelector('.folder-trash').getBoundingClientRect().width};
+            }"""
+            rest = await pg.evaluate("getComputedStyle(document.querySelector('.folder-trash')).width")
+            check('folder swipe: at rest the delete button has no width (nothing red under the card)', rest == '0px', rest)
+            r1 = await pg.evaluate(sw, [-4, -12, -24, -36, -48, -60])
+            check('folder swipe: the card follows the finger from where the drag starts (no jump)', r1['out'][0][0] == '' and r1['out'][2][0] == 'translate3d(-12px, 0px, 0px)', json.dumps(r1['out']))
+            check('folder swipe: past half way it snaps open, the button is a full pill', r1['open'] and r1['tx'] == -80 and abs(r1['tw'] - 72) < 1, json.dumps(r1))
+            await pg.evaluate("document.querySelector('.folder-swipe').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
+            await pg.wait_for_timeout(450)
+            r2 = await pg.evaluate(sw, [-4, -12, -20, -24, -26, -28])
+            check('folder swipe: a short slow drag springs back shut', not r2['open'] and r2['tx'] == 0 and r2['tw'] == 0, json.dumps(r2))
+            await pg.evaluate("go({name:'home'})")
+
             # grading: the drag ring goes with touch gestures; with gestures off the plain buttons are back
             await pg.evaluate("go({name:'home'})")
             await pg.evaluate('startGlobalStudy()')

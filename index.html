@@ -13,10 +13,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#EDF0EE" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#111614" media="(prefers-color-scheme: dark)">
-<link rel="stylesheet" href="web.css?v=8a909949eb">
-<script src="config.js?v=d007ae7e35"></script>
-<script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=c8cfa400e8"></script>
+<link rel="stylesheet" href="web.css?v=4f716b672b">
+<script src="config.js?v=4545ddf6fb"></script>
+<script src="vendor/supabase.js?v=183ff90999"></script>
+<script src="web.js?v=1183a99295"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -132,6 +132,14 @@ button:disabled{cursor:default;opacity:.38}
 .deck{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 14px 10px 10px;margin-bottom:8px}
 .thumb{width:52px;height:52px;border-radius:10px;overflow:hidden;background:var(--surface2);flex:none;display:flex;align-items:center;justify-content:center;color:var(--ink3)}
 .deck.folder .thumb{color:#B8862B;background:rgba(184,134,43,.12)}
+.folder-swipe{position:relative;overflow:hidden;border-radius:14px;margin-bottom:8px;touch-action:pan-y}
+.folder-swipe>.deck{position:relative;z-index:1;margin-bottom:0;transition:transform .22s ease;touch-action:pan-y}
+.folder-swipe>.deck:hover,.folder-swipe>.deck:active{transform:none}
+.folder-swipe.dragging>.deck{transition:none;user-select:none}
+.folder-trash{position:absolute;right:0;top:0;bottom:0;width:72px;border:0;border-radius:0 14px 14px 0;background:#c93636;color:white;display:flex;align-items:center;justify-content:center}
+.folder-trash:focus-visible{outline:3px solid var(--ink);outline-offset:-4px}
+@media(prefers-reduced-motion:reduce){.folder-swipe>.deck{transition:none}}
+.calm .folder-swipe>.deck{transition:none}
 .deck.textdeck .thumb{color:var(--primary);background:var(--primary-soft)}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .dinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
@@ -1141,6 +1149,13 @@ const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul',
 const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
 I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
+I18N_DICT.push(
+  ['Смахните влево или нажмите стрелку влево, чтобы открыть удаление','Swipe left or press Left Arrow to reveal Delete','Kustutamise avamiseks pühi vasakule või vajuta vasaknoolt'],
+  ['Не удалось проверить сборку курса. Проверьте соединение.','Could not check the course build. Check your connection.','Kursuse koostamist ei saanud kontrollida. Kontrolli ühendust.'],
+  ['Сборка запускается. Попробуйте удалить папку через несколько секунд.','The build is starting. Try deleting the folder again in a few seconds.','Koostamine käivitub. Proovi kausta mõne sekundi pärast uuesti kustutada.'],
+  ['Сначала остановите сборку курса на другом устройстве.','Stop building this course on the other device first.','Peata esmalt kursuse koostamine teises seadmes.'],
+  ['Папка и все её колоды, фото, карточки и прогресс будут удалены. Это нельзя отменить. Исходные материалы и планы курсов сохранятся.','The folder and all its decks, photos, cards and progress will be deleted. This cannot be undone. Course source materials and plans will be kept.','Kaust ning kõik selle pakid, fotod, kaardid ja edenemine kustutatakse. Seda ei saa tagasi võtta. Kursuste lähtematerjalid ja plaanid säilivad.']
+);
 let LANG='ru',I18N=null;const TRC=new Map();
 const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const isLetter=ch=>!!ch&&/[A-Za-zА-Яа-яЁёÕÄÖÜõäöü]/.test(ch);
@@ -1741,9 +1756,9 @@ function deckRowHtml(d){
 }
 function folderRowHtml(f){
   const c=folderCounts(f.id);const n=decksInFolder(f.id).length;
-  return '<button class="deck folder'+(f.off?' off':'')+'" data-act="openFolder" data-id="'+f.id+'"><span class="thumb">'+ic('folder')+'</span>'+
+  return '<div class="folder-swipe" data-folder="'+esc(f.id)+'"><button class="folder-trash" data-act="deleteFolder" data-id="'+esc(f.id)+'" aria-label="'+esc(T3('Удалить папку','Delete folder','Kustuta kaust')+': '+f.name)+'" aria-hidden="true" tabindex="-1" disabled>'+ic('trash',22)+'</button><button class="deck folder'+(f.off?' off':'')+'" data-act="openFolder" data-id="'+f.id+'" aria-expanded="false" aria-description="'+esc(T3('Смахните влево или нажмите стрелку влево, чтобы открыть удаление','Swipe left or press Left Arrow to reveal Delete','Kustutamise avamiseks pühi vasakule või vajuta vasaknoolt'))+'"><span class="thumb">'+ic('folder')+'</span>'+
     '<span class="dinfo"><span class="dname">'+esc(f.name)+'</span>'+(f.off?'<span class="dmeta">выключена</span>':c.total?progHtml(c):'<span class="dmeta">'+(n?pl(n,'колода','колоды','колод'):'папка пуста')+'</span>')+'</span>'+
-    '<span class="dcounts"><b class="'+(c.new?'c-new':'zero')+'">'+c.new+'</b><b class="'+(c.learn?'c-learn':'zero')+'">'+c.learn+'</b><b class="'+(c.review?'c-due':'zero')+'">'+c.review+'</b></span></button>';
+    '<span class="dcounts"><b class="'+(c.new?'c-new':'zero')+'">'+c.new+'</b><b class="'+(c.learn?'c-learn':'zero')+'">'+c.learn+'</b><b class="'+(c.review?'c-due':'zero')+'">'+c.review+'</b></span></button></div>';
 }
 /* a switched-off folder keeps its decks, but they leave «today», the shared session and reminders */
 function deckOff(d){const f=d&&d.folderId&&folderById(d.folderId);return !!(f&&f.off);}
@@ -1919,13 +1934,13 @@ SCREENS.library={
     items.sort((a,b)=>((a.o.createdAt||0)-(b.o.createdAt||0)));
     const rows=items.map(it=>it.t==='folder'?folderRowHtml(it.o):deckRowHtml(it.o)).join('');
     return '<div class="page tabbed"><header class="hhead"><div class="h1t">Колоды</div><button class="ibtn" data-act="addMenu" aria-label="Добавить">'+ic('plus')+'</button></header>'+
-      (S.decks.length?rows+'<button class="btn line block" data-act="addMenu" style="margin-top:6px">'+ic('plus',18)+'Новая колода или папка</button>':
+      (S.decks.length||S.folders.length?rows+'<button class="btn line block" data-act="addMenu" style="margin-top:6px">'+ic('plus',18)+'Новая колода или папка</button>':
         '<div class="empty"><div class="demo" aria-hidden="true"><span class="demo-line"></span><span class="demo-mask">?</span></div>'+
         '<div class="h2" style="color:var(--ink)">Пока нет колод</div><p style="margin:6px auto 0;max-width:360px;line-height:1.55">Создайте колоду, сфотографируйте страницу атласа и закройте подписи рамками.</p>'+
         '<button class="btn primary" data-act="newDeck">'+ic('plus',18)+'Создать колоду</button>'+(starterBtn()?'<div style="margin-top:8px">'+starterBtn()+'</div>':'')+'</div>')+
       '</div>';
   },
-  mount(){mountImgFallbacks();}
+  mount(){mountImgFallbacks();mountFolderSwipes();}
 };
 SCREENS.globalStats={
   html(){
@@ -2233,13 +2248,94 @@ async function addMenu(){
   const v=await actionSheet(null,[{v:'deck',icon:'image',label:'Колода с фото',sub:'Рамки на подписях атласа'},{v:'text',icon:'cards',label:'Текстовые карточки',sub:'Вставить таблицу: термин и описание'},{v:'folder',icon:'folder',label:'Новая папка'},{v:'anki',icon:'import',label:'Импорт из Anki',sub:'Файл .apkg или .colpkg — с фото, масками и прогрессом'}]);
   if(v==='deck')newDeck(null,'photo');else if(v==='text')newDeck(null,'text');else if(v==='folder')newFolder();else if(v==='anki')ankiPick();
 }
+const FSW={row:null,gesture:null,blocked:null,until:0,deleting:new Set()};
+function folderSwipeSet(row,open){
+  if(FSW.row&&FSW.row!==row)folderSwipeSet(FSW.row,false);
+  if(!row)return;
+  const main=row.querySelector('.deck'),trash=row.querySelector('.folder-trash');
+  row.classList.remove('dragging');main.style.transition=RM()?'none':'';main.style.transform=open?'translateX(-72px)':'';
+  main.setAttribute('aria-expanded',String(open));trash.disabled=!open;trash.tabIndex=open?0:-1;trash.setAttribute('aria-hidden',String(!open));
+  FSW.row=open?row:null;
+}
+function folderSwipeCancel(){
+  const g=FSW.gesture;FSW.gesture=null;if(g)folderSwipeSet(g.row,g.open);
+}
+function mountFolderSwipes(){
+  FSW.row=null;FSW.gesture=null;
+  document.querySelectorAll('.folder-swipe').forEach(row=>{
+    const main=row.querySelector('.deck');
+    main.addEventListener('touchstart',e=>{
+      folderSwipeCancel();if(e.touches.length!==1)return;
+      const t=e.touches[0];if(t.clientX<24||t.clientX>innerWidth-24)return;
+      const open=FSW.row===row;if(FSW.row&&!open)folderSwipeSet(FSW.row,false);
+      FSW.gesture={row:row,x:t.clientX,y:t.clientY,dx:0,open:open,drag:false};
+    },{passive:true});
+    main.addEventListener('touchmove',e=>{
+      const g=FSW.gesture;if(!g||g.row!==row)return;
+      if(e.touches.length!==1){folderSwipeCancel();return;}
+      const t=e.touches[0],dx=t.clientX-g.x,dy=t.clientY-g.y;
+      if(!g.drag){if(Math.abs(dy)>8&&Math.abs(dy)>=Math.abs(dx)){folderSwipeCancel();return;}if(Math.abs(dx)<10||Math.abs(dx)<Math.abs(dy)*1.3)return;g.drag=true;row.classList.add('dragging');}
+      e.preventDefault();g.dx=dx;main.style.transition='none';main.style.transform='translateX('+Math.max(-72,Math.min(0,(g.open?-72:0)+dx))+'px)';
+    },{passive:false});
+    main.addEventListener('touchend',()=>{
+      const g=FSW.gesture;if(!g||g.row!==row)return;FSW.gesture=null;
+      if(g.drag){FSW.blocked=row;FSW.until=Date.now()+600;folderSwipeSet(row,g.open?g.dx<30:g.dx<-30);}
+    },{passive:true});
+    main.addEventListener('touchcancel',folderSwipeCancel,{passive:true});
+    row.addEventListener('keydown',e=>{
+      if(e.key==='ArrowLeft'){e.preventDefault();e.stopPropagation();folderSwipeSet(row,true);row.querySelector('.folder-trash').focus();}
+      else if(e.key==='ArrowRight'||e.key==='Escape'){e.preventDefault();e.stopPropagation();folderSwipeSet(row,false);main.focus();}
+    });
+  });
+}
+document.addEventListener('pointerdown',e=>{if(FSW.row&&!FSW.row.contains(e.target))folderSwipeSet(FSW.row,false);},true);
+document.addEventListener('click',e=>{
+  const row=e.target.closest('.folder-swipe');
+  if(row&&e.target.closest('.deck')){
+    if(FSW.blocked===row&&Date.now()<FSW.until){e.preventDefault();e.stopImmediatePropagation();return;}
+    if(FSW.row===row){e.preventDefault();e.stopImmediatePropagation();folderSwipeSet(row,false);}
+  }
+},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&FSW.row&&!layer.firstChild){const row=FSW.row;folderSwipeSet(row,false);row.querySelector('.deck').focus();e.preventDefault();}},true);
 async function deleteFolder(fid){
-  const f=folderById(fid);if(!f)return;
-  const n=decksInFolder(fid).length;
-  if(!(await confirmDialog({title:'Удалить папку «'+f.name+'»?',text:n?pl(n,'Колода','Колоды','Колод')+' внутри '+(n===1?'останется':'останутся')+' на главном экране, без папки.':'Действие можно отменить только вручную.'})))return false;
-  decksInFolder(fid).forEach(d=>{delete d.folderId;persist('decks',d.id);});
-  S.folders=S.folders.filter(x=>x.id!==fid);removeDoc('folders',fid);
-  return true;
+  const f=folderById(fid);if(!f||FSW.deleting.has(fid))return false;
+  FSW.deleting.add(fid);
+  try{
+    // Sources and plans belong to drafts, not folders. Read their current links before changing the folder.
+    try{await cnLoad();}catch(e){toast(T3('Не удалось проверить сборку курса. Проверьте соединение.','Could not check the course build. Check your connection.','Kursuse koostamist ei saanud kontrollida. Kontrolli ühendust.'),5000);return false;}
+    const drafts=Array.from(CDRAFTS.values()).filter(d=>d.courseId===fid),plans=[];
+    for(const d of drafts){
+      let p=d._plan;
+      if(S.db){try{const saved=cnPlanDoc(await cnDocData('cplan',d.id));if(saved){const run=saved.bld&&saved.bld.run;if(run&&run.dev!==CN_DEV&&Date.now()-run.at<120000){toast(T3('Сначала остановите сборку курса на другом устройстве.','Stop building this course on the other device first.','Peata esmalt kursuse koostamine teises seadmes.'),5000);return false;}if(!p)p=saved;}}catch(e){toast(T3('Не удалось проверить сборку курса. Проверьте соединение.','Could not check the course build. Check your connection.','Kursuse koostamist ei saanud kontrollida. Kontrolli ühendust.'),5000);return false;}}
+      plans.push({d:d,p:p});
+    }
+    if(!(await confirmDialog({title:T3('Удалить папку «'+f.name+'»?','Delete folder “'+f.name+'”?','Kustuta kaust „'+f.name+'“?'),text:T3('Папка и все её колоды, фото, карточки и прогресс будут удалены. Это нельзя отменить. Исходные материалы и планы курсов сохранятся.','The folder and all its decks, photos, cards and progress will be deleted. This cannot be undone. Course source materials and plans will be kept.','Kaust ning kõik selle pakid, fotod, kaardid ja edenemine kustutatakse. Seda ei saa tagasi võtta. Kursuste lähtematerjalid ja plaanid säilivad.')})))return false;
+    // The dialog may stay open while another device claims the build. Check again before changing anything.
+    for(const x of plans){
+      const d=x.d;
+      if(d._bldGo&&!d._bld){toast(T3('Сборка запускается. Попробуйте удалить папку через несколько секунд.','The build is starting. Try deleting the folder again in a few seconds.','Koostamine käivitub. Proovi kausta mõne sekundi pärast uuesti kustutada.'),5000);return false;}
+      if(S.db){
+        let saved;try{saved=cnPlanDoc(await cnDocData('cplan',d.id));}catch(e){toast(T3('Не удалось проверить сборку курса. Проверьте соединение.','Could not check the course build. Check your connection.','Kursuse koostamist ei saanud kontrollida. Kontrolli ühendust.'),5000);return false;}
+        const run=saved&&saved.bld&&saved.bld.run;
+        if(run&&run.dev!==CN_DEV&&Date.now()-run.at<120000){toast(T3('Сначала остановите сборку курса на другом устройстве.','Stop building this course on the other device first.','Peata esmalt kursuse koostamine teises seadmes.'),5000);return false;}
+        if(saved&&(!x.p||saved.at>x.p.at))x.p=saved;
+      }
+    }
+    for(const x of plans){
+      if(x.d._bldGo&&!x.d._bld){toast(T3('Сборка запускается. Попробуйте удалить папку через несколько секунд.','The build is starting. Try deleting the folder again in a few seconds.','Koostamine käivitub. Proovi kausta mõne sekundi pärast uuesti kustutada.'),5000);return false;}
+      const d=x.d;d._folderRev=(d._folderRev||0)+1;cnBldStop(d);d.courseId='';d.bldAt=0;d._bld=null;d._bldDirty=(d._bldDirty||0)+1;
+      if(x.p){d._plan=x.p;d._plan.bld=null;await cnBldWrite(d);}await cnSave(d);
+      if(S.db&&d._bldDirty){toast('Не удалось сохранить изменения. Проверьте соединение.',5000);return false;}
+    }
+    // Re-read contents after the confirmation; queued helpers also remove packed cards and uploaded assets.
+    const ds=decksInFolder(fid),ids=new Set(ds.map(d=>d.id)),pids=new Set(S.plates.filter(p=>ids.has(p.deckId)).map(p=>p.id));
+    S.cards.filter(c=>ids.has(c.deckId)||pids.has(c.plateId)).forEach(c=>removeCard(c.id));
+    S.plates.filter(p=>pids.has(p.id)).forEach(p=>dropPlate(p));
+    ds.forEach(d=>{delete S.stats[d.id];removeDoc('stats',d.id);removeDoc('decks',d.id);});S.decks=S.decks.filter(d=>!ids.has(d.id));
+    S.exams.forEach(e=>{const fs=e.folderIds||[],ds=e.deckIds||[];if(fs.includes(fid)||ds.some(id=>ids.has(id))){e.folderIds=fs.filter(id=>id!==fid);e.deckIds=ds.filter(id=>!ids.has(id));persist('exams',e.id);}});
+    if(META.courseLast&&pids.has(META.courseLast.pid)){delete META.courseLast;persistMeta();}
+    S.folders=S.folders.filter(x=>x.id!==fid);removeDoc('folders',fid);folderSwipeSet(FSW.row,false);return true;
+  }finally{FSW.deleting.delete(fid);}
 }
 async function folderMenu(fid){
   const f=folderById(fid);if(!f)return;
@@ -6069,10 +6165,11 @@ function cnBldState(d){
 }
 /* the build record of the cloud is read and merged first; a fresh «building» mark of another tab or device refuses; else this tab takes the mark → the record, or null */
 async function cnBldClaim(d){
+  const folderRev=d._folderRev||0;   // folder deletion also invalidates a claim awaiting its cloud read
   const bl=d._plan.bld||(d._plan.bld=cnBldNew());
   let c=null;
   try{c=cnPlanDoc(await cnDocData('cplan',d.id));}catch(e){toast(cnRunErrText('net',null),5000);return null;}
-  if(!d._plan||CDRAFTS.get(d.id)!==d)return null;
+  if(!d._plan||CDRAFTS.get(d.id)!==d||folderRev!==(d._folderRev||0))return null;
   if(c&&c.at===d._plan.at&&c.bld){
     cnBldMerge(bl,c.bld);
     const r=c.bld.run;
@@ -9204,6 +9301,7 @@ const A={
   pushOff:()=>{if(!WEBPUSH())return;window.CORPUS_WEB.push.disable().then(()=>{toast('Уведомления на этом устройстве выключены');pushPaint();},()=>{toast('Не получилось. Проверьте соединение.');pushPaint();});},
   pushTest:()=>{if(!WEBPUSH())return;pushSync();window.CORPUS_WEB.push.test(LANG).then(r=>toast(r&&r.sent?'Отправлено — уведомление придёт через несколько секунд':'Не удалось отправить. Выключите и включите уведомления снова.',5000),e=>toast(pushErr(e&&e.code),5000));},
   folderMenu:()=>folderMenu(view.folderId),
+  deleteFolder:el=>{deleteFolder(el.dataset.id).then(ok=>{if(ok){toast('Папка удалена');render();}}).catch(recoverFromError);},
   newDeckInFolder:()=>newDeck(view.folderId),
   folderMode:el=>{const f=folderById(view.folderId);if(!f)return;f.mode=el.dataset.v;persist('folders',f.id);$$('.mode').forEach(b=>{const on=b.dataset.v===f.mode;b.classList.toggle('on',on);b.setAttribute('aria-checked',on);});},
   studyFolder:()=>startFolderStudy(view.folderId,false),

@@ -442,7 +442,7 @@ async def main():
                 """legacy=True (default): the page plans from the old v1 inputs, like a draft made before the registry (the plan v1 and lessons v1 stay supported for such drafts);
                 legacy=False: the real app, a new outline writes the registry and the plan is the knowledge plan (v2)."""
                 ctx = await b.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True, **kw)
-                await ctx.add_init_script('window.__TEST__=true;')
+                await ctx.add_init_script('window.__TEST__=true;window.__TEST_COURSES__=true;')   # the Courses tab is closed to everyone but the admin: the scenarios below open it, «courses are closed» checks it
                 if legacy:
                     await ctx.add_init_script("try{window.__TEST_LEGACY_PLAN__=!sessionStorage.getItem('t032.real');}catch(e){window.__TEST_LEGACY_PLAN__=true;}")   # src/corpus.html, the __TEST__ block; sessionStorage t032.real=1 + a reload gives the real app on the same device
                 pg = await ctx.new_page()
@@ -1323,6 +1323,17 @@ async def main():
             await pg.evaluate("go({name:'settings'})")
             await pg.wait_for_timeout(800)
             check('a friend does not see site statistics', await pg.evaluate("!document.querySelector('#siteStats')"))
+            # the Courses tab is «in development» for everyone but the admin, in all three languages; no «Kolju» offer anywhere
+            await pg.evaluate("window.__TEST_COURSES__=false;0")
+            for lang, txt in (('et', 'Funktsioon on arenduses'), ('en', 'This feature is in development'), ('ru', 'Функция в разработке')):
+                await ui_lang(pg, lang)
+                await pg.evaluate("go({name:'courses'})")
+                soon = await pg.inner_text('#crSoon')
+                check(f'courses closed for a friend ({lang}): «in development» screen, no import / new-course buttons', txt in soon and await pg.evaluate("!document.querySelector('.crs [data-act=importPick],.crs [data-act=starter],.cnnew')"), soon.replace('\n', ' | ')[:120])
+            await ui_lang(pg, 'et')
+            await pg.evaluate("window.__TEST_COURSES__=true;go({name:'courses'})")
+            check('courses open again when the flag is set (the admin case)', await pg.evaluate("!document.querySelector('#crSoon')"))
+            await pg.evaluate("go({name:'settings'})")
             # ---------- introduction: a new photo is shown 6 labels at a time before they are learned ----------
             ch = await pg.evaluate("[0,1,2,6,7,13].map(n=>introChunks(Array.from({length:n},(_,i)=>i),INTRO_CHUNK).map(g=>g.length))")
             check('intro: chunks of 6 for 0, 1, 2, 6, 7, 13 labels', ch == [[], [1], [2], [6], [6, 1], [6, 6, 1]], json.dumps(ch))

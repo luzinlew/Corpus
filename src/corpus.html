@@ -4153,8 +4153,17 @@ function crHomeHtml(f,multi){
         'The pictures come from study materials and are only for your own learning. Do not share the course file. Names and importance were found automatically, there may be mistakes.',
         'Pildid on õppematerjalidest ja on siin ainult sinu isiklikuks õppimiseks. Ära jaga kursuse faili. Nimed ja tähtsus on tuvastatud automaatselt, vigu võib esineda.')+'</p></div></details></div>';
 }
+/* the courses tab is still being built: on the website only the admin (corpus_ping → CORPUS_WEB.admin) sees it; the claude.ai artifact has no CORPUS_WEB and stays open */
+const crLocked=()=>!!(window.CORPUS_WEB&&!window.CORPUS_WEB.admin&&!window.__TEST_COURSES__);
+window.addEventListener('corpus-admin',()=>{if(view&&(view.name==='courses'||view.name==='courseLesson'||view.name==='courseNew'))go({name:'courses'});});
+function crSoonHtml(){
+  return '<div class="page tabbed crs"><header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div></header><div class="sv-empty" id="crSoon">'+kostik(60,'hi','kk-float')+'<div class="kbubble big"><b>'+
+    T3('Функция в разработке','This feature is in development','Funktsioon on arenduses')+'</b><br>'+
+    T3('Курсы пока недоступны. Мы ещё доделываем их и откроем позже.','Courses are not available yet. We are still finishing them and will open them later.','Kursused pole veel saadaval. Viimistleme neid veel ja avame hiljem.')+'</div></div></div>';
+}
 SCREENS.courses={
   html(){
+    if(crLocked())return crSoonHtml();
     const fs=crFolders(),f=fs.find(x=>x.id===view.fid)||(fs.length===1?fs[0]:null);
     if(f)return crHomeHtml(f,fs.length>1);
     const head='<header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div>'+cnNewBtn()+'</header>'+cnDraftsHtml();
@@ -4171,6 +4180,7 @@ SCREENS.courses={
         (due?'<span class="cpill due">'+ic('repeat',13)+T3('Повторить ','Repeat ','Korda ')+due+'</span>':started?'<span class="cpill done">'+ic('check',13)+T3('Всё повторено','All repeated','Kõik korratud')+'</span>':'<span class="cpill new">'+T3('Не начат','Not started','Alustamata')+'</span>')+'</span>'+crBar(dn,ls.length)+'</button>';}).join('')+'</div></div>';
   },
   mount(){
+    if(crLocked())return;
     mountImgFallbacks();cnMountCourses();
     const from=()=>({name:'courses',fid:view.fid});
     document.querySelectorAll('.crs .clrow').forEach(b=>b.onclick=()=>openLesson(b.dataset.pid,from()));

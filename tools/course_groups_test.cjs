@@ -155,16 +155,28 @@ async function t3_1200_and_limits() {
   const heavy = registry([{ name: "N".repeat(120), pages: pagesOf(240, 5) }]);
   const store = context.cnDocData, heavyDocs = new Map();
   context.cnDocData = async (c, id) => { const x = await store(c, id); if (x) { x.units.forEach(u => { u.sources = Array.from({ length: 8 }, (_, i) => ({ ...u.sources[0], blockId: u.sources[0].blockId + "-" + i, start: i * 30, end: i * 30 + 14 })); }); } return x; };
-  const TH = await planInput(heavy);
-  assert.equal(TH.units.length, 1200);
-  codeOf(() => build(aiAnswer(TH, 5), TH), "knowledge_too_large");
+  await assert.rejects(planInput(heavy), e => e && e.code === "knowledge_too_large", "refused before the request (the estimate of the document), not after the charge");
   context.cnDocData = store;
-  /* more than 250 groups: an explicit error, nothing is cut */
-  await assert.rejects(planInput(registry([{ pages: pagesOf(300, 1) }])), e => e && e.code === "knowledge_too_large");
-  /* 251 groups are refused too, 250 are taken */
-  const ok250 = await planInput(registry([{ pages: pagesOf(250, 1).concat([]) }, { pages: pagesOf(1, 1) }].slice(0, 1)));
-  assert.equal(ok250.inp.groups.length, 250, "250 groups of a single unit: " + JSON.stringify(ok250.inp).length);
-  await assert.rejects(planInput(registry([{ pages: pagesOf(251, 1) }])), e => e && e.code === "knowledge_too_large");
+  /* R2: the count of groups depends on the units, not on the pages: pages of one unit are merged (T-037 round 2; this replaces the first version of G3, which expected an error for 300 pages of one unit) */
+  const order = x => x.groups.flatMap(g => g.ids);
+  for (const [pages, per, want] of [[400, 1, 67], [1200, 1, 200], [300, 4, 200]]) {
+    let R; try { R = await planInput(registry([{ pages: pagesOf(pages, per) }])); } catch (e) { throw new Error('case ' + pages + 'x' + per + ': ' + JSON.stringify(e)); }
+    assert.equal(R.units.length, pages * per);
+    assert.equal(R.inp.groups.length, want, pages + " pages of " + per);
+    assert.deepEqual(clone(order(R)), clone(R.units.map(u => u.id)), "source order and coverage kept");
+    assert.ok(R.groups.every(g => g.ids.length >= 1 && g.ids.length <= 6));
+    assert.equal(R.inp.groups.reduce((n, g) => n + g.n, 0), pages * per);
+    assert.equal(serverSays(R.inp), "");
+  }
+  /* groups of visual units without a page merge too */
+  /* the cap on groups: exactly at the cap is taken, one over is an explicit error (the cap is lowered here, a valid registry cannot reach 250) */
+  const cap = ctx("CN_GROUPS"), cap0 = cap.maxGroups;
+  try {
+    cap.maxGroups = 200;
+    assert.equal((await planInput(registry([{ pages: pagesOf(1200, 1) }]))).inp.groups.length, 200);
+    cap.maxGroups = 199;
+    await assert.rejects(planInput(registry([{ pages: pagesOf(1200, 1) }])), e => e && e.code === "knowledge_too_large");
+  } finally { cap.maxGroups = cap0; }
   /* the split of long lessons may not make more than 60 lessons: an explicit error, no lesson is dropped or merged */
   const g = T.inp.groups.map(x => x.id), over = { parts: [{ name: "P", lessons: [] }] };
   for (let i = 0; i < 24; i++) over.parts[0].lessons.push({ title: "Big " + i, groups: g.slice(i * 9, i * 9 + 9), rationale: "Nine groups of five units." });
@@ -332,13 +344,53 @@ async function t8_step_plan() {
   const { source } = require("./course_logic_test.cjs");
   const m = /knowledge_groups_unsupported:T3\('([^']+)','([^']+)','([^']+)'\)/.exec(source);
   assert.ok(m && m[1] && m[2] && m[3], "the message of knowledge_groups_unsupported has ru, en and et");
-  assert.match(source, /c==='knowledge_groups_unsupported'\)return \{k:c\}/);
+  assert.match(source, /c==='knowledge_groups_unsupported'\|\|c==='knowledge_plan_rejected'\)return \{k:c\}/);
+}
+
+async function t9_round2() {
+  /* the plan document is estimated before the request: a registry whose index cannot fit CN_PL.doc is refused without asking the AI */
+  const long = "L".repeat(120);
+  /* 900 eligible units and 1500 excluded, every one with 8 long sources */
+  const heavy = { id: "draft-gr", name: "Groups", mats: [] };
+  const docs = new Map(), mat = { id: "mat-0", name: long, role: "base", kind: "pdf", pages: 300, kdocs: [], kstatus: "processed" };
+  const mk = (n, ok) => ({ id: "ku1_h" + n, version: 1, type: ok ? "statement" : "visual", content: ok ? "Statement number " + n + " " + "w".repeat(100) : null,
+    sources: Array.from({ length: 8 }, (_, i) => ({ materialId: "mat-0", blockId: "draft-gr.mat-0:p" + (1 + (n % 300)) + ":b" + i + "-" + "b".repeat(60), page: 1 + (n % 300), start: i * 30, end: i * 30 + 14, kind: "text_fragment", sourceOrder: { pageIndex: 1 + (n % 300), block: i } })),
+    order: { pageIndex: 1 + (n % 300), page: 1 + (n % 300), block: 0, offset: n }, extractionStatus: ok ? "extracted" : "unresolved", sourceLinkStatus: ok ? "checked" : "location_only", verificationStatus: "unverified", coverageStatus: "not_in_plan" });
+  const all = Array.from({ length: 2400 }, (_, n) => mk(n, n < 900));
+  for (let i = 0, g = 1; i < all.length; i += 200, g++) { const id = "draft-gr.mat-0.ku1.g0." + g; mat.kdocs.push(id); docs.set(id, { kind: "course-knowledge", version: 1, materialId: "mat-0", outlineStatus: "processed", sourceProcessingStatus: "no_warning_detected", completeness: "not_proven", issues: [], units: all.slice(i, i + 200) }); }
+  heavy.mats = [mat];
+  context.cnDocData = async (_c, id) => docs.get(id) || null;
+  const calls = [];
+  context.window.CORPUS_WEB = { courseAI: { plan: async () => { calls.push(1); return {}; } } };
+  await assert.rejects(planInput(heavy), e => e && e.code === "knowledge_too_large", "refused before any request");
+  assert.equal(calls.length, 0);
+  context.window.CORPUS_WEB = null;
+  /* the 431-unit registry passes */
+  const ok = await planInput(registry(SPEC431));
+  assert.equal(ok.inp.kind, "knowledge-groups-v1");
+  /* p is limited to what the function takes */
+  context.cnDocData = async () => ({ kind: "course-knowledge", version: 1, materialId: "mat-0", outlineStatus: "processed", sourceProcessingStatus: "no_warning_detected", completeness: "not_proven", issues: [], units: Array.from({ length: 160 }, (_, n) => { const u = mk(n, true); u.sources = [{ ...u.sources[0], page: 100000 + n }]; u.order.pageIndex = 100000 + n; u.content = "Statement number " + n + " " + "w".repeat(400); return u; }) });
+  const m2 = { id: "mat-0", name: "Far.pdf", role: "base", kind: "pdf", pages: 3, kdocs: ["draft-gr.mat-0.ku1.g0.1"], kstatus: "processed" };
+  const F = await logic.cnKnowledgePlanInput({ id: "draft-gr", name: "Far", mats: [m2] }, { cancel: false, topics: [{ title: "T", pages: [100005, 3], m: { id: "mat-0" } }], dt: {}, diagnostics: null });
+  assert.equal(F.inp.kind, "knowledge-groups-v1");
+  assert.ok(F.inp.groups.every(g => g.p <= 99999) && F.inp.topicHints.every(t => t.pages.every(x => x <= 99999)));
+  assert.equal(serverSays(F.inp), "");
+  /* the answer of the function to a refused request */
+  const T = await planInput(registry(SPEC431));
+  const asks = async err => { context.window.CORPUS_WEB = { courseAI: { plan: async () => { throw err; } } }; const r = { cancel: false, i: 0, spent: 0, cache: { plan: null }, ac: { signal: undefined }, usage: {} }; try { await logic.cnStepPlan({ id: "draft-gr", mats: [], name: "G", _pDirty: new Set() }, r, T); } catch (e) { return [e.code, r.spent]; } finally { context.window.CORPUS_WEB = null; } };
+  assert.deepEqual(clone(await asks({ code: "invalid_input", message: "plan: groups: every item is { id, m, p, n, t } with a unique id gN" })), ["knowledge_plan_rejected", 0], "a refusal of the new function is not 'not updated'");
+  assert.deepEqual(clone(await asks({ code: "invalid_input", message: "plan: input: only name, topics, terms, photos, pages and exam" })), ["knowledge_groups_unsupported", 0]);
+  /* a failed plan says that the units were charged; a degraded request is recorded */
+  assert.ok(Number.isInteger(build(aiAnswer(T, 5), T).groupDegrade));
+  const { source } = require("./course_logic_test.cjs");
+  assert.match(source, /planPaid/);
+  assert.ok(logic.cnKnowledgePlanDoc(clone(build(aiAnswer(T, 5), T))).groupDegrade >= 0);
 }
 
 (async () => {
   let failed = 0;
-  for (const [name, fn] of [["G1 a registry of 431 units goes by groups", t1_big_registry_groups], ["G2 the switch from the per-unit request to groups", t2_threshold], ["G3 1200 units fit; more than 250 groups or 1200 units are an explicit error", t3_1200_and_limits], ["G4 answers of the AI: coverage, splitting, explicit errors", t4_answers], ["G5 the function refuses wrong forms and has its own prompt", t5_server], ["G6 the answer fits the token budget", t6_tokens], ["G7 the old request and the old plan document are unchanged", t7_old_path_and_docs], ["G8 the step of the plan: one request, 5 units; an old function and a wrong answer are explicit errors", t8_step_plan]]) {
-    try { await fn(); console.log("PASS " + name); } catch (e) { failed++; console.log("FAIL " + name + "\n  " + String(e && e.stack || e).split("\n").slice(0, 14).join("\n  ").slice(0, 700)); }
+  for (const [name, fn] of [["G1 a registry of 431 units goes by groups", t1_big_registry_groups], ["G2 the switch from the per-unit request to groups", t2_threshold], ["G3 1200 units fit; more than 250 groups or 1200 units are an explicit error", t3_1200_and_limits], ["G4 answers of the AI: coverage, splitting, explicit errors", t4_answers], ["G5 the function refuses wrong forms and has its own prompt", t5_server], ["G6 the answer fits the token budget", t6_tokens], ["G7 the old request and the old plan document are unchanged", t7_old_path_and_docs], ["G9 round 2: groups by units, document estimate, limits of p, errors", t9_round2], ["G8 the step of the plan: one request, 5 units; an old function and a wrong answer are explicit errors", t8_step_plan]]) {
+    try { await fn(); console.log("PASS " + name); } catch (e) { failed++; console.log("FAIL " + name + "\n  " + String(e && (e.stack || JSON.stringify(e)) || e).split("\n").slice(0, 14).join("\n  ").slice(0, 700)); }
   }
   if (failed) process.exitCode = 1; else console.log("COURSE GROUPS TESTS PASSED");
 })();

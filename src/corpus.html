@@ -4859,7 +4859,7 @@ function cnRunErr(e){
   if(c==='extract_incomplete')return {k:'source'};
   if(c==='quota'||c==='limit'||c==='broken')return {k:'store'};
   if(c==='noterms'||c==='toolarge'||c==='timeout')return {k:c};
-  if(c==='knowledge_incomplete'||c==='knowledge_empty'||c==='knowledge_too_large'||c==='knowledge_groups_unsupported')return {k:c};
+  if(c==='knowledge_incomplete'||c==='knowledge_empty'||c==='knowledge_too_large'||c==='knowledge_groups_unsupported'||c==='knowledge_plan_rejected')return {k:c};
   if(typeof c==='string'&&c.indexOf('knowledge_plan_')===0)return {k:'knowledge_plan_invalid'};
   if(c==='offline')return {k:'net'};
   if(!c)console.error('plan',e);
@@ -5342,35 +5342,50 @@ async function cnKnowledgePlanInput(d,r){
   if(grouped){
     if(all.length>CN_GROUPS.indexMax)throw {code:'knowledge_too_large'};
     const g=cnKnowledgeGroupsInput(d,r,eligible,all,materialRows,sourceAssessment);
+    /* the plan document (the index with the lesson of each unit, the lessons, the diagnostics) is estimated now, before the paid request: one that cannot fit is refused here, not after the charge */
+    if(JSON.stringify(index).length+CN_GROUPS.docEntryExtra*index.length+CN_GROUPS.docReserve>CN_PL.doc)throw {code:'knowledge_too_large'};
     cnRPaint();
-    return {kind:'knowledge',grouped:true,inp:g.inp,groups:g.groups,units:eligible,index:index,sourceAssessment:sourceAssessment,diagnostics:r.diagnostics||null};
+    return {kind:'knowledge',grouped:true,degrade:g.degrade,inp:g.inp,groups:g.groups,units:eligible,index:index,sourceAssessment:sourceAssessment,diagnostics:r.diagnostics||null};
   }
   cnRPaint();
   return {kind:'knowledge',inp:inp,units:eligible,index:index,sourceAssessment:sourceAssessment,diagnostics:r.diagnostics||null};
 }
 /* The plan of a registry too large for one request per unit (T-037). The units, in the source order, are cut into groups of one material and one page (at most perGroup units; the border of a page always starts
    a new group); the AI sees only the group (a number, the material, the page, the count and up to 3 short fragments) and answers with group ids; the app turns them back into units. Nothing is cut: more than maxGroups groups is an error. */
-const CN_GROUPS={maxGroups:250,perGroup:6,jsonChars:60000,indexMax:2400,labelChars:80,fragments:3,fragmentChars:80,topicHints:120};
+const CN_GROUPS={maxGroups:250,perGroup:6,jsonChars:60000,indexMax:2400,labelChars:80,pageMax:99999,docReserve:100000,docEntryExtra:60,fragments:3,fragmentChars:80,topicHints:120};
 function cnKnowledgeGroupsInput(d,r,eligible,all,materialRows,sourceAssessment){
   const groups=[];let cur=null;
   for(const u of eligible){
-    const s=u.sources[0],pg=Number.isSafeInteger(+s.page)&&+s.page>=0?+s.page:0,key=u.order.materialIndex+'|'+(s.page===null||s.page===undefined?'i'+u.order.pageIndex:pg);
+    const s=u.sources[0],pg=Number.isSafeInteger(+s.page)&&+s.page>=0?Math.min(+s.page,CN_GROUPS.pageMax):0,key=u.order.materialIndex+'|'+(s.page===null||s.page===undefined?'i'+u.order.pageIndex:pg);
     if(!cur||cur.key!==key||cur.units.length>=CN_GROUPS.perGroup){cur={id:'g'+(groups.length+1),key:key,mi:u.order.materialIndex,p:pg,units:[],ids:[]};groups.push(cur);}
     cur.units.push(u);cur.ids.push(u.id);
   }
+  /* the count of groups must depend on the units, not on the pages: too many groups (many pages of one or two units) are merged with the next one of the same material while they hold at most perGroup units;
+     if that is not enough the units of a material are packed in runs of perGroup across the page borders (p is the first page of a group). Source order and coverage are kept. */
+  if(groups.length>CN_GROUPS.maxGroups){
+    const merged=[];
+    for(const g of groups){const last=merged[merged.length-1];if(last&&last.mi===g.mi&&last.units.length+g.units.length<=CN_GROUPS.perGroup){last.units=last.units.concat(g.units);last.ids=last.ids.concat(g.ids);}else merged.push({...g});}
+    groups.length=0;merged.forEach(g=>groups.push(g));
+  }
+  if(groups.length>CN_GROUPS.maxGroups){
+    const packed=[];
+    for(const g of groups){for(const u of g.units){const last=packed[packed.length-1];if(last&&last.mi===g.mi&&last.units.length<CN_GROUPS.perGroup){last.units.push(u);last.ids.push(u.id);}else packed.push({mi:g.mi,p:g.p,units:[u],ids:[u.id]});}}
+    groups.length=0;packed.forEach((g,i)=>{g.id='';groups.push(g);});
+  }
+  groups.forEach((g,i)=>{g.id='g'+(i+1);});
   if(groups.length>CN_GROUPS.maxGroups)throw {code:'knowledge_too_large'};
   const frag=(u,n)=>String(cnKnowledgeContentText(u.type,u.content)).replace(/\s+/g,' ').trim().slice(0,n);
   const names=materialRows.map(m=>m.name.slice(0,60)),idx=new Map(materialRows.map((m,i)=>[m.id,i]));
   const exCount=new Map();all.filter(u=>!u.eligible).forEach(u=>exCount.set(u.order.materialIndex,(exCount.get(u.order.materialIndex)||0)+1));
   const status={status:sourceAssessment.status,registryStatus:sourceAssessment.registryStatus,incompleteMaterials:sourceAssessment.incompleteMaterials,reviewMaterials:sourceAssessment.reviewMaterials,unresolvedVisuals:sourceAssessment.unresolvedVisuals,unprocessedVisuals:sourceAssessment.unprocessedVisuals};
   /* the more groups, the shorter the text of each: the request never exceeds jsonChars, and nothing is dropped from the plan, only text for the AI is shortened */
-  for(const [nf,fl,nt] of [[3,80,CN_GROUPS.topicHints],[2,60,80],[1,60,40],[1,40,0]]){
+  for(const [step,[nf,fl,nt]] of [[3,80,CN_GROUPS.topicHints],[2,60,80],[1,60,40],[1,40,0]].entries()){
     const inp={kind:'knowledge-groups-v1',name:(d.name||'Course').slice(0,300),
-      topicHints:r.topics.slice(0,nt).map(t=>{const pg=(t.pages||[]).filter(x=>Number.isSafeInteger(+x)&&+x>=1).map(Number),h={title:String(t.title||'').slice(0,80),pages:pg.length?[Math.min(...pg),Math.max(...pg)]:[]},mi=idx.get(t.m&&t.m.id);if(mi!==undefined)h.m=mi;return h;}),
+      topicHints:r.topics.slice(0,nt).map(t=>{const pg=(t.pages||[]).filter(x=>Number.isSafeInteger(+x)&&+x>=1).map(x=>Math.min(+x,CN_GROUPS.pageMax)),h={title:String(t.title||'').slice(0,80),pages:pg.length?[Math.min(...pg),Math.max(...pg)]:[]},mi=idx.get(t.m&&t.m.id);if(mi!==undefined)h.m=mi;return h;}),
       materials:names,
       groups:groups.map(g=>{const t=[];for(const u of g.units){if(t.length>=nf)break;const x=frag(u,fl);if(x&&!t.includes(x))t.push(x);}return {id:g.id,m:g.mi,p:g.p,n:g.units.length,t:t};}),
       excluded:Array.from(exCount).map(([m,n])=>({m:m,n:n})),sourceStatus:status};
-    if(JSON.stringify(inp).length<=CN_GROUPS.jsonChars)return {inp:inp,groups:groups.map(g=>({id:g.id,ids:g.ids}))};
+    if(JSON.stringify(inp).length<=CN_GROUPS.jsonChars)return {inp:inp,degrade:step,groups:groups.map(g=>({id:g.id,ids:g.ids}))};
   }
   throw {code:'knowledge_too_large'};
 }
@@ -5537,12 +5552,12 @@ function cnFallbackRaw(inp){
   return {parts:parts};
 }
 async function cnStepPlan(d,r,T){
-  r.i=4;cnRPaint();
+  r.i=4;r.planPaid=false;cnRPaint();
   const W=window.CORPUS_WEB,key=JSON.stringify(T.inp),knowledge=T.kind==='knowledge';
   let raw=r.cache.plan&&r.cache.plan.k===key?r.cache.plan.res:null,fb=false;
   if(!raw){
-    try{raw=await W.courseAI.plan(LANG,T.inp,{signal:r.ac.signal});cnUsageAdd(r,raw);r.spent+=5;r.cache.plan={k:key,res:raw};}
-    catch(e){cnUsageAdd(r,e);if(e&&(e.code==='invalid_json'||e.code==='timeout')&&!knowledge){r.spent+=5;fb=true;}else{if(e&&e.courseAI&&e.courseAI.charged||e&&['invalid_json','timeout'].includes(e.code))r.spent+=5;throw knowledge&&T.grouped&&e&&e.code==='invalid_input'?{code:'knowledge_groups_unsupported'}:e;}}   // only the legacy term plan has the existing local fallback; a function that does not know the groups answers invalid_input before it charges
+    try{raw=await W.courseAI.plan(LANG,T.inp,{signal:r.ac.signal});cnUsageAdd(r,raw);r.spent+=5;r.planPaid=true;r.cache.plan={k:key,res:raw};}
+    catch(e){cnUsageAdd(r,e);if(e&&(e.code==='invalid_json'||e.code==='timeout')&&!knowledge){r.spent+=5;fb=true;}else{if(e&&e.courseAI&&e.courseAI.charged||e&&['invalid_json','timeout'].includes(e.code)){r.spent+=5;r.planPaid=true;}throw knowledge&&T.grouped&&e&&e.code==='invalid_input'?{code:/input: only name, topics, terms/.test(String(e.message||''))?'knowledge_groups_unsupported':'knowledge_plan_rejected'}:e;}}   // only the legacy term plan has the existing local fallback; a function that does not know the groups answers invalid_input before it charges
   }
   if(r.cancel)return;
   let doc=null;
@@ -5597,6 +5612,7 @@ function cnRunErrText(k,left){
     knowledge_empty:T3('В проверяемом реестре не найдено пригодных единиц знаний. Проверьте исходники и диагностику.','No eligible knowledge units were found in the registry. Review the sources and diagnostics.','Registrist ei leitud sobivaid teadmuse üksusi. Kontrolli allikaid ja diagnostikat.'),
     knowledge_too_large:T3('Реестр знаний превышает безопасный лимит одного плана. Материал не был сокращён; разделите его на несколько курсов.','The knowledge registry exceeds the safe limit for one plan. No material was omitted; split it into several courses.','Teadmuse register ületab ühe plaani ohutu piiri. Materjali ei kärbitud; jaga see mitmeks kursuseks.'),
     knowledge_plan_invalid:T3('План не прошёл локальную проверку: проверьте ответ и повторите составление. Единицы не удалялись и не добавлялись автоматически.','The plan did not pass local validation. Review the answer and try again. Units were not silently dropped or added.','Plaan ei läbinud kohalikku kontrolli. Vaata vastus üle ja proovi uuesti. Üksusi ei eemaldatud ega lisatud vaikselt.'),
+    knowledge_plan_rejected:T3('Сервер не принял запрос плана. Проверьте число материалов и страниц (не больше 20 материалов) и повторите. Ничего не списано.','The server did not accept the plan request. Check the number of materials and pages (at most 20 materials) and try again. Nothing was charged.','Server ei võtnud plaani päringut vastu. Kontrolli materjalide ja lehekülgede arvu (kuni 20 materjali) ja proovi uuesti. Midagi ei arvestatud maha.'),
     knowledge_groups_unsupported:T3('Сервер ИИ не принял план по группам (возможно, он ещё не обновлён). Ничего не списано; повторите позже.','The AI server did not accept the plan by groups (it may not be updated yet). Nothing was charged; try again later.','TI server ei võtnud rühmade plaani vastu (võib-olla pole see veel uuendatud). Midagi ei arvestatud maha; proovi hiljem uuesti.'),
     timeout:T3('ИИ отвечал слишком долго. Повторите — сделанное не пропадёт.','The AI took too long to answer. Retry: what is done is kept.','TI vastas liiga kaua. Proovi uuesti – tehtu säilib.'),
     toolarge:T3('Материалов слишком много для одного плана. Уберите часть файлов.','There is too much material for one plan. Remove some files.','Materjali on ühe plaani jaoks liiga palju. Eemalda mõned failid.')};
@@ -5608,7 +5624,7 @@ function cnReadInner(d){
   let h='<div class="cnrhd">'+CN_MASC+'<b>'+T3('ИИ составляет план','The AI is making the plan','TI koostab plaani')+'</b><span>'+T3('Фото читаются на этом устройстве — это может занять несколько минут. Можно свернуть приложение.','Photos are read on this device, which may take a few minutes. You can minimise the app.','Fotod loetakse selles seadmes, see võib võtta mõne minuti. Rakenduse võib minimeerida.')+'</span></div>'+
     '<div class="cnck">'+cnReadRows(r).map(x=>'<div class="cnrow '+x[2]+'"><span class="cndot">'+(x[2]==='done'?CN_CHK:x[2]==='cur'?CN_SP14:x[2]==='bad'?'!':'')+'</span><span class="cnrx"><b>'+esc(x[0])+'</b><small>'+esc(x[1])+'</small></span></div>').join('')+'</div>'+
     '<div class="cnspend">'+esc(T3('Израсходовано '+r.spent+' из ≈ '+r.est+' запросов','Used '+r.spent+' of ≈ '+r.est+' requests','Kasutatud '+r.spent+' / ≈ '+r.est+' päringut')+(left!=null?T3(' · лимит курсов: осталось '+left,' · course limit: '+left+' left',' · kursuste limiit: jäänud '+left):'')+cnUsageText(r.usage))+'</div>';
-  if(r.state==='err')h+='<div class="cnwarn cnerr" role="alert">'+esc(cnRunErrText(r.err.k,left))+'</div>';
+  if(r.state==='err')h+='<div class="cnwarn cnerr" role="alert">'+esc(cnRunErrText(r.err.k,left)+(r.planPaid&&r.err.k!=='quota'?T3(' 5 единиц квоты за составление плана уже списаны.',' The 5 quota units for making the plan were already charged.',' Plaani koostamise 5 kvoodiühikut on juba maha arvatud.'):''))+'</div>';
   return h;
 }
 function cnReadBar(d){
@@ -5730,7 +5746,7 @@ function cnKnowledgeGroupsPlanBuild(raw,T){
   const missing=T.groups.filter(g=>!seen.has(g.id)).map(g=>g.id);
   if(missing.length)throw {code:'knowledge_plan_missing',ids:missing.slice(0,20)};
   const doc=cnKnowledgePlanBuild({parts:parts},T);   // the count of lessons after the cut is checked there: more than CN_PL.lessons is an error
-  doc.grouped=true;doc.groupCount=T.groups.length;doc.groupSplits=splits.slice(0,CN_PL.lessons);
+  doc.grouped=true;doc.groupCount=T.groups.length;doc.groupDegrade=Math.max(0,Math.min(3,+T.degrade||0));doc.groupSplits=splits.slice(0,CN_PL.lessons);
   return doc;
 }
 function cnKnowledgePlanDoc(o){
@@ -5771,7 +5787,7 @@ function cnKnowledgePlanDoc(o){
   if(o.grouped!==undefined){
     if(o.grouped!==true||!Number.isSafeInteger(o.groupCount)||o.groupCount<1||o.groupCount>CN_GROUPS.maxGroups||!Array.isArray(o.groupSplits)||o.groupSplits.length>CN_PL.lessons)return null;
     const sp=[];for(const x of o.groupSplits){if(!x||!str(x.title,120)||!Number.isSafeInteger(x.into)||x.into<2||x.into>CN_PL.lessons)return null;sp.push({title:x.title,into:x.into});}
-    grouped={grouped:true,groupCount:o.groupCount,groupSplits:sp};
+    grouped={grouped:true,groupCount:o.groupCount,groupSplits:sp,groupDegrade:Number.isSafeInteger(o.groupDegrade)&&o.groupDegrade>=0&&o.groupDegrade<=3?o.groupDegrade:0};
   }
   return {planVersion:2,planKind:'knowledge',bld:cnBldDoc(o.bld),at:+o.at||0,ed:+o.ed||0,fp:str(o.fp,40),edited:!!o.edited,fallback:false,lang:cnLangOk(o.lang),parts:parts,knowledgeIndex:index,sourceAssessment:sourceAssessment,
     coverage:{expected:eligible.size,planned:seen.size,missing:0,duplicates:0,unknown:0,unresolved:Math.max(0,+c.unresolved||0),status:'registry_covered',completeness:'not_proven',sequenceChanges:Math.max(0,+c.sequenceChanges||0)},diagnostics:cnDiagClean(o.diagnostics),...(grouped||{})};

@@ -12,6 +12,7 @@ class Mock:
         self.paid = 0            # POST /v1/messages received
         self.non_outline = 0     # messages whose prompt is not an outline (plan/lesson/other)
         self.ct_calls = 0
+        self.bodies = []         # parsed bodies of POST /v1/messages (tests compare them with the chunk files)
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -47,6 +48,7 @@ class Mock:
                     c = (body.get("messages") or [{}])[0].get("content", "")
                     outline = isinstance(c, str) and c.startswith("CORPUS-OUTLINE")
                     mock.log.append(("POST", self.path, ok, "outline" if outline else "other"))
+                    mock.bodies.append(body)
                     i = mock.paid; mock.paid += 1
                     if not outline: mock.non_outline += 1
                     if not ok: return self._err(401, "invalid")

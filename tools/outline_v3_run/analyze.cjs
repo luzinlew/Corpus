@@ -249,7 +249,9 @@ function synthetic() {
   const bad = A.filter(a => !a[1]); console.log("\nSYNTHETIC " + (bad.length ? "FAILED: " + bad.map(a => a[0]).join("; ") : "CHECKS PASSED (" + A.length + ")")); process.exitCode = bad.length ? 1 : 0;
 }
 
-if (args.includes("--synthetic")) synthetic();
+module.exports = { MATS, H, evaluate, witnessTable, witnessContext, listCoverage, seedTerms, preservation, loadResponse, norm, flat, short, quotesOfUnit, USD, logic, clone, read };
+if (require.main !== module) { /* used as a library by analyze_chunks.cjs */ }
+else if (args.includes("--synthetic")) synthetic();
 else {
   const newDir = opt("--new-dir", null) && path.resolve(opt("--new-dir")), res = analyzeAll({ oldKind: opt("--old", "old-response"), newDir: newDir && fs.existsSync(path.join(newDir, "response-1.json")) ? newDir : null });
   printReport(res);

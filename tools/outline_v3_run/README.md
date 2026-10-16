@@ -54,3 +54,15 @@ Remove-Item Env:CORPUS_OUTLINE_API_KEY
 
 ## Анализ
 `node analyze.cjs` — без аргументов: baseline по старым ответам. `--old evidence` — старые из `evidence/paid-response-N-outline.json`. `--synthetic` — самопроверка на искусственных ответах (неверная цитата, дубль, >50, 21 пример). Подстрока ≠ смысловое соответствие; число единиц ≠ полнота; вердикт-таблица не объявляет «успех».
+
+## T-033 A: нарезка по страницам (Лев 2026-10-16: ≤ 7 вызовов, ≤ $0.10)
+Меняется только INPUT: страницы целиком, Основа 1–3 | 4–6, Дополнение 1–3 | 4–6 | 7–8 | 9–10. Префикс промпта, system, модель, thinking, max_tokens, блоки — байт в байт как в request-1/2.json.
+```bash
+python3 -I make_chunks.py                         # chunks/request-<doc>-<k>.json + chunk-manifest.json (проверка sha исходных запросов и покрытия страниц)
+python3 -I test_chunks.py                         # mock: ≤7 вызовов, без повторов, без plan/lesson, ключа нет в файлах
+python3 -I run_outline_v3.py --dry-check --chunks chunks --max-calls 7 --out-dir out-chunks
+python3 -I run_outline_v3.py --run       --chunks chunks --max-calls 7 --out-dir out-chunks
+node analyze_chunks.cjs --json out-chunks/analysis.json     # v1 целиком | v3 целиком | v3 куски
+```
+В режиме кусков `--max-calls` обязателен (≤ 7, не меньше числа кусков), бюджет min($0.10, manifest), HTTP-ошибка тоже резервирует верхнюю границу.
+`analyze_chunks.cjs` проверяет каждый кусок производственным валидатором отдельно (свой предел 50 и флаг обрыва) и склеивает принятые единицы; отдельный слой «до обрыва» — ДИАГНОСТИКА целых единиц оборванного ответа (приложение так не делает).

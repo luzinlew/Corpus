@@ -14,7 +14,7 @@
 <meta name="theme-color" content="#EDF0EE" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#111614" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="web.css?v=8a909949eb">
-<script src="config.js?v=d9dc86188c"></script>
+<script src="config.js?v=d007ae7e35"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
 <script src="web.js?v=7d9342f383"></script>
 <meta name="color-scheme" content="light dark">
@@ -4238,12 +4238,24 @@ function crHomeHtml(f,multi){
         'Pildid on õppematerjalidest ja on siin ainult sinu isiklikuks õppimiseks. Ära jaga kursuse faili. Nimed ja tähtsus on tuvastatud automaatselt, vigu võib esineda.')+'</p></div></details></div>';
 }
 /* the courses tab is still being built: on the website only the admin (corpus_ping → CORPUS_WEB.admin) sees it; the claude.ai artifact has no CORPUS_WEB and stays open */
-const crLocked=()=>!!(window.CORPUS_WEB&&!window.CORPUS_WEB.admin&&!window.__TEST_COURSES__);
+/* a tester with ?create=1 (cnOn) also gets in; the rest see «in development» with a «request beta access» mailto: link (sent from the person's own mail app, nothing goes through our server) */
+const crLocked=()=>!!(window.CORPUS_WEB&&!window.CORPUS_WEB.admin&&!window.__TEST_COURSES__&&!cnOn());
+const CR_MAIL='contact@corpusapp.ee';
+function crBetaHref(){
+  const W=window.CORPUS_WEB,em=W&&typeof W.email==='string'?W.email.trim():'';
+  const subj=T3('Corpus: запрос на бета-тест курсов','Corpus: request for the courses beta','Corpus: kursuste beetatesti taotlus');
+  const body=T3('Здравствуйте! Хочу участвовать в бета-тесте курсов Corpus.\n\n','Hello! I would like to take part in the Corpus courses beta.\n\n','Tere! Soovin osaleda Corpuse kursuste beetatestis.\n\n')+
+    (em?T3('Моя почта в Corpus: ','My e-mail in Corpus: ','Minu e-post Corpuses: ')+em+'\n\n':'')+
+    T3('Кто я и какие материалы хочу загрузить (предмет, примерный объём):\n\n','Who I am and what materials I want to upload (subject, approximate size):\n\n','Kes ma olen ja milliseid materjale tahan üles laadida (aine, ligikaudne maht):\n\n');
+  return 'mailto:'+CR_MAIL+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
+}
 window.addEventListener('corpus-admin',()=>{if(view&&(view.name==='courses'||view.name==='courseLesson'||view.name==='courseNew'))go({name:'courses'});});
 function crSoonHtml(){
   return '<div class="page tabbed crs"><header class="hhead"><div class="h1t">'+T3('Курсы','Courses','Kursused')+'</div></header><div class="sv-empty" id="crSoon">'+kostik(60,'hi','kk-float')+'<div class="kbubble big"><b>'+
     T3('Функция в разработке','This feature is in development','Funktsioon on arenduses')+'</b><br>'+
-    T3('Курсы пока недоступны. Мы ещё доделываем их и откроем позже.','Courses are not available yet. We are still finishing them and will open them later.','Kursused pole veel saadaval. Viimistleme neid veel ja avame hiljem.')+'</div></div></div>';
+    T3('Курсы пока недоступны. Мы ещё доделываем их и откроем позже.','Courses are not available yet. We are still finishing them and will open them later.','Kursused pole veel saadaval. Viimistleme neid veel ja avame hiljem.')+
+    '<div class="crbeta"><a class="btn primary" href="'+esc(crBetaHref())+'">'+T3('Запросить бета-тест','Request beta access','Taotle beetajuurdepääsu')+'</a>'+
+    '<div class="crmail"><span id="crMailAddr">'+CR_MAIL+'</span> <button class="btn" data-act="crCopyMail">'+T3('Скопировать адрес','Copy address','Kopeeri aadress')+'</button></div></div></div></div></div>';
 }
 SCREENS.courses={
   html(){
@@ -9560,6 +9572,8 @@ const A={
   ankiPick:()=>ankiPick(),
   cmpNotes:()=>cmpNotes(view.deckId),
   shareCode:()=>askShareCode(),
+  crCopyMail:()=>{const fail=()=>{try{const e=$('#crMailAddr'),r=document.createRange();r.selectNodeContents(e);const sl=getSelection();sl.removeAllRanges();sl.addRange(r);}catch(e){}toast(T3('Скопируйте вручную: ','Copy it by hand: ','Kopeeri käsitsi: ')+CR_MAIL,6000);};
+    try{navigator.clipboard.writeText(CR_MAIL).then(()=>toast(T3('Адрес скопирован','Address copied','Aadress kopeeritud')),fail);}catch(e){fail();}},
   importPick:()=>{const f=$('#importFile');if(!f)return;f.onchange=e=>{const file=e.target.files&&e.target.files[0];e.target.value='';if(file)importFile(file);};f.click();},
   newDeck:()=>newDeck(),
   folderOn:()=>{const f=folderById(view.folderId);if(!f)return;delete f.off;persist('folders',f.id);toast('Папка включена');render();pushSyncSoon();},
@@ -9796,7 +9810,7 @@ if(window.__TEST__){
   window.META=META;window.QS=QS;window.ankiImport=ankiImport;window.akOpen=akOpen;window.akAnalyze=akAnalyze;window.akRenderCard=akRenderCard;window.akSan=akSan;window.akIOShapes=akIOShapes;window.akIOESvg=akIOESvg;window.PACKS=PACKS;window.packBody=packBody;window.readNamesDecks=readNamesDecks;window.dbDocCount=dbDocCount;window.buildExport=buildExport;window.importData=importData;window.openShareCode=openShareCode;window.shareByCode=shareByCode;window.zipOpen=zipOpen;window.addMenu=addMenu;window.deckMenu=deckMenu;window.cmpParse=cmpParse;window.cmpRun=cmpRun;window.cmpNotes=cmpNotes;window.cmpKey=cmpKey;window.edGo=edGo;window.prGo=prGo;window.genMnemonics=genMnemonics;window.hintDialog=hintDialog;window.importFile=importFile;window.removeCard=removeCard;window.wipeAll=wipeAll;window.textCardHtml=textCardHtml;window.qsOpen=qsOpen;window.qsClose=qsClose;
   window.S=S;window.CAL=CAL;window.pushSync=pushSync;window.pushSummary=pushSummary;window.pushPaint=pushPaint;window.examById=examById;window.exStat=exStat;window.buildIcs=buildIcs;window.examMigrate=examMigrate;window.examNudge=examNudge;window.editExamDlg=editExamDlg;window.examForDeck=examForDeck;window.examForFolder=examForFolder;window.planQuota=planQuota;window.exportIcs=exportIcs;window.icsFold=icsFold;
   window.cnKnowledgeLessonStatusHtml=cnKnowledgeLessonStatusHtml;window.cnKnowledgeUnitInfoHtml=cnKnowledgeUnitInfoHtml;window.cnReadRows=cnReadRows;   // tests of the texts of a v2 course
-  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnOutRequireEmphasis=cnOutRequireEmphasis;window.cnPlanClean=cnPlanClean;window.cnPlanCoverage=cnPlanCoverage;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnPageTermIds=cnPageTermIds;window.cnPagesCheck=cnPagesCheck;window.cnPagesOf=cnPagesOf;window.cnBldMatch=cnBldMatch;window.cnBldErrCode=cnBldErrCode;window.cnHasLessonSource=cnHasLessonSource;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
+  window.newId=newId;window.persist=persist;window.CDRAFTS=CDRAFTS;window.cnDraftOk=cnDraftOk;window.CN_EXAM_RE=CN_EXAM_RE;window.cnQuestions=cnQuestions;window.cnAddFiles=cnAddFiles;window.cnNewBtn=cnNewBtn;window.crBetaHref=crBetaHref;window.cnSave=cnSave;window.cnDeleteDraft=cnDeleteDraft;window.CN_LIM=CN_LIM;window.cnTO=cnTO;window.cnRefresh=cnRefresh;window.cnDraftsHtml=cnDraftsHtml;window.cnOn=cnOn;window.cnLatin=cnLatin;window.cnNorm=cnNorm;window.cnOutRequireEmphasis=cnOutRequireEmphasis;window.cnPlanClean=cnPlanClean;window.cnPlanCoverage=cnPlanCoverage;window.cnPlanDoc=cnPlanDoc;window.cnSrcText=cnSrcText;window.cnPlanPaint=cnPlanPaint;window.crLesson=crLesson;window.cnPut=cnPut;window.cnKey=cnKey;window.cnWrite=cnWrite;window.startSession=startSession;window.openLesson=openLesson;window.buildExport=buildExport;window.importData=importData;window.cnPageCands=cnPageCands;window.cnPageTermIds=cnPageTermIds;window.cnPagesCheck=cnPagesCheck;window.cnPagesOf=cnPagesOf;window.cnBldMatch=cnBldMatch;window.cnBldErrCode=cnBldErrCode;window.cnHasLessonSource=cnHasLessonSource;window.cnLessonClean=cnLessonClean;window.crNeedTr=crNeedTr;window.cnBPaint=cnBPaint;window.cnEst=cnEst;window.cnLeft=cnLeft;window.cnPlanBuild=cnPlanBuild;window.cnFallbackRaw=cnFallbackRaw;window.cnStem=cnStem;window.cnWeak=cnWeak;window.cnFp=cnFp;window.CN_PL=CN_PL;window.deckById=deckById;window.folderById=folderById;window.plateById=plateById;
   window.decksInFolder=decksInFolder;window.normCard=normCard;window.cardById=cardById;
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
@@ -9967,6 +9981,7 @@ html,body{background:var(--bg)}
 .sv-empty{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:30px 8px}
 .sv-empty .kbubble{flex:none;max-width:320px}.sv-empty .kbubble::before{display:none}
 .sv-empty .btn{min-width:240px}
+.crbeta{margin-top:12px;display:flex;flex-direction:column;gap:8px;align-items:center}.crbeta .btn{min-width:0}.crmail{font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center}#crMailAddr{user-select:all;-webkit-user-select:all}
 /* ===== заучивание ===== */
 .full.study .bar,.full .bar{position:relative}
 .full.study>.bar{padding-bottom:16px}

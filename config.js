@@ -6,5 +6,5 @@ self.CORPUS_CONFIG = {
   key: 'sb_publishable_zvG5uH19haeN6xTUkP6hSQ_siHwoc8E',
   bucket: 'plates',
   /* share code (10 letters) of a ready-made folder offered on an empty home screen: «Поделиться по QR-коду» on it, then put the code here. '' = no offer */
-  starter: ''
+  starter: '2asv3f5pwp'
 };

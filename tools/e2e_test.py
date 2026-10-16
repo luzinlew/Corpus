@@ -634,6 +634,22 @@ async def main():
             plain = await pg.evaluate("!document.querySelector('#panel .ring')&&!!document.querySelector('#panel .btn[data-act=reveal]')")
             check('gestures on: grade ring; off: plain buttons', ring and plain)
             await pg.evaluate("META.swipe=true;go({name:'home'})")
+            # wrong typed answer in a near-square window (split view): the grade ring shrinks so the panel keeps to about half the height
+            await pg.set_viewport_size({'width': 820, 'height': 640})
+            await pg.evaluate("go({name:'home'})")
+            await pg.evaluate('startGlobalStudy()')
+            await pg.wait_for_selector('#panel .ring')
+            await pg.evaluate("SS.cm='type';SS.phase='answer';SS.result='wrong';SS.typed='margo superior petrosae';updStudy()")
+            sq = await pg.evaluate("(()=>{const p=document.querySelector('#panel'),r=document.querySelector('#panel .ring');return {ph:p.offsetHeight,H:app.clientHeight,z:parseFloat(r.style.zoom)||1,wide:app.classList.contains('wide')};})()")
+            check('square window: the answer panel takes at most 60% of the height, the ring is smaller than usual', not sq['wide'] and sq['ph'] <= sq['H'] * 0.6 and sq['z'] < 1, json.dumps(sq))
+            await pg.set_viewport_size({'width': 390, 'height': 844})
+            # typed answer: words stay apart, only the wrong part of a word is marked, a missing word is one plate
+            dw = await pg.evaluate("[diffHtml('margo superior petrosae','Margo superior partis petrosae'),diffHtml('processus styloideus','Proc. styloideus'),diffHtml('proc.styloideus','Proc. styloideus'),diffHtml('foo','Margo')]")
+            check('typed diff: a missing word is one plate between the words, letters are not scattered',
+                  dw[0].count('class="gap wd"') == 1 and dw[0].startswith('margo superior <mark class="gap wd"') and dw[0].endswith('</mark> petrosae'), dw[0])
+            check('typed diff: «processus» against «Proc.» marks the tail of the word only, a missing space is a single gap',
+                  dw[1].startswith('proc<s>essus</s><mark>.</mark> styloideus') and dw[2].count('class="gap"') == 1 and '<s>' not in dw[2], json.dumps(dw[1:3]))
+            check('typed diff: an unrelated word is struck out whole and the right one is shown as a plate', dw[3].startswith('<s>foo</s> <mark class="gap wd"'), dw[3])
 
             # strict mode: no Kostik and no fact of the day
             await pg.evaluate("META.calm=true;applyLook();go({name:'home'})")

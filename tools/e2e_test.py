@@ -573,7 +573,7 @@ async def main():
             await pg.click('.tour [data-tour=end]')
             await pg.wait_for_function("!document.querySelector('#layer .tour')")
             check('tour closes and is remembered', await pg.evaluate('META.tourSeen===1'))
-            await pg.click('[data-act=tour]')
+            await pg.click('[data-act=tour] >> visible=true')
             await pg.wait_for_selector('#layer .tour')
             await pg.click('.tour [data-tour=skip]')
             await pg.wait_for_function("!document.querySelector('#layer .tour')")
@@ -705,6 +705,161 @@ async def main():
             await pg.evaluate("META.calm=false;applyLook();go({name:'home'})")
             check('strict mode hides Kostik and the fact of the day', strict == [0, False, True], json.dumps(strict))
 
+            # adaptive layout of the home screen: sidebar / narrow rail / floating bar
+            lay_js = """(()=>{const r=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return {l:b.left,w:b.width,h:b.height,t:b.top,b:b.bottom};};
+              const cs=(s,p)=>{const e=document.querySelector(s);return e?getComputedStyle(e)[p]:null;};
+              const vis=s=>{const e=document.querySelector(s);return !!e&&getComputedStyle(e).display!=='none'&&e.getBoundingClientRect().width>0;};
+              const sl=document.querySelector('.svtiles'),sg=document.querySelector('.sesslim');
+              return {wrap:r('.tabwrap'),wrapPos:cs('.tabwrap','position'),bar:r('.tabbar'),barPos:cs('.tabbar','position'),btns:document.querySelectorAll('.tabwrap .tabbar button').length,
+                head:vis('.svhead'),today:cs('.svtoday','display'),tl:r('.svt-l'),tr:r('.svt-r'),page:r('.page.svhome'),brand:vis('.tabbrand'),foot:vis('.tabfoot'),
+                cols:cs('.svtiles','gridTemplateColumns'),tdisp:cs('.svtiles','display'),tscroll:sl?sl.scrollWidth>sl.clientWidth+1:null,ntiles:document.querySelectorAll('.svtile').length,
+                mcols:cs('.modes','gridTemplateColumns').split(' ').length,sesslim:sg?sg.scrollWidth>sg.clientWidth+1:null,
+                fact:document.querySelector('.modes')&&document.querySelector('.svfact')?document.querySelector('.modes').compareDocumentPosition(document.querySelector('.svfact'))&4:null};})()"""
+            span_js = """(()=>[...document.querySelectorAll('.tabwrap .tabbar button')].map(b=>{const s=b.querySelector('span');const rg=document.createRange();rg.selectNodeContents(s);
+              return {t:s.textContent,clip:s.scrollWidth>s.clientWidth+0.5,text:rg.getBoundingClientRect().width,btn:b.clientWidth,ell:getComputedStyle(s).textOverflow};}))()"""
+            lang0 = await pg.evaluate('document.documentElement.lang')
+            async def sw_lang(lg):
+                await pg.evaluate("(l=>{const b=document.createElement('button');b.dataset.act='setLang';b.dataset.v=l;b.style.display='none';document.body.appendChild(b);b.click();b.remove();go({name:'home'});})('%s')" % lg)
+            fake_ids = ['zz%d' % i for i in range(7)]
+            async def lay(w, h=900):
+                await pg.set_viewport_size({'width': w, 'height': h})
+                return await pg.evaluate(lay_js)
+            try:
+                # seven extra (unsaved, in memory only) decks so that the tile grids have something to fill
+                await pg.evaluate("(ids=>{ids.forEach((id,i)=>S.decks.push({id,name:'Zz '+i,newPerDay:20,mode:'hideAll',createdAt:Date.now()+i}));})(%s)" % json.dumps(fake_ids))
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.evaluate("go({name:'home'})")
+                await pg.wait_for_selector('.svtoday')
+                L = await pg.evaluate(lay_js)
+                check('layout 1440: sidebar 232px at the left, six tabs inside, brand and foot shown, header hidden',
+                      L['wrapPos'] == 'fixed' and abs(L['wrap']['l']) < 1 and abs(L['wrap']['w'] - 232) < 2 and L['btns'] == 6 and L['brand'] and L['foot'] and not L['head'], json.dumps(L))
+                check('layout 1440: «today» is a card with two columns side by side, six deck columns (5 decks + the new-deck tile), four mode columns, fact below the modes',
+                      L['today'] == 'grid' and L['tl'] and L['tr'] and L['tr']['l'] > L['tl']['l'] + 100 and abs(L['tr']['t'] - L['tl']['t']) < L['tl']['h']
+                      and len(L['cols'].split()) == 6 and L['fact'] == 4 and L['mcols'] == 4, json.dumps(L))
+                L = await lay(1700)
+                check('layout 1700: the page stops at 1280px and sits right of the sidebar', 1279 <= L['page']['w'] <= 1281 and L['page']['l'] >= 232, json.dumps(L['page']))
+                L = await lay(1000, 768)
+                check('layout 1000: narrow 84px rail with six tabs, header hidden, six deck columns, four modes, page right of the rail',
+                      L['wrapPos'] == 'fixed' and abs(L['wrap']['w'] - 84) < 2 and L['btns'] == 6 and not L['head'] and len(L['cols'].split()) == 6 and L['mcols'] == 4 and L['page']['l'] >= L['wrap']['w'] - 0.5, json.dumps(L))
+                L = await lay(820, 1180)
+                check('layout 820: no sidebar (the wrapper is not fixed)', L['wrapPos'] != 'fixed', json.dumps(L))
+                check('layout 820: the tab bar itself is fixed and ≤580px wide, the head is back, «today» is a two-column card (≥800px), three deck columns',
+                      L['barPos'] == 'fixed' and L['bar']['w'] <= 580.5 and L['head'] and not L['brand'] and L['today'] == 'grid' and len(L['cols'].split()) == 3, json.dumps(L))
+                L = await lay(700, 1000)
+                check('layout 700: «today» is display:contents, the bar is floating, three deck columns, four modes',
+                      L['today'] == 'contents' and L['barPos'] == 'fixed' and L['wrapPos'] != 'fixed' and len(L['cols'].split()) == 3 and L['mcols'] == 4, json.dumps(L))
+                L = await lay(390, 844)
+                check('layout 390: six tabs fit the floating bar, «today» is display:contents, the deck row scrolls, two modes per row',
+                      L['btns'] == 6 and L['barPos'] == 'fixed' and L['bar']['l'] >= 11 and L['bar']['l'] + L['bar']['w'] <= 379 and L['today'] == 'contents'
+                      and L['tdisp'] == 'flex' and (L['ntiles'] < 4 or L['tscroll']) and L['mcols'] == 2, json.dumps(L))
+                # breakpoints, one pixel either side
+                a, b2, c, d = await lay(899), await lay(900), await lay(1099), await lay(1100)
+                check('layout breakpoints 899/900/1099/1100: floating bar, 84px rail, 84px rail, 232px sidebar',
+                      a['wrapPos'] != 'fixed' and a['barPos'] == 'fixed' and b2['wrapPos'] == 'fixed' and abs(b2['wrap']['w'] - 84) < 2
+                      and abs(c['wrap']['w'] - 84) < 2 and abs(d['wrap']['w'] - 232) < 2, json.dumps([a['wrap'], b2['wrap'], c['wrap'], d['wrap']]))
+                a, b2 = await lay(799), await lay(800)
+                check('layout breakpoints 799/800: «today» display:contents, then a card', a['today'] == 'contents' and b2['today'] != 'contents', json.dumps([a['today'], b2['today']]))
+                a, b2 = await lay(599), await lay(600)
+                check('layout breakpoints 599/600: deck row is a flex carousel, then a grid', a['tdisp'] == 'flex' and b2['tdisp'] == 'grid', json.dumps([a['tdisp'], b2['tdisp']]))
+                # labels in the 84px rail are not clipped, in every language; the session-limit chips fit on a phone
+                bad = []
+                for lg in ('ru', 'en', 'et'):
+                    await sw_lang(lg)
+                    for w in (900, 1000):
+                        await pg.set_viewport_size({'width': w, 'height': 768})
+                        for s in await pg.evaluate(span_js):
+                            if s['clip'] or s['text'] > s['btn'] + 0.5:
+                                bad.append([lg, w, s])
+                    for w in (390, 360):
+                        L = await lay(w, 800)
+                        if L['sesslim']:
+                            bad.append([lg, w, 'sesslim overflows'])
+                check('rail labels fit the 84px rail (900/1000px) and the limit chips fit at 390/360px, in ru/en/et', not bad, json.dumps(bad, ensure_ascii=False))
+                await sw_lang(lang0)
+                # a phone in landscape lands in the sidebar layout: the foot buttons must be reachable by scrolling
+                await pg.set_viewport_size({'width': 932, 'height': 430})
+                await pg.evaluate("document.querySelector('.tabfoot-b[data-act=settings]').scrollIntoView()")
+                R = await pg.evaluate("""(()=>{const w=document.querySelector('.tabwrap');const b=document.querySelector('.tabfoot-b[data-act=settings]').getBoundingClientRect();
+                  return {sh:w.scrollHeight,ch:w.clientHeight,oy:getComputedStyle(w).overflowY,top:b.top,bottom:b.bottom,ih:innerHeight};})()""")
+                check('layout 932x430: the sidebar scrolls and «Settings» can be scrolled into the window',
+                      R['sh'] >= R['ch'] and R['oy'] == 'auto' and R['top'] >= 0 and R['bottom'] <= R['ih'] + 0.5, json.dumps(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await sw_lang(lang0)
+                await pg.evaluate("(ids=>{S.decks=S.decks.filter(d=>!ids.includes(d.id));go({name:'home'});})(%s)" % json.dumps(fake_ids))
+
+            # polish: sliding pill in the rail, directional tab transitions, reduced motion, one-time sidebar entrance
+            try:
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                await pg.evaluate("go({name:'home'})")
+                await pg.wait_for_selector('.tabpill')
+                P = await pg.evaluate("(()=>{const p=document.querySelector('.tabpill'),b=document.querySelector('.tabbar button.on');return {d:getComputedStyle(p).display,ph:p.getBoundingClientRect().height,bh:b.getBoundingClientRect().height};})()")
+                check('rail 1000: the sliding pill is visible and as tall as the active button', P['d'] != 'none' and abs(P['ph'] - P['bh']) < 1.5, json.dumps(P))
+                await pg.click('.tabbar [data-v=library]')
+                await pg.wait_for_timeout(800)
+                P = await pg.evaluate("(()=>{const p=document.querySelector('.tabpill');const m=new DOMMatrix(getComputedStyle(p).transform);return {ty:m.m42,ti:p.style.getPropertyValue('--ti'),top:p.getBoundingClientRect().top,btn:document.querySelectorAll('.tabbar button')[1].getBoundingClientRect().top};})()")
+                check('rail 1000: after a click on «Decks» the pill moved down to the second button', P['ty'] > 20 and P['ti'] == '1' and abs(P['top'] - P['btn']) < 2, json.dumps(P))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("go({name:'home'})")
+                await pg.click('.tabbar [data-v=calendar]')
+                c1 = await pg.evaluate("document.getElementById('app').className")
+                await pg.wait_for_timeout(700)
+                await pg.click('.tabbar [data-v=library]')
+                c2 = await pg.evaluate("document.getElementById('app').className")
+                check('tab transitions are directional: Home→Calendar is dir-next, Calendar→Decks is dir-prev', 'enter-tab' in c1 and 'dir-next' in c1 and 'enter-tab' in c2 and 'dir-prev' in c2, json.dumps([c1, c2]))
+                await pg.emulate_media(reduced_motion='reduce')
+                await pg.evaluate("go({name:'home'});go({name:'calendar'})")
+                D = await pg.evaluate("(()=>{const e=document.querySelector('#app>.page>*');return parseFloat(getComputedStyle(e).animationDuration);})()")
+                check('prefers-reduced-motion: the tab entrance animation has ~0 duration', D <= 0.01, str(D))
+                await pg.emulate_media(reduced_motion='no-preference')
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                for v in ('home', 'library', 'home'):
+                    await pg.evaluate("go({name:'%s'})" % v)
+                await pg.wait_for_timeout(800)
+                await pg.evaluate("window.__twIn=1;go({name:'library'})")
+                W = await pg.evaluate("[document.documentElement.classList.contains('tw-in'),document.querySelector('.tabwrap').getAnimations().length]")
+                check('sidebar entrance runs only once: with the flag set, a new render adds no tw-in class and no animation', W == [False, 0], json.dumps(W))
+                await pg.evaluate("window.__twIn=0;render()")
+                W = await pg.evaluate("[document.documentElement.classList.contains('tw-in'),document.querySelector('.tabwrap').getAnimations().length]")
+                check('sidebar entrance: with the flag reset, render adds tw-in and one running animation', W == [True, 1], json.dumps(W))
+                await pg.wait_for_timeout(800)
+                W = await pg.evaluate("[document.documentElement.classList.contains('tw-in'),document.querySelector('.tabwrap').getAnimations().length,window.__twIn]")
+                check('sidebar entrance: the class is removed and the animation ends', W == [False, 0, 1], json.dumps(W))
+                await pg.evaluate("go({name:'library'})")
+                await pg.evaluate("document.documentElement.classList.add('calm');go({name:'home'});go({name:'library'})")
+                C = await pg.evaluate("(()=>{const e=document.querySelector('.dgrid>*');return e?[getComputedStyle(e).animationName,parseFloat(getComputedStyle(e).animationDuration)]:null;})()")
+                check('calm mode: grid items have no entrance animation', C is not None and (C[0] == 'none' or C[1] <= 0.01), json.dumps(C))
+            finally:
+                await pg.emulate_media(reduced_motion='no-preference')
+                await pg.evaluate("document.documentElement.classList.remove('calm')")
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("go({name:'home'})")
+
+            # «Decks» tab on a wide screen: the same frame as «Home», the rows become a grid of cards, a counter by the title
+            lib_js = """(()=>{const g=document.querySelector('.dgrid'),pg=document.querySelector('.page.tabbed'),h=document.querySelector('.hhead .h1t');
+              const c=document.querySelector('.hhead .hcount');
+              return {page:pg?pg.getBoundingClientRect().width:null,disp:g?getComputedStyle(g).display:null,cols:g?getComputedStyle(g).gridTemplateColumns.split(' ').length:0,
+                deck:!!document.querySelector('.dgrid .deck'),count:c?c.textContent:null,n:S.decks.length,h1:h?parseFloat(getComputedStyle(h).fontSize):0};})()"""
+            try:
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.evaluate("go({name:'library'})")
+                await pg.wait_for_selector('.dgrid .deck')
+                L = await pg.evaluate(lib_js)
+                check('layout 1440 «Decks»: page 1200–1280px, ≥3 card columns, a counter with the number of decks next to a 32px title',
+                      1200 <= L['page'] <= 1281 and L['disp'] == 'grid' and L['cols'] >= 3 and L['count'] == str(L['n']) and L['h1'] == 32, json.dumps(L))
+                await pg.set_viewport_size({'width': 1700, 'height': 900})
+                L = await pg.evaluate(lib_js)
+                check('layout 1700 «Decks»: the page stops at 1280px', 1279 <= L['page'] <= 1281, json.dumps(L))
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                L = await pg.evaluate(lib_js)
+                check('layout 1000 «Decks»: ≥2 card columns', L['cols'] >= 2, json.dumps(L))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                L = await pg.evaluate(lib_js)
+                check('layout 390 «Decks»: a single column of rows', L['disp'] != 'grid' or L['cols'] == 1, json.dumps(L))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("go({name:'home'})")
+
             # share the folder → a file with the photo inside
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
@@ -789,6 +944,78 @@ async def main():
             await pg.wait_for_selector('.crs.chome .cpart >> nth=1 >> button.cph')
             await pg.click('.crs.chome .cpart >> nth=1 >> button.cph')   # the part with the lesson is opened by its own heading
             await pg.wait_for_function("document.querySelectorAll('.crs.chome .clrow').length===2")
+
+            # list of courses on a wide screen: a grid (a second course is a copy made in memory only)
+            try:
+                await pg.evaluate("""(()=>{const f=S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link)));S.folders.push({id:'zf2',name:'Kopia',mode:'hideAll',createdAt:Date.now()+100});
+                  S.decks.filter(d=>d.folderId===f.id).forEach(d=>{S.decks.push(Object.assign({},d,{id:'zd'+d.id,folderId:'zf2'}));
+                    S.plates.filter(p=>p.deckId===d.id).forEach(p=>S.plates.push(Object.assign({},p,{id:'zp'+p.id,deckId:'zd'+d.id})));});go({name:'courses'});})()""")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.ccards .ccard')
+                R = await pg.evaluate("({n:document.querySelectorAll('.ccard').length,cols:getComputedStyle(document.querySelector('.ccards')).gridTemplateColumns.split(' ').length,w:document.querySelector('.page.tabbed').getBoundingClientRect().width})")
+                check('layout 1440 «Courses»: two courses in a grid of ≥3 columns inside the 1280px frame', R['n'] == 2 and R['cols'] >= 3 and R['w'] <= 1281, json.dumps(R))
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                R = await pg.evaluate("getComputedStyle(document.querySelector('.ccards')).gridTemplateColumns.split(' ').length")
+                check('layout 1000 «Courses»: two columns', R == 2, str(R))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                R = await pg.evaluate("getComputedStyle(document.querySelector('.ccards')).gridTemplateColumns.split(' ').length")
+                check('layout 390 «Courses»: one column', R == 1, str(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("""(f1=>{S.folders=S.folders.filter(f=>f.id!=='zf2');S.decks=S.decks.filter(d=>d.folderId!=='zf2');S.plates=S.plates.filter(p=>!p.id.startsWith('zp'));
+                  go({name:'courses',fid:f1});})(S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link))).id)""")
+                await pg.wait_for_selector('.crs.chome .clrow')
+            try:
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate("(()=>{const r=document.querySelector('.page.crs.chome').getBoundingClientRect();return {w:r.width,l:r.left,r:innerWidth-r.right};})()")
+                check('layout 1440 «Course» page: 700–961px wide and centred in the free area', 700 <= R['w'] <= 961 and abs((R['l'] - 232) - R['r']) < 20, json.dumps(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+
+            # «Calendar», «Statistics», «More» on wide screens
+            try:
+                await pg.evaluate("""(()=>{const dk=n=>{const d=new Date(Date.now()+n*864e5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};const t=Date.now();[3,9].forEach((n,i)=>S.exams.push({id:'zx'+i,title:'Kontrolltoo '+i,date:dk(n),folderIds:[],deckIds:[],createdAt:t+i}));go({name:'calendar'});})()""")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.calbox .calgrid .cday:not(.out)')
+                await pg.wait_for_timeout(700)
+                CJS = """()=>{const g=document.querySelector('.calgrid').getBoundingClientRect(),d=document.querySelector('.cdaybox').getBoundingClientRect(),c=document.querySelector('.cday:not(.out)').getBoundingClientRect();
+                  return {disp:getComputedStyle(document.querySelector('.calbox')).display,cols:getComputedStyle(document.querySelector('.calbox')).gridTemplateColumns.split(' ').length,
+                  gr:g.right,gb:g.bottom,dl:d.left,dt:d.top,dw:d.width,ch:c.height,page:document.querySelector('.page.tabbed').getBoundingClientRect().width,nex:document.querySelectorAll('.exgrid .excard').length}}"""
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(CJS)
+                check('layout 1440 «Calendar»: month grid left, day panel (280–340px) right of it, day cells ≥70px high, upcoming tests in a grid',
+                      R['disp'] == 'grid' and R['cols'] >= 2 and R['dl'] > R['gr'] - 4 and 280 <= R['dw'] <= 340 and R['ch'] >= 70 and R['nex'] >= 2, json.dumps(R))
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(CJS)
+                check('layout 1000 «Calendar»: two columns', R['cols'] >= 2 and R['dl'] > R['gr'] - 4 and R['ch'] >= 70, json.dumps(R))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(CJS)
+                check('layout 390 «Calendar»: one column, day panel under the grid', R['cols'] == 1 and R['dt'] >= R['gb'] - 4, json.dumps(R))
+                await pg.evaluate("go({name:'globalStats'})")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.gstats .stat')
+                await pg.wait_for_timeout(700)
+                SJS = "()=>({cols:getComputedStyle(document.querySelector('.gstats')).gridTemplateColumns.split(' ').length,tiles:getComputedStyle(document.querySelector('.gstats .stat-grid')).gridTemplateColumns.split(' ').length,page:document.querySelector('.page.tabbed').getBoundingClientRect().width})"
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(SJS)
+                check('layout 1440 «Statistics»: 1200–1281px frame, ≥2 columns, three tiles in a row', 1200 <= R['page'] <= 1281 and R['cols'] >= 2 and R['tiles'] == 3, json.dumps(R))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.wait_for_timeout(300)
+                R = await pg.evaluate(SJS)
+                check('layout 390 «Statistics»: one column', R['cols'] == 1, json.dumps(R))
+                await pg.evaluate("go({name:'settings'})")
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                await pg.wait_for_selector('.page.more .overview')
+                await pg.wait_for_timeout(700)
+                R = await pg.evaluate("document.querySelector('.page.more').getBoundingClientRect().width")
+                check('layout 1440 «More»: page centred, 700–1081px wide', 700 <= R <= 1081, str(R))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("""(f1=>{S.exams=S.exams.filter(e=>!e.id.startsWith('zx'));go({name:'courses',fid:f1});})(S.folders.find(f=>S.decks.some(d=>d.folderId===f.id&&S.plates.some(p=>p.deckId===d.id&&p.link))).id)""")
+                await pg.wait_for_selector('.crs.chome .clrow')
 
             # the lesson of the first photo
             await pg.click('.crs.chome .clrow >> nth=0')

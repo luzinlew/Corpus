@@ -698,6 +698,41 @@ async def main():
                 await sw_lang(lang0)
                 await pg.evaluate("(ids=>{S.decks=S.decks.filter(d=>!ids.includes(d.id));go({name:'home'});})(%s)" % json.dumps(fake_ids))
 
+            # polish: sliding pill in the rail, directional tab transitions, reduced motion, one-time sidebar entrance
+            try:
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                await pg.evaluate("go({name:'home'})")
+                await pg.wait_for_selector('.tabpill')
+                P = await pg.evaluate("(()=>{const p=document.querySelector('.tabpill'),b=document.querySelector('.tabbar button.on');return {d:getComputedStyle(p).display,ph:p.getBoundingClientRect().height,bh:b.getBoundingClientRect().height};})()")
+                check('rail 1000: the sliding pill is visible and as tall as the active button', P['d'] != 'none' and abs(P['ph'] - P['bh']) < 1.5, json.dumps(P))
+                await pg.click('.tabbar [data-v=library]')
+                await pg.wait_for_timeout(800)
+                P = await pg.evaluate("(()=>{const p=document.querySelector('.tabpill');const m=new DOMMatrix(getComputedStyle(p).transform);return {ty:m.m42,ti:p.style.getPropertyValue('--ti'),top:p.getBoundingClientRect().top,btn:document.querySelectorAll('.tabbar button')[1].getBoundingClientRect().top};})()")
+                check('rail 1000: after a click on «Decks» the pill moved down to the second button', P['ty'] > 20 and P['ti'] == '1' and abs(P['top'] - P['btn']) < 2, json.dumps(P))
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("go({name:'home'})")
+                await pg.click('.tabbar [data-v=calendar]')
+                c1 = await pg.evaluate("document.getElementById('app').className")
+                await pg.wait_for_timeout(700)
+                await pg.click('.tabbar [data-v=library]')
+                c2 = await pg.evaluate("document.getElementById('app').className")
+                check('tab transitions are directional: Home→Calendar is dir-next, Calendar→Decks is dir-prev', 'enter-tab' in c1 and 'dir-next' in c1 and 'enter-tab' in c2 and 'dir-prev' in c2, json.dumps([c1, c2]))
+                await pg.emulate_media(reduced_motion='reduce')
+                await pg.evaluate("go({name:'home'});go({name:'calendar'})")
+                D = await pg.evaluate("(()=>{const e=document.querySelector('#app>.page>*');return parseFloat(getComputedStyle(e).animationDuration);})()")
+                check('prefers-reduced-motion: the tab entrance animation has ~0 duration', D <= 0.01, str(D))
+                await pg.emulate_media(reduced_motion=None)
+                await pg.set_viewport_size({'width': 1440, 'height': 810})
+                for v in ('home', 'library', 'home'):
+                    await pg.evaluate("go({name:'%s'})" % v)
+                await pg.wait_for_timeout(800)
+                W = await pg.evaluate("[document.querySelector('.tabwrap').getAnimations().length,document.documentElement.classList.contains('tw-in')]")
+                check('sidebar entrance runs only once: no running animation and no tw-in class after later renders', W == [0, False], json.dumps(W))
+            finally:
+                await pg.emulate_media(reduced_motion=None)
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("go({name:'home'})")
+
             # share the folder → a file with the photo inside
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")

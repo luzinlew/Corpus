@@ -5520,6 +5520,10 @@ async def main():
                 await pg.evaluate('void rateAsk()')
                 await pg.wait_for_selector('#layer .rate-ch')
                 await rt_sweep(f'{lg} first-visit dialog', '#layer')
+                dl = await pg.evaluate("""(()=>{const d=document.querySelector('#layer .dlg'),bs=[...d.querySelectorAll('.rate-ch button')],de=document.documentElement;
+                  return {n:bs.length,w:window.innerWidth,doc:de.scrollWidth,dlg:d.scrollWidth<=d.clientWidth,right:Math.max(...bs.map(b=>b.getBoundingClientRect().right)),
+                    small:bs.filter(b=>b.getBoundingClientRect().height<40).map(b=>b.textContent),clipped:bs.filter(b=>b.scrollWidth>b.clientWidth+1||b.scrollHeight>b.clientHeight+1).map(b=>b.textContent)}})()""")
+                check(f'rating {lg}: the first-visit dialog at 390 px: 5 buttons, no sideways scroll, buttons at least 40 px high, no clipped text', dl['n'] == 5 and dl['w'] == 390 and dl['doc'] <= 390 and dl['dlg'] and dl['right'] <= 390 and dl['small'] == [] and dl['clipped'] == [], json.dumps(dl, ensure_ascii=False))
                 await pg.click('#layer [data-s="alias"]')
                 await pg.wait_for_selector('#dlgIn')
                 await rt_sweep(f'{lg} nickname dialog', '#layer')
@@ -5579,7 +5583,7 @@ async def main():
             await pg.click('#rateBox [data-v=points]')
             await pg.wait_for_function("document.querySelector('#rateBox [data-v=points]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-r')", timeout=8000)
             cap = lambda: pg.evaluate("(document.querySelector('#rateBox .rate-reward')||{}).textContent||null")
-            check('rating: under «Верные» a small line says «1-е место недели получает +20 запросов к ИИ»', await cap() == '1-е место недели получает +20 запросов к ИИ')
+            check('rating: under «Верные» a small line says «Награда за 1-е место недели: +20 запросов к ИИ (от 3 дней занятий и 70% верных)»', await cap() == 'Награда за 1-е место недели: +20 запросов к ИИ (от 3 дней занятий и 70% верных)')
             for mt in ('accuracy', 'errors'):
                 await pg.click(f'#rateBox [data-v={mt}]')
                 await pg.wait_for_function(f"document.querySelector('#rateBox [data-v={mt}]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-me')", timeout=8000)
@@ -5587,7 +5591,7 @@ async def main():
                 check(f'rating: no reward line under «{mt}»', await cap() is None)
             await pg.click('#rateBox [data-v=points]')
             await pg.wait_for_function("document.querySelector('#rateBox .rate-reward')", timeout=8000)
-            for lg, txt in (('en', '1st place of the week gets +20 AI requests'), ('et', 'Nädala 1. koht saab +20 TI päringut')):
+            for lg, txt in (('en', 'Reward for 1st place of the week: +20 AI requests (from 3 days of study and 70% correct)'), ('et', 'Nädala 1. koha preemia: +20 TI päringut (alates 3 õppepäevast ja 70% õigetest)')):
                 await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
                 await pg.wait_for_selector('#rateBox .rate-r.me')
                 check(f'rating {lg}: the reward line is translated', await cap() == txt, str(await cap()))
@@ -5598,8 +5602,6 @@ async def main():
             await pg.wait_for_selector('#layer .sitem')
             await pg.click('#layer [data-s="real"]')
             await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Тебя показывают как «Rate»')", timeout=5000)
-            src2 = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
-            check('rating: the award toast says 1st place of the ranking in ru / en / et', all(k in src2 for k in ('Вы заняли первое место в рейтинге недели!', 'You took 1st place in last week’s ranking!', 'Sa said eelmise nädala edetabelis 1. koha!')) and 'самый активный и точный на прошлой' not in src2)
             await pg.click('#rateBox [data-act=rateGear]')
             await pg.wait_for_selector('#layer .sitem')
             await pg.click('#layer [data-s="del"]')
@@ -5676,6 +5678,71 @@ async def main():
             check('rating: …and nothing is called again in this session', rq == [] and not await pg.query_selector('#rateBox'), json.dumps(rq))
             check('rating: …without errors in the console', errs_t[n_err:] == [], '; '.join(errs_t[n_err:])[:300])
             rt_api('?mode=')
+            # --- the winner's toast (corpus_week_award is driven by /__rating?award=…): once per week, in three languages; none for others / no week ---
+            AW = {'week': '2026-10-12', 'me': True, 'fresh': True, 'units': 20, 'winner': 'Студент', 'balance': 20}
+            award_txt = {'ru': 'Вы заняли первое место в рейтинге недели! +20 запросов ИИ', 'en': 'You took 1st place in last week’s ranking! +20 AI requests', 'et': 'Sa said eelmise nädala edetabelis 1. koha! +20 TI päringut'}
+            async def award_ctx(lg, award):
+                rt_api('?award=' + urllib.parse.quote(json.dumps(award) if award is not None else ''))
+                c2, p2, e2 = await open_ctx()
+                await c2.add_init_script(f"try{{localStorage.setItem('corpus.lang','{lg}');}}catch(e){{}}")
+                await p2.goto(SITE)
+                await p2.wait_for_selector('.cw-auth input[name=email]')
+                await p2.fill('input[name=email]', 'rate@test.ee')
+                await p2.fill('input[name=password]', 'kolju2026')
+                await p2.click('.cw-go')
+                await app_ready(p2)
+                return c2, p2, e2
+            toasts = "[...document.querySelectorAll('.toast')].map(t=>t.textContent)"
+            for lg in ('ru', 'en', 'et'):
+                c2, p2, e2 = await award_ctx(lg, AW)
+                await p2.wait_for_function(f"{toasts}.some(t=>t==={json.dumps(award_txt[lg], ensure_ascii=False)})", timeout=8000)
+                check(f'award {lg}: the winner is told once with the reward ({lg} text)', await p2.evaluate("localStorage.getItem('corpus.award')") == '2026-10-12')
+                await p2.reload()
+                await app_ready(p2)
+                await p2.wait_for_timeout(3500)
+                check(f'award {lg}: after a reload the toast is not shown again', not any(award_txt[lg] == t for t in await p2.evaluate(toasts)) and await p2.evaluate("localStorage.getItem('corpus.award')") == '2026-10-12')
+                await c2.close()
+            for tag, aw in (('me is false', dict(AW, me=False)), ('week is null', {'week': None})):
+                c2, p2, e2 = await award_ctx('ru', aw)
+                await p2.wait_for_timeout(3500)
+                check(f'award: {tag} → no toast, nothing remembered', not any('место в рейтинге' in t for t in await p2.evaluate(toasts)) and await p2.evaluate("localStorage.getItem('corpus.award')") is None)
+                await c2.close()
+            rt_api('?award=')
+
+            # --- the cached mode follows the server: changed behind the client's back, anon ↔ hidden; hidden does not send, anon does ---
+            def mode_ctx(mode):
+                rt_api('', [{'email': 'rate@test.ee', 'mode': mode, 'asked': True}])
+            c3, p3, e3 = await open_ctx()
+            await c3.add_init_script("window.__RATE_TEST__=true;")
+            mode_ctx('anon')
+            await p3.goto(SITE)
+            await p3.wait_for_selector('.cw-auth input[name=email]')
+            await p3.fill('input[name=email]', 'rate@test.ee')
+            await p3.fill('input[name=password]', 'kolju2026')
+            await p3.click('.cw-go')
+            await app_ready(p3)
+            send_try = "localStorage.removeItem('corpus.ratingAt.'+CORPUS_WEB.uid);S.decks.some(d=>d.id==='rd1')||S.decks.push({id:'rd1',name:'Rating',newPerDay:20,mode:'hideAll',createdAt:Date.now()});S.stats.rd1={id:'rd1',days:{[dayKey()]:{n:33,ok:20}}};rateSubmit()"
+            await p3.evaluate("go({name:'globalStats'})")
+            await p3.wait_for_function("META.ratingMode==='anon'", timeout=8000)
+            check('rating: the server says anon → the cached mode is anon', await p3.evaluate("META.ratingMode") == 'anon')
+            mode_ctx('hidden')
+            await p3.reload(); await app_ready(p3)
+            await p3.evaluate("go({name:'globalStats'})")
+            await p3.wait_for_function("META.ratingMode==='hidden'", timeout=8000)
+            await p3.wait_for_timeout(3200)
+            n0 = len(rt_api()['submits'])
+            await p3.evaluate(send_try); await p3.wait_for_timeout(800)
+            check('rating: changed to hidden on the server → the cache follows and nothing is sent', len(rt_api()['submits']) == n0 and await p3.evaluate("META.ratingMode")=='hidden')
+            mode_ctx('anon')
+            await p3.reload(); await app_ready(p3)
+            await p3.evaluate("go({name:'globalStats'})")
+            await p3.wait_for_function("META.ratingMode==='anon'", timeout=8000)
+            await p3.wait_for_timeout(3200)
+            n0 = len(rt_api()['submits'])
+            await p3.evaluate(send_try); await p3.wait_for_timeout(800)
+            check('rating: back to anon on the server → the cache follows and the week is sent again', len(rt_api()['submits']) == n0 + 1, str((n0, len(rt_api()['submits']))))
+            await c3.close()
+
             # --- the real branch: without the test switches the first-visit question appears on Statistics (asked=false) ---
             import base64 as _b64
             tok_p = signup_token('prod@test.ee')

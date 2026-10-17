@@ -2088,7 +2088,7 @@ function rateBodyHtml(r){
   if(tail.length){if(top.length&&tail[0].rank>top[top.length-1].rank+1)rows+='<li class="rate-gap" aria-hidden="true">…</li>';rows+=tail.map(x=>rateRowHtml(x,pct)).join('');}
   return '<p class="rate-me">'+esc(line)+'</p>'+(hint?'<p class="rate-hint muted sm">'+esc(hint)+'</p>':'')+
     (rows?'<ol class="rate-list">'+rows+'</ol>':'<p class="muted sm rate-note">Пока в таблице никого нет</p>')+
-    (!pct&&(r.reward_units|0)>0?'<p class="rate-reward muted sm">'+esc(T3('1-е место недели получает +'+(r.reward_units|0)+' запросов к ИИ','1st place of the week gets +'+(r.reward_units|0)+' AI requests','Nädala 1. koht saab +'+(r.reward_units|0)+' TI päringut'))+'</p>':'');
+    (!pct&&(r.reward_units|0)>0?'<p class="rate-reward muted sm">'+esc(T3('Награда за 1-е место недели: +'+(r.reward_units|0)+' запросов к ИИ (от 3 дней занятий и 70% верных)','Reward for 1st place of the week: +'+(r.reward_units|0)+' AI requests (from 3 days of study and 70% correct)','Nädala 1. koha preemia: +'+(r.reward_units|0)+' TI päringut (alates 3 õppepäevast ja 70% õigetest)'))+'</p>':'');
 }
 function rateInner(){
   const r=RATE.res,me=r&&r.me,hidden=!!(me&&me.asked&&me.mode==='hidden');
@@ -2111,7 +2111,8 @@ function rateLoad(){
   a.get(m).then(r=>{
     if(seq!==RATE.seq)return;
     RATE.res=r;RATE.err='';
-    const mm=r&&r.me&&r.me.mode?r.me.mode:null;   // anon by defaultif(mm&&META.ratingMode!==mm){META.ratingMode=mm;persistMeta();}
+    // anon by default
+    const mm=r&&r.me&&r.me.mode?r.me.mode:null;if(mm&&META.ratingMode!==mm){META.ratingMode=mm;persistMeta();}
     ratePaint();rateMaybeAsk(r);
   },e=>{
     if(seq!==RATE.seq)return;

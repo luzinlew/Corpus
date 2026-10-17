@@ -134,7 +134,7 @@ function multipartFile(buf, ctype) {
 }
 
 /* ---------- weekly rating (the rules of supabase/rating.sql) ---------- */
-const RT = { mode: '', today: '', profiles: new Map(), weeks: new Map(), people: new Map(), calls: { submit: 0, get: 0, set_profile: 0, delete_mine: 0 }, submits: [] };   // mode: '' | 'missing' (PGRST202 for all four) | 'offline' (the connection is dropped)
+const RT = { mode: '', today: '', profiles: new Map(), weeks: new Map(), people: new Map(), calls: { submit: 0, get: 0, set_profile: 0, delete_mine: 0 }, submits: [], award: null };   // award: what corpus_week_award answers (null: {week:null}), set by /__rating?award=<json>; mode: '' | 'missing' (PGRST202 for all four) | 'offline' (the connection is dropped)
 const rtToday = () => RT.today || new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Tallinn' });
 const rtWeekStart = (today) => { const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
 const rtEmail = (uid) => { const u = byId(uid); return u ? u.email : (RT.people.get(uid) || {}).email || ''; };
@@ -186,8 +186,9 @@ http.createServer(async (req, res) => {
     send(res, 200, Q); return;
   }
   if (p === '/__rating') {   // ?mode=missing|offline|'' ; ?today=YYYY-MM-DD ; ?reset=1 ; POST a JSON array of other people to seed the current week: {email|name, mode, asked, answers, correct, active_days, points}; answers with the state
-    if (u.searchParams.get('reset') === '1') { RT.profiles.clear(); RT.weeks.clear(); RT.people.clear(); RT.submits.length = 0; RT.mode = ''; RT.today = ''; for (const k of Object.keys(RT.calls)) RT.calls[k] = 0; }
+    if (u.searchParams.get('reset') === '1') { RT.profiles.clear(); RT.weeks.clear(); RT.people.clear(); RT.submits.length = 0; RT.award = null; RT.mode = ''; RT.today = ''; for (const k of Object.keys(RT.calls)) RT.calls[k] = 0; }
     if (u.searchParams.has('mode')) RT.mode = u.searchParams.get('mode');
+    if (u.searchParams.has('award')) { const aw = u.searchParams.get('award'); RT.award = aw ? JSON.parse(aw) : null; }
     if (u.searchParams.has('today')) RT.today = u.searchParams.get('today');
     if (req.method === 'POST' && Array.isArray(body)) {
       const ws = rtWeekStart(rtToday());
@@ -430,7 +431,7 @@ http.createServer(async (req, res) => {
       me: { rank: me ? me.rn : null, value: me ? me.val : null, answers: w ? w.answers : 0, points: w ? w.points : 0, eligible: !!me, mode: pr.mode, asked: !!pr.asked, name: rtName(uid) },
       top: r.filter((x) => x.rn <= 10).map(item), around: me ? r.filter((x) => x.rn >= me.rn - 3 && x.rn <= me.rn + 3).map(item) : [] }); return;
   }
-  if (p === '/rest/v1/rpc/corpus_week_award' && req.method === 'POST') { send(res, 200, { week: null }); return; }
+  if (p === '/rest/v1/rpc/corpus_week_award' && req.method === 'POST') { send(res, 200, RT.award || { week: null }); return; }
   /* ---------- rpc: corpus_ping / corpus_site_stats (as in supabase/stats.sql) ---------- */
   const isAdmin = (uid) => { const u = byId(uid); return !!u && ADMINS.includes(u.email.toLowerCase()); };
   const dayOf = (t) => new Date(t).toISOString().slice(0, 10);

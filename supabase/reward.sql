@@ -29,13 +29,14 @@ create or replace function public.corpus_week_award() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   uid uuid := auth.uid();
-  ws date := date_trunc('week', private.rating_today()::timestamp)::date - 7;   -- Monday of last Monday-to-Sunday week
+  ws date;
   u integer; w record; ab public.ai_bonus; fresh boolean := false; aw private.ai_awards;
 begin
   if uid is null then return jsonb_build_object('week', null); end if;
   if to_regclass('public.rating_week') is null or to_regclass('public.rating_profile') is null then
     raise exception 'rating_not_installed' using errcode = '55000';
   end if;
+  ws := date_trunc('week', private.rating_today()::timestamp)::date - 7;   -- Monday of last Monday-to-Sunday week
   select * into aw from private.ai_awards where week_start = ws;
   if not found then
     select s.value::integer into u from private.settings s where s.key = 'ai_week_reward' and s.value ~ '^[0-9]{1,6}$';

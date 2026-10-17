@@ -152,6 +152,59 @@ await setToday("2026-11-19");
   ok("ai_week_reward 35 is paid", a.me === true && a.units === 35 && (await bal(u)) === b0 + 35 && a.balance === 35, JSON.stringify(a));
 }
 
+// ---- (a) the leader of the table does not meet the rules: the next one gets the reward, not rank 1 of the table ----
+{
+  const rk = (await sql(`select user_id, rn::int rn from private.rating_ranked('points', date '${LW}')`)).rows!;
+  const rn = (k: string) => rk.find((x) => x.user_id === U(k))?.rn;
+  ok("week 1: the table leaders (50% accuracy; 2 days) fail the rules and are above the winner, who is not rank 1", rn("low") === 1 && rn("twod") === 2 && rn("anon") > 2 && (await awards())[0].user_id === U("anon"), JSON.stringify(rk));
+}
+// ---- (b) the winner-to-be deleted their data before the week was closed ----
+await setToday("2026-11-26");     // last week 16..22 Nov... use explicit rows below
+{
+  const lw = "2026-11-16";
+  const X = id(90), Y = id(91);
+  await sql(`insert into auth.users values ('${X}', 'del.eted@x.ee'), ('${Y}', 'next.one@x.ee')`);
+  await sql(`insert into public.rating_week (user_id, week_start, answers, correct, active_days, points) values ('${X}', '${lw}', 300, 300, 5, 150), ('${Y}', '${lw}', 100, 90, 4, 90)`);
+  const d = await runAs("authenticated", X, `select public.corpus_rating_delete_mine()`);
+  a = await award(OBS);
+  ok("delete_mine before the week is closed: that person does not win, the next one does", d.ok && a.week === lw && (await awards()).at(-1).user_id === Y && (await bal(X)) === 0, JSON.stringify(a) + (d.msg ?? ""));
+}
+// ---- (c) hidden after the week ended, before the first call ----
+await setToday("2026-12-03");     // last week 23..29 Nov
+{
+  const lw = "2026-11-23";
+  const Z = id(92), V = id(93);
+  await sql(`insert into auth.users values ('${Z}', 'late.hide@x.ee'), ('${V}', 'valid.one@x.ee')`);
+  await sql(`insert into public.rating_week (user_id, week_start, answers, correct, active_days, points) values ('${Z}', '${lw}', 300, 300, 5, 150), ('${V}', '${lw}', 100, 90, 4, 90)`);
+  const h = await runAs("authenticated", Z, `select public.corpus_rating_set_profile('hidden')`);
+  a = await award(OBS);
+  ok("hidden after the week and before the first call: does not win", h.ok && a.week === lw && (await awards()).at(-1).user_id === V && (await bal(Z)) === 0, JSON.stringify(a));
+}
+// ---- the reward setting that is not a number ----
+await sql(`insert into private.settings (key, value) values ('ai_week_reward', 'abc') on conflict (key) do update set value = 'abc'`);
+await setToday("2026-12-10");     // last week 30 Nov..6 Dec
+{
+  const W = id(94); await sql(`insert into auth.users values ('${W}', 'plain.num@x.ee')`);
+  await sql(`insert into public.rating_week (user_id, week_start, answers, correct, active_days, points) values ('${W}', '2026-11-30', 60, 60, 4, 60)`);
+  const r0 = await runAs("authenticated", W, `select public.corpus_week_award() r`);
+  ok("ai_week_reward that is not a number: no error, the default 20 is paid", r0.ok && r0.rows![0].r.units === 20 && r0.rows![0].r.me === true, r0.msg ?? JSON.stringify(r0.rows));
+}
+// ---- rating.sql not run: a clear error ----
+{
+  const d2 = new PGlite();
+  await d2.exec(`create role authenticated nologin; create role anon nologin; create schema auth; create table auth.users (id uuid primary key, email text);
+    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    grant usage on schema auth to authenticated; create schema private;
+    create table private.settings (key text primary key, value text not null);
+    insert into auth.users values ('${id(1)}', 'a@x.ee')`);
+  await d2.exec(slice(ai, "create table if not exists public.ai_bonus", "alter table public.ai_usage"));
+  await d2.exec(reward);
+  await d2.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${id(1)}', false)`);
+  let code = "", msg = "";
+  try { await d2.query(`select public.corpus_week_award()`); } catch (e: any) { code = e.code; msg = String(e.message); }
+  ok("without rating_week the function raises rating_not_installed (55000)", code === "55000" && /rating_not_installed/.test(msg), code + " " + msg);
+}
+
 // ---- the real week boundary uses Tallinn time through rating_today() ----
 {
   const src = reward.replace(/--.*$/gm, "");
@@ -162,6 +215,7 @@ await setToday("2026-11-19");
 // ---- rollback: the old function comes back (needs its tables only when called) ----
 const r1 = await tryExec(rollback), r2 = await tryExec(rollback);
 ok("reward_rollback.sql runs twice without errors", r1 === "" && r2 === "", r1 + r2);
+ok("(d) reward_rollback.sql applies cleanly (no docs/activity needed to create it)", r1 === "" && r2 === "");
 ok("…it restores the old function (reads public.docs)", (await sql(`select prosrc ~ 'public\\.docs' as old from pg_proc where proname = 'corpus_week_award'`)).rows![0].old === true);
 const e3 = await tryExec(reward);
 ok("reward.sql can be applied again after the rollback", e3 === "" && (await sql(`select prosrc ~ 'rating_week' as n from pg_proc where proname = 'corpus_week_award'`)).rows![0].n === true, e3);

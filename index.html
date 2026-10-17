@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="web.css?v=8a909949eb">
 <script src="config.js?v=d007ae7e35"></script>
 <script src="vendor/supabase.js?v=59d39487c3"></script>
-<script src="web.js?v=dad147cc56"></script>
+<script src="web.js?v=7e4f3a237a"></script>
 <meta name="color-scheme" content="light dark">
 <title>Corpus — анатомия по изображениям</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1229,7 +1229,7 @@ const I18N_PLU={
   'текстовая карточка|текстовые карточки|текстовых карточек':[['text card','text cards'],['tekstikaart','tekstikaarti']]
 };
 const MONTHS_L={ru:MONTHS.slice(),en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],et:['jaan','veebr','märts','apr','mai','juuni','juuli','aug','sept','okt','nov','dets']};
-const LANGS=[['ru','Русский'],['en','English'],['et','Eesti']];
+const LANGS=[['et','Eesti'],['en','English'],['ru','Русский']];
 I18N_DICT.push(["Активность", "Activity", "Aktiivsus"]);
 I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "streak, days", "seeria, päeva"],["Чаще всего ошибались", "Missed most often", "Enim eksisid"],["Повторить трудные", "Review difficult cards", "Korda rasked kaarte"],["На главную", "Back to home", "Avalehele"]);
 I18N_DICT.push(["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"],["Больше не предлагать","Don’t suggest again","Ära paku enam"],["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]);
@@ -1353,7 +1353,7 @@ function setLang(l,save){
   document.documentElement.lang=l;document.title=l==='ru'?TITLE_RU:tr(TITLE_RU);
   if(save){try{localStorage.setItem('corpus.lang',l);}catch(e){}}
 }
-function langRowHtml(){return '<div class="segrow"><span data-noi18n>Язык · Language · Keel</span><div class="seg" role="radiogroup" data-noi18n>'+LANGS.map(o=>'<button role="radio" aria-checked="'+(o[0]===LANG)+'" class="'+(o[0]===LANG?'on':'')+'" data-act="setLang" data-v="'+o[0]+'">'+o[1]+'</button>').join('')+'</div></div>';}
+function langRowHtml(){return '<div class="segrow"><span data-noi18n>Keel · Language · Язык</span><div class="seg" role="radiogroup" data-noi18n>'+LANGS.map(o=>'<button role="radio" aria-checked="'+(o[0]===LANG)+'" class="'+(o[0]===LANG?'on':'')+'" data-act="setLang" data-v="'+o[0]+'">'+o[1]+'</button>').join('')+'</div></div>';}
 function switchLang(l,keep){
   setLang(l,true);if(!keep)dismissOverlay(null);const ch=$('#chat');if(ch){ch.remove();if(CH.open){CH.open=false;document.body.classList.remove('chat-open');}}
   render();qsRebuild();if(I18N)i18nTree(document.body);
@@ -2371,7 +2371,7 @@ async function pickRefPlate(did){
     '<button class="sitem cancel" data-s="">Отмена</button>';
   return await showOverlay(html,ov=>{mountImgFallbacks();$$('[data-pid]',ov).forEach(b=>b.onclick=()=>dismissOverlay(b.dataset.pid));$$('[data-s]',ov).forEach(b=>b.onclick=()=>dismissOverlay(null));});
 }
-function refLabel(pid){const p=plateById(pid);if(!p)return '';const d=deckById(p.deckId);const i=platesOf(p.deckId).indexOf(p);return (d?d.name+', ':'')+'фото '+(i+1);}
+function refLabel(pid){const p=plateById(pid);if(!p)return '';const d=deckById(p.deckId);const i=platesOf(p.deckId).indexOf(p);return (d?d.name+', ':'')+T3('фото ','photo ','foto ')+(i+1);}
 async function tEdit(did,nid,after){
   const d=deckById(did);if(!d)return;
   const cards=nid?S.cards.filter(c=>isText(c)&&(c.noteId||c.id)===nid):[];
@@ -2384,7 +2384,7 @@ async function tEdit(did,nid,after){
       '<label class="fl" for="nF">Термин</label><textarea id="nF" rows="2" placeholder="lig. transversum atlantis">'+esc(dr.front)+'</textarea>'+
       '<label class="fl" for="nB">Описание</label><textarea id="nB" rows="3" placeholder="между massae laterales atlantis; удерживает dens">'+esc(dr.back)+'</textarea>'+
       '<label class="chk"><input type="checkbox" id="nBoth"'+(dr.both?' checked':'')+'> В обе стороны</label>'+
-      '<div class="nref">'+(dr.ref?(u?'<img src="'+esc(u)+'" alt="" data-fb>':'')+'<span class="nref-t">'+esc(refLabel(dr.ref))+'</span><button class="btn line sm" id="nLink">Другое фото</button><button class="btn quiet sm" id="nUnlink">Убрать</button>':'<button class="btn line sm" id="nLink">'+ic('link',16)+'Связать с фото</button><span class="nref-t muted">необязательно — фото покажется вместе с ответом</span>')+'</div>'+
+      '<div class="nref">'+(dr.ref?(u?'<img src="'+esc(u)+'" alt="" data-fb>':'')+'<span class="nref-t">'+esc(refLabel(dr.ref))+'</span><button class="btn line sm" id="nLink">Другое фото</button><button class="btn quiet sm" id="nUnlink">Убрать</button>':'<button class="btn line sm" id="nLink">'+ic('link',16)+'Связать с фото</button><span class="nref-t muted">'+T3('необязательно — фото покажется вместе с ответом','optional — the photo appears together with the answer','valikuline — foto kuvatakse koos vastusega')+'</span>')+'</div>'+
       '<div class="dlg-btns">'+(nid?'<button class="btn line danger ico" id="nDel" aria-label="Удалить карточку">'+ic('trash',18)+'</button>':'')+'<button class="btn line" data-s="0">Отмена</button><button class="btn primary" id="nSave">Сохранить</button></div></div>';
     const v=await showOverlay(html,ov=>{
       mountImgFallbacks();
@@ -2862,7 +2862,7 @@ function sessSummary(){
 }
 function doneHtml(){
   const sm=sessSummary();
-  const scope=SS.hard?{name:'Трудные'}:SS.examId&&examById(SS.examId)?{name:exTitle(examById(SS.examId))}:SS.folderId?folderById(SS.folderId):deckById(SS.deckId);let next='';
+  const scope=SS.hard?{name:tr('Трудные')}:SS.examId&&examById(SS.examId)?{name:exTitle(examById(SS.examId))}:SS.folderId?folderById(SS.folderId):deckById(SS.deckId);let next='';
   if(!SS.cram&&!SS.hard){const ids=sessionDeckIds();const l=S.cards.filter(c=>ids.indexOf(c.deckId)>=0&&!cardExcluded(c)&&(c.type==='learn'||c.type==='relearn')).sort((a,b)=>a.due-b.due)[0];if(l)next=' Следующая карточка будет готова через '+fmtDelay(l.due-Date.now())+'.';}
   return '<div class="full"><header class="bar"><button class="ibtn plain" data-act="studyExit" aria-label="Закрыть">'+ic('close')+'</button><div class="bar-title"><b data-noi18n>'+esc(scope?scope.name:'')+'</b></div>'+gearBtn(1)+'</header>'+
     (SS.limitHit?'<div class="donebox">'+doneMark()+'<h2>Сессия завершена</h2><p class="muted">'+pl(SS.done,'ответ','ответа','ответов')+' за '+pl(Math.max(1,Math.round((Date.now()-SS.t0)/MIN)),'минуту','минуты','минут')+'. Хорошая работа — можно передохнуть или продолжить.</p>'+sm.html+
@@ -9098,7 +9098,7 @@ function hardScopeIds(fid){return fid?decksInFolder(fid).map(d=>d.id):liveDecks(
 function hardPool(fid){return hardCards(hardScopeIds(fid)).filter(c=>!cardExcluded(c));}
 function hardRowHtml(fid){
   const n=hardPool(fid).length;if(!n)return '';
-  return '<button class="deck hardrow" data-act="openHardDeck" data-folder="'+esc(fid||'')+'"><span class="thumb">'+ic('spark',22)+'</span><span class="dinfo"><span class="dname">Трудные</span><span class="dmeta">Собираются автоматически</span></span><span class="cnt">'+n+'</span></button>';
+  return '<button class="deck hardrow" data-act="openHardDeck" data-folder="'+esc(fid||'')+'"><span class="thumb">'+ic('spark',22)+'</span><span class="dinfo"><span class="dname">'+tr('Трудные')+'</span><span class="dmeta">Собираются автоматически</span></span><span class="cnt">'+n+'</span></button>';
 }
 function studyHard(fid){
   const hs=hardPool(fid);if(!hs.length){toast('Трудных карточек нет — отлично');return;}
@@ -9108,7 +9108,7 @@ SCREENS.hard={
   html(){
     const fid=view.folderId&&folderById(view.folderId)?view.folderId:null;
     const hs=hardPool(fid);const mode=META.hardMode||'hideAll';
-    return '<div class="page hardscreen"><header class="pbar"><button class="ibtn" data-act="'+(fid?'openFolderBack':'library')+'" aria-label="Назад">'+ic('back')+'</button><h1>Трудные</h1></header>'+
+    return '<div class="page hardscreen"><header class="pbar"><button class="ibtn" data-act="'+(fid?'openFolderBack':'library')+'" aria-label="Назад">'+ic('back')+'</button><h1>'+tr('Трудные')+'</h1></header>'+
       '<p class="muted hardnote">Собирается автоматически: карточка уходит после 3 верных ответов подряд (по этой карточке)</p>'+
       (hs.length?'<section class="overview">'+modeGridHtml(mode,'hardMode')+'<button class="btn primary big block hardgo" data-act="studyHard" data-folder="'+esc(fid||'')+'">'+ic('spark',18)+'Учить трудные · '+hs.length+'</button></section>'+
         '<div class="sbox"><div class="hardlist">'+hs.slice(0,60).map(c=>'<button class="crow" data-act="openHard" data-id="'+c.id+'"><span class="t'+(isText(c)&&c.dir==='r'?'':' latin')+'">'+esc(cardTitle(c))+'</span><span class="cnt">'+pl(hardN(c),'ошибка','ошибки','ошибок')+'</span>'+(isLeech(c)?'<span class="st st-leech">трудная</span>':'')+'</button>').join('')+'</div></div>':
@@ -9753,7 +9753,7 @@ function openTour(){
     const sh=$('.sheet',ov);
     const draw=()=>{
       const L=tourSlides(),s=L[i],last=i===L.length-1;
-      sh.innerHTML='<div class="tour"><div class="tour-skip"><div class="tour-lang" role="radiogroup" data-noi18n>'+[['ru','RU'],['et','ET'],['en','EN']].map(o=>'<button role="radio" aria-checked="'+(o[0]===LANG)+'" class="'+(o[0]===LANG?'on':'')+'" data-tl="'+o[0]+'">'+o[1]+'</button>').join('')+'</div>'+(last?'':'<button class="btn quiet sm" data-tour="skip">Пропустить</button>')+'</div>'+
+      sh.innerHTML='<div class="tour"><div class="tour-skip"><div class="tour-lang" role="radiogroup" data-noi18n>'+[['et','ET'],['en','EN'],['ru','RU']].map(o=>'<button role="radio" aria-checked="'+(o[0]===LANG)+'" class="'+(o[0]===LANG?'on':'')+'" data-tl="'+o[0]+'">'+o[1]+'</button>').join('')+'</div>'+(last?'':'<button class="btn quiet sm" data-tour="skip">Пропустить</button>')+'</div>'+
         '<div class="tour-ic" aria-hidden="true">'+ic(s.ic,30)+'</div><h3>'+esc(s.t)+'</h3>'+(s.p?'<p class="tour-p">'+esc(s.p)+'</p>':'')+
         '<ul>'+s.li.map(x=>'<li>'+ic(x[0],18)+'<span>'+esc(x[1])+'</span></li>').join('')+'</ul>'+
         (s.speak?'<button class="btn line block" data-tour="speak">'+ic(metaOn('speakOn')?'check':'volume',18)+(metaOn('speakOn')?'Озвучка включена':'Включить озвучку')+'</button>':'')+

@@ -1840,6 +1840,9 @@ async def main():
             check('AI visibility: no nudge before any miss', await pg.evaluate("!document.querySelector('.ainudge')"))
             await nudge_step(1)
             check('AI visibility: after «again» one «Explain with Claude» line appears', await pg.evaluate("document.querySelectorAll('.ainudge').length===1&&/Claude/.test(document.querySelector('.ainudge .go').textContent)&&META.aiNudge.n===1"))
+            check('own AI icon: the «Explain with Claude» line has the AI icon, not the spark', await pg.evaluate("!!document.querySelector('.ainudge .go svg[data-ic=ai]')&&!document.querySelector('.ainudge svg[data-ic=spark]')"))
+            check('own AI icon: the streak counter (not AI) uses the flame', await pg.evaluate("(()=>{const o=SS.streak;SS.streak=5;const h=document.createElement('div');h.innerHTML=countsBar();SS.streak=o;return !!h.querySelector('.streak svg[data-ic=flame]')&&!h.querySelector('svg[data-ic=ai],svg[data-ic=spark]');})()"))
+            check('own AI icon: the editor hint button (Claude) has the AI icon', await pg.evaluate("(()=>{const h=document.createElement('div');h.innerHTML=edHintField({id:'z',term:'ossa',hint:''});return !!h.querySelector('[data-act=edHintAI] svg[data-ic=ai]');})()"))
             await nudge_step(3)
             check('AI visibility: the line goes away after the next answer', await pg.evaluate("!document.querySelector('.ainudge')"))
             await nudge_step(1)
@@ -1935,11 +1938,15 @@ async def main():
             await pg.evaluate("S.sample=window.__smpN;META.aiNudge=null;0")
             src_t = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
             check('AI visibility: new strings have en/et translations', all(x in src_t for x in ['["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"]', '["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]', '["Больше не предлагать","Don’t suggest again","Ära paku enam"]']))
+            check('own AI icon: no ic(\'spark\' left in the source; Claude buttons use ai, OCR/streak/hard do not',
+                  "ic('spark'" not in src_t and "spark:'" not in src_t
+                  and all(("data-act=\"edAI\">'+ic(S.sample&&S.imgOK?'ai'" in src_t, "id=\"hAI\">'+ic('ai'" in src_t, "id=\"cmpAI\">'+ic('ai'" in src_t, "data-act=\"edSugg\">'+ic('scan'" in src_t, "data-act=\"edOCR\" aria-label=\"Распознать текст в рамке\" title=\"Распознать текст в рамке\">'+ic('scan'" in src_t, "icon:'ai',label:t,raw:1" in src_t)))
             await pg.evaluate("go({name:'home'})")
             # ---------- «Hard» virtual deck: tile, all modes, schedule-affecting answers, leaving after 3 correct in a row ----------
             await pg.evaluate("go({name:'library'})")
             await pg.wait_for_selector('.page.tabbed')
             check('hard deck: tile shown in the library while a card has misses', await pg.evaluate("!!document.querySelector('.deck.hardrow[data-act=openHardDeck]') && hardCards(S.decks.map(d=>d.id)).length>0"))
+            check('own AI icon: the «Hard» tile uses the target icon, not AI/spark', await pg.evaluate("!!document.querySelector('.deck.hardrow svg[data-ic=target]')&&!document.querySelector('.deck.hardrow svg[data-ic=ai],.deck.hardrow svg[data-ic=spark]')"))
             # the name of the «Hard» tile and of its screen is a UI string, not a deck name: it is translated; the language switch lists Eesti, English, Русский in that order
             await pg.evaluate("setLang('et');go({name:'library'})")
             await pg.wait_for_timeout(200)

@@ -1939,7 +1939,7 @@ SCREENS.home={
     const banners=(S.cards.length&&S.downloads&&(!META.lastBackup||Date.now()-META.lastBackup>WEEK)?'<button class="banner" data-act="backup" style="display:block;width:100%;text-align:left;border:none">'+(META.lastBackup?'Резервной копии не было больше недели.':'Сделайте резервную копию, чтобы не потерять прогресс.')+' <b>Скачать копию</b></button>':'')+
       (!S.db&&S.ready?'<div class="banner">Хранилище недоступно в этом окне — изменения не сохранятся после перезагрузки.</div>':'')+
       (S.loadErr?'<div class="banner">Не удалось загрузить сохранённые данные. Обновите страницу.</div>':'');
-    const head='<header class="svhead"><div class="brand"><span class="sv-logo" aria-hidden="true"></span>Corpus</div><div class="hbtns"><button class="ibtn sv-round" data-act="tour" aria-label="Что умеет Corpus" title="Что умеет Corpus">'+ic('help')+'</button><button class="ibtn sv-round" data-act="settings" aria-label="Настройки и резервная копия">'+ic('gear')+'</button></div></header>';
+    const head='<header class="svhead"><div class="brand"><span class="sv-logo" aria-hidden="true"></span>Corpus</div><div class="hbtns"><button class="ibtn sv-round" data-act="tour" aria-label="Что умеет Corpus" title="Что умеет Corpus">'+ic('help')+'</button></div></header>';
     if(!S.decks.length){
       const st=starterBtn(true);   // a ready-made folder to start with: the one obvious first step; making a deck or importing stays next to it
       return '<div class="page tabbed svhome">'+head+banners+

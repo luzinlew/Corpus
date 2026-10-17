@@ -705,6 +705,16 @@ async def main():
             await pg.evaluate("META.calm=false;applyLook();go({name:'home'})")
             check('strict mode hides Kostik and the fact of the day', strict == [0, False, True], json.dumps(strict))
 
+            # home header: only the "?" button, no gear; the settings screen is reached through the "More" tab
+            await pg.set_viewport_size({'width': 390, 'height': 844})
+            await pg.evaluate("go({name:'home'})")
+            hb = await pg.evaluate("[...document.querySelectorAll('.svhead .hbtns button')].map(b=>b.dataset.act)")
+            check('home header has only the tour button, no gear', hb == ['tour'], json.dumps(hb))
+            await pg.click('.tabbar [data-v=settings]')
+            await pg.wait_for_function("view.name==='settings'")
+            check('the More tab opens the settings screen', await pg.evaluate("view.name") == 'settings')
+            await pg.evaluate("go({name:'home'})")
+
             # adaptive layout of the home screen: sidebar / narrow rail / floating bar
             lay_js = """(()=>{const r=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return {l:b.left,w:b.width,h:b.height,t:b.top,b:b.bottom};};
               const cs=(s,p)=>{const e=document.querySelector(s);return e?getComputedStyle(e)[p]:null;};

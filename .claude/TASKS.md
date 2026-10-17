@@ -55,6 +55,7 @@
 | T-029 | P1 | Надёжность ИИ: функция пишет ошибки базы в лог; ИИ включается сам, если статус пришёл позже 2,5 с; выкладка функций из GitHub Actions (секрет SUPABASE_ACCESS_TOKEN, проверка загрузки после выкладки) | deployed fd7b395 (2026-10-12); функции выложены из GitHub Actions (прогон 1 — success); откат cb06900 | claude/T-029-ai-reliability |
 | T-042 | P1 | Адаптивная раскладка (вариант B из CORPUS-LAYOUT-SPEC): только вёрстка/стили. Этап 1 — главная на ≥1100 / 900–1099 / <900; этап 2 — остальные вкладки | ready: этапы 1–2 (главная, анимации, Колоды, Курсы, Календарь, Статистика, Ещё) в ветке, не выложено, ждёт «деплой» | claude/T-042-adaptive-layout |
 | T-043 | P1 | Дерганое открытие чата на экране учёбы (iPad ландшафт): margin-right у #app анимируется 0.34 с, раскладка (wide/панель/картинка) пересчитывается только через 360 мс → кадр с панелью поверх картинки и резкий скачок | ready (проверки зелёные), деплой по «деплой» Льва 2026-10-17 | claude/T-043-chat-open-jank |
+| T-044 | P1 | i18n: «Трудные» переводятся (плитка, заголовок, шапка занятия), «необязательно…» и «фото N» в ссылке на фото; порядок языков Eesti, English, Русский везде | deployed (откат c3e50ab) | claude/T-043-i18n-lang-order |
 
 ## Журнал
 
@@ -501,9 +502,13 @@
 - проверки: build --check up to date; e2e implementer 816 PASS ALL PASSED; e2e координатор 816 PASS, exit=0, ALL PASSED; тест «chat open/close не дёргает раскладку» красный на старом коде (changes at [396] ms) и зелёный на новом; процессов после прогонов нет
 - ревью: не запускалось — изменение 24 строки CSS/раскладки без логики данных, ни одно условие cycle (>30 строк логики, импорт/экспорт, web.js/sw.js/supabase) не сработало; тесты добавлены, не изменены
 
-| T-044 | P1 | Награда недели из рейтинга (победитель = 1-е место «Верные», от 3 дней/30 ответов/70% верных, hidden не выигрывает, winner не раскрывает почту) + режим anon («Студент», по умолчанию для всех) + диалог «Остаться анонимным» | deployed 2026-10-17 (откат c3e50ab); SQL rating.sql → reward.sql Лев выполнил | claude/T-043-reward-anon |
+### T-044 Перевод «Трудные» и порядок языков
+- по слову Льва «Deploy» (2026-10-17): влит origin/main (c3e50ab), e2e ALL PASSED (820 PASS), SQL и функций нет
+- откат: c3e50abffea0c1f6ee652e1d6ffefbb8e1b66821 (gh-pages до выкладки)
 
-### T-044 Награда из рейтинга и режим anon
+| T-045 | P1 | Награда недели из рейтинга (победитель = 1-е место «Верные», от 3 дней/30 ответов/70% верных, hidden не выигрывает, winner не раскрывает почту) + режим anon («Студент», по умолчанию для всех) + диалог «Остаться анонимным» | deployed 2026-10-17 (откат c3e50ab); SQL rating.sql → reward.sql Лев выполнил | claude/T-043-reward-anon |
+
+### T-045 Награда из рейтинга и режим anon
 - статус: ready — ветка claude/T-043-reward-anon от main 8859174; Лев сказал «деплой» (2026-10-17), но сайт нельзя выкладывать до SQL: новый клиент вызывает set_profile('anon'), которого в базе ещё нет
 - файлы: supabase/rating.sql, supabase/reward.sql, supabase/reward_rollback.sql, supabase/rating_anon_rollback.sql, supabase/rating_rollback.sql (шапка), tools/rating_test.ts, tools/reward_test.ts (новый), src/corpus.html, index.html, tools/fake-supabase.js, tools/e2e_test.py
 - проверки (координатор, 2026-10-17): build.py --check — up to date; rating_test 218 PASS; reward_test 39 PASS; e2e 834 PASS, ALL PASSED с первого раза
@@ -511,4 +516,4 @@
 - принято: награда считается из клиентских итогов дня (потолки 400 ответов / 150 верных в день); победителя видно в private.ai_awards (answers, good, days); неделя до запуска рейтинга без данных закрывается «никто»
 - порядок для Льва в Supabase → SQL Editor: 1) rating.sql, 2) reward.sql (оба безопасно повторять). Откат в обратном порядке: reward_rollback.sql → rating_anon_rollback.sql → git show 8859174:supabase/rating.sql
 - откат сайта: gh-pages = 8859174466a84f9e2c578c11d36f942de1b0d60f
-- деплой T-044 2026-10-17 по слову Льва: SQL выполнен Львом («Все сделано»), влит origin/main c3e50ab (T-043 чат), e2e на слитом коде 838 PASS ALL PASSED, rating_test 218, reward_test 39; откат сайта: gh-pages = c3e50abffea0c1f6ee652e1d6ffefbb8e1b66821; откат SQL: reward_rollback.sql → rating_anon_rollback.sql → git show 8859174:supabase/rating.sql
+- деплой T-045 2026-10-17 по слову Льва: SQL выполнен Львом («Все сделано»), влит origin/main c3e50ab (T-043 чат), e2e на слитом коде 838 PASS ALL PASSED, rating_test 218, reward_test 39; откат сайта: gh-pages = c3e50abffea0c1f6ee652e1d6ffefbb8e1b66821; откат SQL: reward_rollback.sql → rating_anon_rollback.sql → git show 8859174:supabase/rating.sql

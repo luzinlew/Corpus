@@ -708,7 +708,7 @@
   function curLang() { try { var v = localStorage.getItem('corpus.lang'); if (v === 'ru' || v === 'en' || v === 'et') return v; } catch (e) {} return 'et'; }
   function langRow() {
     var cur = curLang();
-    return '<div class="cw-lang">' + [['ru', 'Русский'], ['en', 'English'], ['et', 'Eesti']].map(function (o) {
+    return '<div class="cw-lang">' + [['et', 'Eesti'], ['en', 'English'], ['ru', 'Русский']].map(function (o) {
       return '<button type="button" data-noi18n data-lang="' + o[0] + '" class="' + (o[0] === cur ? 'on' : '') + '">' + o[1] + '</button>';
     }).join('') + '</div>';
   }

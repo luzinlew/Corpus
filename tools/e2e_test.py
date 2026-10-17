@@ -1922,6 +1922,74 @@ async def main():
             finally:
                 await pg.set_viewport_size({'width': 390, 'height': 844})
                 await asyncio.sleep(0.3)
+            # T-045: one drawer system. >=900 px: chat, settings and menu sheets are right-hand drawers of one width; narrower: bottom sheets; centred dialogs round all 4 corners
+            RECT_JS = """((s)=>{const e=document.querySelector(s);if(!e)return null;const r=e.getBoundingClientRect(),c=getComputedStyle(e);
+              return {l:r.left,t:r.top,r:r.right,b:r.bottom,w:r.width,iw:innerWidth,ih:innerHeight,tl:parseFloat(c.borderTopLeftRadius),tr:parseFloat(c.borderTopRightRadius),bl:parseFloat(c.borderBottomLeftRadius),br:parseFloat(c.borderBottomRightRadius)};})"""
+            async def panel_rects():
+                out = {}
+                await pg.click('.full.study [data-act=askOpen]')
+                await pg.wait_for_selector('#chat.on')
+                await asyncio.sleep(0.6)
+                out['chat'] = await pg.evaluate(RECT_JS + "('#chat')")
+                await pg.click('#chClose')
+                await asyncio.sleep(0.5)
+                await pg.click('.full.study [data-act=qsOpen]')
+                await pg.wait_for_selector('#qs.on')
+                await asyncio.sleep(0.6)
+                out['qs'] = await pg.evaluate(RECT_JS + "('#qs')")
+                await pg.click('#qs [data-act=qsClose]')
+                await asyncio.sleep(0.5)
+                await pg.click('.full.study [data-act=studyMenu]')
+                await pg.wait_for_selector('#layer .ov.in .sheet')
+                await asyncio.sleep(0.7)
+                out['menu'] = await pg.evaluate(RECT_JS + "('#layer .sheet')")
+                await pg.evaluate("dismissOverlay(null)")
+                await asyncio.sleep(0.3)
+                return out
+            for (vw, vh) in ((1440, 900), (1180, 820), (1024, 768), (932, 430)):
+                try:
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(0.5)
+                    pr = await panel_rects()
+                    want = min(420, 0.4 * vw)
+                    ok = all(abs(r['r'] - r['iw']) <= 1 and abs(r['t']) <= 1 and abs(r['b'] - r['ih']) <= 1 and abs(r['w'] - want) <= 1 for r in pr.values())
+                    check(f'drawers {vw}x{vh}: chat, settings and the menu sheet are right-hand drawers, full height, one width = min(420, 40vw)', ok, {k: (round(r['l']), round(r['t']), round(r['r']), round(r['b']), round(r['w'])) for k, r in pr.items()})
+                finally:
+                    await pg.set_viewport_size({'width': 390, 'height': 844})
+                    await asyncio.sleep(0.3)
+            for (vw, vh) in ((820, 1180), (744, 1133), (390, 844), (844, 390)):
+                try:
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(0.5)
+                    pr = await panel_rects()
+                    ok = all(abs(r['b'] - r['ih']) <= 1 and r['t'] >= 0 and r['w'] <= r['iw'] + 1 and r['w'] <= 641 and r['bl'] == 0 and r['br'] == 0 and r['tl'] >= 20 and r['tr'] >= 20 for r in pr.values())
+                    check(f'bottom sheets {vw}x{vh}: chat, settings and the menu sheet sit on the bottom edge, in the window, narrower than 640, rounded on top only', ok, {k: (round(r['l']), round(r['t']), round(r['w']), round(r['b']), r['tl'], r['bl']) for k, r in pr.items()})
+                finally:
+                    await pg.set_viewport_size({'width': 390, 'height': 844})
+                    await asyncio.sleep(0.3)
+            # a centred dialog: «delete the deck» confirmation
+            try:
+                await pg.evaluate("go({name:'deck',deckId:window.__nudgeDeck})")
+                await pg.wait_for_selector('[data-act=deckMenu]')
+                for (vw, vh) in ((1440, 900), (820, 1180)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(0.4)
+                    await pg.click('[data-act=deckMenu]')
+                    await pg.wait_for_selector('#layer .ov.in [data-s=del]')
+                    await asyncio.sleep(0.5)
+                    await pg.click('#layer [data-s=del]')
+                    await pg.wait_for_selector('#layer .dlg')
+                    await asyncio.sleep(0.7)
+                    r = await pg.evaluate(RECT_JS + "('#layer .sheet')")
+                    check(f'centred dialog {vw}x{vh}: all four corners rounded the same (>=20px) and the box is inside the window', r['tl'] == r['tr'] == r['bl'] == r['br'] >= 20 and r['l'] >= 0 and r['t'] >= 0 and r['r'] <= r['iw'] and r['b'] <= r['ih'], r)
+                    await pg.evaluate("dismissOverlay(null)")
+                    await asyncio.sleep(0.3)
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await asyncio.sleep(0.3)
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                await asyncio.sleep(0.4)
             # not on the answer side
             await pg.evaluate('doReveal()')
             await pg.wait_for_function("SS.phase==='answer'", timeout=5000)

@@ -2,6 +2,8 @@
 -- by the activity data (public.docs "stats" / public.activity), not the 1st place of the rating. Only the function is replaced;
 -- the table private.ai_awards and the bonuses already given stay. Paste into Supabase → SQL Editor → Run. Safe to run again.
 -- Needs supabase/stats.sql (public.activity) as before.
+-- Order of rollback: first reward_rollback.sql, then rating_anon_rollback.sql (if the anon mode was rolled back) and only then
+-- rating_rollback.sql; otherwise corpus_week_award refers to objects that are already gone.
 
 create or replace function public.corpus_week_award() returns jsonb
 language plpgsql security definer set search_path = '' as $$

@@ -6,6 +6,8 @@
 -- (anon, real and alias take part; hidden never wins), with at least 3 active days, at least 30 answers and at least 70% of them
 -- correct. The winner has the most points (ties: more answers, then the lower user id). If nobody fits, nobody gets the reward.
 -- The winner's name in the answer is the rating name ("Студент" for anon), never an email.
+-- Order: rating.sql first, then this file (without public.rating_week the function raises rating_not_installed, errcode 55000).
+-- A week with no rating data is closed as "nobody won" for good (the first week after the rating started may be incomplete; accepted).
 -- Size of the reward:  update private.settings set value = '30' where key = 'ai_week_reward';
 -- Back to the previous version (activity-based): supabase/reward_rollback.sql
 
@@ -31,9 +33,12 @@ declare
   u integer; w record; ab public.ai_bonus; fresh boolean := false; aw private.ai_awards;
 begin
   if uid is null then return jsonb_build_object('week', null); end if;
+  if to_regclass('public.rating_week') is null or to_regclass('public.rating_profile') is null then
+    raise exception 'rating_not_installed' using errcode = '55000';
+  end if;
   select * into aw from private.ai_awards where week_start = ws;
   if not found then
-    select coalesce(nullif(value, '')::integer, 20) into u from private.settings where key = 'ai_week_reward';
+    select s.value::integer into u from private.settings s where s.key = 'ai_week_reward' and s.value ~ '^[0-9]{1,6}$';
     u := coalesce(u, 20);
     select r.user_id, r.answers, r.correct, r.active_days into w
       from public.rating_week r left join public.rating_profile p on p.user_id = r.user_id

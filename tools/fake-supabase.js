@@ -141,7 +141,7 @@ const rtEmail = (uid) => { const u = byId(uid); return u ? u.email : (RT.people.
 function rtName(uid) {
   const pr = RT.profiles.get(uid) || {};
   if (pr.mode === 'alias' && pr.alias) return pr.alias;
-  if (!pr.asked) return 'Студент';
+  if (pr.mode !== 'real' || !pr.asked) return 'Студент';   // anon (the default) and hidden: no email name
   const toks = rtEmail(uid).split('@')[0].split(/[-._+0-9]+/).map((x) => x.replace(/[^\p{L}]/gu, '')).filter(Boolean);
   if (!toks.length) return 'Студент';
   const t1 = Array.from(toks[0]).slice(0, 20).join(''), t2 = toks[1];
@@ -153,7 +153,7 @@ function rtRanked(metric, ws) {
   for (const [k, w] of RT.weeks) {
     if (w.week_start !== ws) continue;
     const pr = RT.profiles.get(w.user_id);
-    if ((pr ? pr.mode : 'real') === 'hidden') continue;
+    if ((pr ? pr.mode : 'anon') === 'hidden') continue;
     if (metric === 'points' ? !(w.points > 0) : !(w.answers >= 100 && w.active_days >= 2)) continue;
     rows.push(w);
   }
@@ -398,7 +398,7 @@ http.createServer(async (req, res) => {
         ta += n; tc += o; tp += Math.min(o, 150); if (n > 0) td++; valid++;
       }
       if (!valid) { send(res, 204); return; }
-      if (!RT.profiles.has(uid)) RT.profiles.set(uid, { mode: 'real', alias: null, asked: false });
+      if (!RT.profiles.has(uid)) RT.profiles.set(uid, { mode: 'anon', alias: null, asked: false });
       const key = uid + '|' + ws, old = RT.weeks.get(key);
       if (!old || ta >= old.answers) RT.weeks.set(key, { user_id: uid, week_start: ws, answers: ta, correct: tc, active_days: td, points: tp });
       const cut = new Date(today + 'T00:00:00Z'); cut.setUTCDate(cut.getUTCDate() - 56);
@@ -407,7 +407,7 @@ http.createServer(async (req, res) => {
     }
     if (fn === 'set_profile') {
       const mode = b.p_mode;
-      if (!['real', 'alias', 'hidden'].includes(mode)) { send(res, 400, { code: '22023', message: 'bad_mode', details: null, hint: null }); return; }
+      if (!['anon', 'real', 'alias', 'hidden'].includes(mode)) { send(res, 400, { code: '22023', message: 'bad_mode', details: null, hint: null }); return; }
       let a = null;
       if (mode === 'alias') {
         a = typeof b.p_alias === 'string' ? b.p_alias.trim() : null;
@@ -423,10 +423,10 @@ http.createServer(async (req, res) => {
     }
     const metric = b.p_metric === undefined ? 'points' : b.p_metric;
     if (!['points', 'accuracy', 'errors'].includes(metric)) { send(res, 400, { code: '22023', message: 'bad_metric', details: null, hint: null }); return; }
-    const pr = RT.profiles.get(uid) || { mode: 'real', asked: false }, w = RT.weeks.get(uid + '|' + ws);
+    const pr = RT.profiles.get(uid) || { mode: 'anon', asked: false }, w = RT.weeks.get(uid + '|' + ws);
     const r = rtRanked(metric, ws), me = r.find((x) => x.user_id === uid);
     const item = (x) => ({ rank: x.rn, name: rtName(x.user_id), value: x.val, me: x.user_id === uid });
-    send(res, 200, { week_start: ws, metric, min_answers: 100, min_days: 2, total: r.length,
+    send(res, 200, { week_start: ws, metric, min_answers: 100, min_days: 2, total: r.length, reward_units: 20,
       me: { rank: me ? me.rn : null, value: me ? me.val : null, answers: w ? w.answers : 0, points: w ? w.points : 0, eligible: !!me, mode: pr.mode, asked: !!pr.asked, name: rtName(uid) },
       top: r.filter((x) => x.rn <= 10).map(item), around: me ? r.filter((x) => x.rn >= me.rn - 3 && x.rn <= me.rn + 3).map(item) : [] }); return;
   }

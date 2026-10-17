@@ -212,6 +212,7 @@ button:disabled{cursor:default;opacity:.38}
 .rate-chip.on{background:var(--surface);color:var(--ink);border-color:var(--primary);box-shadow:inset 0 0 0 1px var(--primary)}
 .rate-me{margin:0 0 4px;font-size:14px;line-height:1.4;overflow-wrap:anywhere}
 .rate-hint,.rate-note{margin:0 0 6px;overflow-wrap:anywhere}
+.rate-reward{margin:8px 0 0;font-size:12px;line-height:1.35;overflow-wrap:anywhere}
 .rate-list{list-style:none;margin:8px 0 0;padding:0}
 .rate-r{display:flex;align-items:center;gap:10px;min-height:40px;padding:4px 8px;border-radius:10px;font-size:14.5px}
 .rate-r.me{background:var(--surface2);box-shadow:inset 0 0 0 1.5px var(--primary);font-weight:600}
@@ -1235,6 +1236,7 @@ I18N_DICT.push(["верно", "correct", "õigesti"],["серия, дн.", "stre
 I18N_DICT.push(["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"],["Больше не предлагать","Don’t suggest again","Ära paku enam"],["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]);
 I18N_DICT.push(["Не удалось загрузить рейтинг. Попробуй позже","Couldn’t load the ranking. Try again later","Edetabelit ei õnnestunud laadida. Proovi hiljem"],["Повторить","Try again","Proovi uuesti"]);
 I18N_DICT.push(["Рейтинг недели","Weekly ranking","Nädala edetabel"],["Верные","Correct","Õiged"],["Подготовлен","Prepared","Ettevalmistatud"],["Меньше ошибок","Fewer mistakes","Vähem vigu"],["Ответь на карточки, и ты появишься в таблице","Answer some cards and you will appear in the table","Vasta kaartidele ja ilmud tabelisse"],["Загрузка…","Loading…","Laadin…"],["Нет связи","No connection","Ühendust pole"],["Пока в таблице никого нет","Nobody is in the table yet","Tabelis pole veel kedagi"],["Ты скрыт из рейтинга","You are hidden from the ranking","Sa oled edetabelist peidetud"],["Вернуться в рейтинг","Back to the ranking","Tagasi edetabelisse"],["Как показывать тебя в рейтинге?","How should we show you in the ranking?","Kuidas sind edetabelis näidata?"],["Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.","Until you choose, others see you as “Student”. You can switch the ranking off at any time.","Kuni sa ei vali, näevad teised sind kui „Üliõpilast“. Edetabeli saab igal ajal välja lülitada."],["По имени из почты","By my email name","E-posti nime järgi"],["Придумать псевдоним…","Choose a nickname…","Mõtle välja hüüdnimi…"],["Скрыть меня","Hide me","Peida mind"],["Показывать по имени из почты","Show me by my email name","Näita mind e-posti nime järgi"],["Псевдоним…","Nickname…","Hüüdnimi…"],["Удалить мои данные рейтинга","Delete my ranking data","Kustuta minu edetabeli andmed"],["Удалить мои данные рейтинга?","Delete my ranking data?","Kas kustutada minu edetabeli andmed?"],["Результаты этой недели будут удалены, а тебя не будет в таблицах, пока ты снова не выберешь, как показываться.","This week’s results will be deleted and you will stay out of the tables until you choose how to be shown again.","Selle nädala tulemused kustutatakse ja sind pole tabelites, kuni valid uuesti, kuidas end näidata."],["Псевдоним","Nickname","Hüüdnimi"],["2–20 символов: буквы, цифры, пробел . _ -","2–20 characters: letters, digits, space . _ -","2–20 märki: tähed, numbrid, tühik . _ -"]);
+I18N_DICT.push(["Остаться анонимным («Студент»)","Stay anonymous (“Student”)","Jää anonüümseks („Üliõpilane“)"],["Остаться анонимным","Stay anonymous","Jää anonüümseks"],["Показывать имя из почты","Show my email name","Näita e-posti nime"],["Скрыть из рейтинга","Hide from the ranking","Peida edetabelist"],["Ты уже в рейтинге, другие видят тебя как «Студент». Имя можно открыть в любой момент.","You are already in the ranking, others see you as “Student”. You can show your name at any time.","Sa oled juba edetabelis, teised näevad sind kui „Üliõpilane“. Nime saad avada igal ajal."]);
 I18N_DICT.push(["Начать с готовой папки «Kolju»","Start with the ready-made folder “Kolju”","Alusta valmis kaustaga „Kolju“"]);
 I18N_DICT.push(
   ['Смахните влево или нажмите стрелку влево, чтобы открыть удаление','Swipe left or press Left Arrow to reveal Delete','Kustutamise avamiseks pühi vasakule või vajuta vasaknoolt'],
@@ -2085,7 +2087,8 @@ function rateBodyHtml(r){
   let rows=top.map(x=>rateRowHtml(x,pct)).join('');
   if(tail.length){if(top.length&&tail[0].rank>top[top.length-1].rank+1)rows+='<li class="rate-gap" aria-hidden="true">…</li>';rows+=tail.map(x=>rateRowHtml(x,pct)).join('');}
   return '<p class="rate-me">'+esc(line)+'</p>'+(hint?'<p class="rate-hint muted sm">'+esc(hint)+'</p>':'')+
-    (rows?'<ol class="rate-list">'+rows+'</ol>':'<p class="muted sm rate-note">Пока в таблице никого нет</p>');
+    (rows?'<ol class="rate-list">'+rows+'</ol>':'<p class="muted sm rate-note">Пока в таблице никого нет</p>')+
+    (!pct&&(r.reward_units|0)>0?'<p class="rate-reward muted sm">'+esc(T3('1-е место недели получает +'+(r.reward_units|0)+' запросов к ИИ','1st place of the week gets +'+(r.reward_units|0)+' AI requests','Nädala 1. koht saab +'+(r.reward_units|0)+' TI päringut'))+'</p>':'');
 }
 function rateInner(){
   const r=RATE.res,me=r&&r.me,hidden=!!(me&&me.asked&&me.mode==='hidden');
@@ -2108,7 +2111,7 @@ function rateLoad(){
   a.get(m).then(r=>{
     if(seq!==RATE.seq)return;
     RATE.res=r;RATE.err='';
-    const mm=r&&r.me&&r.me.asked?r.me.mode:null;if(mm&&META.ratingMode!==mm){META.ratingMode=mm;persistMeta();}
+    const mm=r&&r.me&&r.me.mode?r.me.mode:null;   // anon by defaultif(mm&&META.ratingMode!==mm){META.ratingMode=mm;persistMeta();}
     ratePaint();rateMaybeAsk(r);
   },e=>{
     if(seq!==RATE.seq)return;
@@ -2128,7 +2131,7 @@ function rateFail(e){
 function rateApplied(r){
   const m=r&&r.mode;if(m){META.ratingMode=m;persistMeta();}
   const n=String((r&&r.name)||'');
-  toast(m==='hidden'?T3('Ты скрыт из рейтинга','You are hidden from the ranking','Sa oled edetabelist peidetud'):T3('Тебя показывают как «'+n+'»','You are shown as “'+n+'”','Sind näidatakse nimega „'+n+'“'),4000);
+  toast(m==='hidden'?T3('Ты скрыт из рейтинга','You are hidden from the ranking','Sa oled edetabelist peidetud'):m==='anon'?T3('Ты в рейтинге анонимно','You are in the ranking anonymously','Sa oled edetabelis anonüümselt'):T3('Тебя показывают как «'+n+'»','You are shown as “'+n+'”','Sind näidatakse nimega „'+n+'“'),4000);
   rateLoad();
 }
 async function rateSet(mode){
@@ -2146,18 +2149,19 @@ async function rateAlias(){
   }
 }
 async function rateChoose(v){
+  if(v==='anon')return rateSet('anon');
   if(v==='real')return rateSet('real');
   if(v==='hidden')return rateSet('hidden');
   if(v==='alias')return rateAlias();
 }
 function rateAsk(){
-  const html='<div class="dlg"><h3>Как показывать тебя в рейтинге?</h3><p>Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.</p>'+
-    '<div class="rate-ch"><button type="button" class="btn primary block" data-s="real">По имени из почты</button><button type="button" class="btn line block" data-s="alias">Придумать псевдоним…</button><button type="button" class="btn line block" data-s="hidden">Скрыть меня</button><button type="button" class="btn line block" data-s="">Позже</button></div></div>';
+  const html='<div class="dlg"><h3>Как показывать тебя в рейтинге?</h3><p>Ты уже в рейтинге, другие видят тебя как «Студент». Имя можно открыть в любой момент.</p>'+
+    '<div class="rate-ch"><button type="button" class="btn primary block" data-s="anon">Остаться анонимным («Студент»)</button><button type="button" class="btn line block" data-s="real">Показывать имя из почты</button><button type="button" class="btn line block" data-s="alias">Придумать псевдоним…</button><button type="button" class="btn line block" data-s="hidden">Скрыть из рейтинга</button><button type="button" class="btn line block" data-s="">Позже</button></div></div>';
   return showOverlay(html,ov=>{$$('[data-s]',ov).forEach(b=>b.onclick=()=>dismissOverlay(b.dataset.s||null));}).then(v=>v?rateChoose(v):false);
 }
 async function rateGear(){
-  const r=RATE.res,me=r&&r.me,md=me&&me.asked?me.mode:null;
-  const v=await actionSheet('Как показывать тебя в рейтинге?',[{v:'real',label:'Показывать по имени из почты',on:md==='real'},{v:'alias',label:'Псевдоним…',on:md==='alias'},{v:'hidden',label:'Скрыть меня',on:md==='hidden'},{v:'del',label:'Удалить мои данные рейтинга',danger:true}]);
+  const r=RATE.res,me=r&&r.me,md=me&&me.mode&&(me.asked||me.mode!=='real')?me.mode:'anon';   // no profile / not asked: anon
+  const v=await actionSheet('Как показывать тебя в рейтинге?',[{v:'anon',label:'Остаться анонимным',on:md==='anon'},{v:'real',label:'Показывать имя из почты',on:md==='real'},{v:'alias',label:'Псевдоним…',on:md==='alias'},{v:'hidden',label:'Скрыть из рейтинга',on:md==='hidden'},{v:'del',label:'Удалить мои данные рейтинга',danger:true}]);
   if(!v)return;
   if(v!=='del'){await rateChoose(v);return;}
   const ok=await confirmDialog({title:'Удалить мои данные рейтинга?',text:'Результаты этой недели будут удалены, а тебя не будет в таблицах, пока ты снова не выберешь, как показываться.',ok:'Удалить'});
@@ -10026,7 +10030,7 @@ async function bootData(){
   if(S.db&&!S.loadErr)examMigrate();
   S.ready=true;NAV='enter-tab';view={name:'home'};render();
   {const W0=window.CORPUS_WEB;if(W0){W0.onOpenView=v=>{if(S.ready&&SCREENS[v]&&!layer.firstChild&&view.name!=='study'&&view.name!=='editor'){CAL.y=null;go({name:v});}};
-    const award=a=>toast(T3('Вы — самый активный и точный на прошлой неделе! +'+a.units+' запросов ИИ','You were the most active and accurate person last week! +'+a.units+' AI requests','Sa olid eelmisel nädalal kõige aktiivsem ja täpsem! +'+a.units+' TI päringut'),7000);
+    const award=a=>toast(T3('Вы заняли первое место в рейтинге недели! +'+a.units+' запросов ИИ','You took 1st place in last week’s ranking! +'+a.units+' AI requests','Sa said eelmise nädala edetabelis 1. koha! +'+a.units+' TI päringut'),7000);
     W0.onAward=award;if(W0.award){const a=W0.award;W0.award=null;setTimeout(()=>award(a),1500);}
     if(W0.startView&&SCREENS[W0.startView]&&!S.loadErr){const v=W0.startView;W0.clearStartView();CAL.y=null;go({name:v});}}}
   if(META.pushOn)pushSyncSoon(4000);

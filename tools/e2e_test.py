@@ -5410,15 +5410,16 @@ async def main():
             await pg.wait_for_selector('#layer .dlg .rate-ch', timeout=8000)
             check('rating: the block «Рейтинг недели» is on Statistics for a signed-in person', await pg.evaluate("!!document.querySelector('#app #rateBox h3')&&document.querySelector('#rateBox h3').textContent==='Рейтинг недели'"))
             dtxt = await pg.inner_text('#layer .dlg')
-            check('rating: first visit asks «Как показывать тебя в рейтинге?» with the explanation and four buttons', 'Как показывать тебя в рейтинге?' in dtxt and 'другие видят тебя как «Студент»' in dtxt and 'отключить в любой момент' in dtxt
-                  and await pg.eval_on_selector_all('#layer .rate-ch button', 'els => els.map(e => e.textContent)') == ['По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже'], dtxt)
+            check('rating: first visit asks «Как показывать тебя в рейтинге?» with the explanation and five buttons (the first, main one: stay anonymous)', 'Как показывать тебя в рейтинге?' in dtxt and 'Ты уже в рейтинге, другие видят тебя как «Студент». Имя можно открыть в любой момент.' in dtxt
+                  and await pg.eval_on_selector_all('#layer .rate-ch button', 'els => els.map(e => e.textContent)') == ['Остаться анонимным («Студент»)', 'Показывать имя из почты', 'Придумать псевдоним…', 'Скрыть из рейтинга', 'Позже']
+                  and await pg.eval_on_selector('#layer .rate-ch button', 'e => e.classList.contains("primary") && e.dataset.s') == 'anon', dtxt)
             rws = await rt_rows(pg)
             check('rating: until the person answers, others show as «Студент» (no e-mail name), hidden people are absent', any('|Студент|' in r for r in rws) and not any('Secret' in r or 'secret' in r.lower() or 'Hidden' in r for r in rws), json.dumps(rws, ensure_ascii=False))
             check('rating: a name with markup is text, not an element', await pg.evaluate("document.querySelectorAll('#rateBox img').length===0&&!window.__xss") and any('<img src=x' in r for r in rws))
             await pg.click('#layer [data-s=""]')
             await pg.wait_for_function("!document.querySelector('#layer .dlg')")
             prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
-            check('rating: «Позже» does not save the answer (asked stays false)', len(prof) == 1 and prof[0]['asked'] is False, json.dumps(prof))
+            check('rating: «Позже» does not save the answer (asked stays false); without a choice the person is anon', len(prof) == 1 and prof[0]['asked'] is False and prof[0]['mode'] == 'anon', json.dumps(prof))
             await pg.evaluate("go({name:'home'})")
             await pg.evaluate("go({name:'globalStats'})")
             await pg.wait_for_selector('#rateBox .rate-list')
@@ -5528,7 +5529,7 @@ async def main():
             # the dictionary has the new strings (I18N_DICT is not reachable from the page: read the source)
             src = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
             need = ['Рейтинг недели', 'Верные', 'Подготовлен', 'Меньше ошибок', 'Ответь на карточки, и ты появишься в таблице', 'Загрузка…', 'Нет связи', 'Пока в таблице никого нет', 'Ты скрыт из рейтинга', 'Вернуться в рейтинг',
-                    'Как показывать тебя в рейтинге?', 'Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже', 'Не удалось загрузить рейтинг. Попробуй позже', 'Повторить',
+                    'Как показывать тебя в рейтинге?', 'Ты уже в рейтинге, другие видят тебя как «Студент». Имя можно открыть в любой момент.', 'Остаться анонимным («Студент»)', 'Остаться анонимным', 'Показывать имя из почты', 'Скрыть из рейтинга', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже', 'Не удалось загрузить рейтинг. Попробуй позже', 'Повторить',
                     'Показывать по имени из почты', 'Псевдоним…', 'Удалить мои данные рейтинга', 'Удалить мои данные рейтинга?', 'Псевдоним', '2–20 символов: буквы, цифры, пробел . _ -']
             lost = [k for k in need if not re.search(r'\["' + re.escape(k) + r'"\s*,\s*"[^"]+"\s*,\s*"[^"]+"\]', src)]
             check('rating: every new interface string has an [ru, en, et] entry in I18N_DICT', lost == [], json.dumps(lost, ensure_ascii=False))
@@ -5537,7 +5538,7 @@ async def main():
             await pg.click('#rateBox [data-act=rateGear]')
             await pg.wait_for_selector('#layer .sitem')
             items = await pg.eval_on_selector_all('#layer .sitem', 'els => els.map(e => [e.textContent.trim(), e.classList.contains("on")])')
-            check('rating: the gear offers name / nickname / hide / delete, the current choice is ticked', [i[0] for i in items] == ['Показывать по имени из почты', 'Псевдоним…', 'Скрыть меня', 'Удалить мои данные рейтинга', 'Отмена'] and [i[1] for i in items] == [False, True, False, False, False], json.dumps(items, ensure_ascii=False))
+            check('rating: the gear offers anonymous / name / nickname / hide / delete, the current choice is ticked', [i[0] for i in items] == ['Остаться анонимным', 'Показывать имя из почты', 'Псевдоним…', 'Скрыть из рейтинга', 'Удалить мои данные рейтинга', 'Отмена'] and [i[1] for i in items] == [False, False, True, False, False, False], json.dumps(items, ensure_ascii=False))
             await pg.click('#layer [data-s="hidden"]')
             await pg.wait_for_function("document.querySelector('#rateBox [data-act=rateBack]')", timeout=5000)
             check('rating: hidden → «Ты скрыт из рейтинга» and the button to come back, no tables', await pg.inner_text('#rateBox .rate-me') == 'Ты скрыт из рейтинга' and not await pg.query_selector('#rateBox .rate-list') and not await pg.query_selector('#rateBox .rate-chips')
@@ -5560,6 +5561,45 @@ async def main():
             prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
             check('rating: coming back by the e-mail name shows «Rate» (from rate@test.ee), my row is back', prof[0]['mode'] == 'real' and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Rate'"))
             my_id = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee'][0]['id']
+            # --- anonymous: «Студент» in the list, the mode is ticked, the toast; the reward line only under «Верные» ---
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            await pg.click('#layer [data-s="anon"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Ты в рейтинге анонимно')", timeout=5000)
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: «Остаться анонимным» saves anon (asked), my row shows «Студент», no email name', prof[0]['mode'] == 'anon' and prof[0]['asked'] is True and prof[0]['alias'] is None
+                  and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Студент'&&META.ratingMode==='anon'"))
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            items = await pg.eval_on_selector_all('#layer .sitem', 'els => els.map(e => e.classList.contains("on"))')
+            check('rating: the gear ticks «Остаться анонимным» for anon', items == [True, False, False, False, False, False], json.dumps(items))
+            await pg.click('#layer .sitem:last-child')
+            await pg.wait_for_function("!document.querySelector('#layer .sitem')")
+            await pg.click('#rateBox [data-v=points]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-v=points]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-r')", timeout=8000)
+            cap = lambda: pg.evaluate("(document.querySelector('#rateBox .rate-reward')||{}).textContent||null")
+            check('rating: under «Верные» a small line says «1-е место недели получает +20 запросов к ИИ»', await cap() == '1-е место недели получает +20 запросов к ИИ')
+            for mt in ('accuracy', 'errors'):
+                await pg.click(f'#rateBox [data-v={mt}]')
+                await pg.wait_for_function(f"document.querySelector('#rateBox [data-v={mt}]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-me')", timeout=8000)
+                await pg.wait_for_timeout(300)
+                check(f'rating: no reward line under «{mt}»', await cap() is None)
+            await pg.click('#rateBox [data-v=points]')
+            await pg.wait_for_function("document.querySelector('#rateBox .rate-reward')", timeout=8000)
+            for lg, txt in (('en', '1st place of the week gets +20 AI requests'), ('et', 'Nädala 1. koht saab +20 TI päringut')):
+                await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
+                await pg.wait_for_selector('#rateBox .rate-r.me')
+                check(f'rating {lg}: the reward line is translated', await cap() == txt, str(await cap()))
+                await rt_sweep(f'{lg} anon list')
+            await pg.evaluate("setLang('ru',false);go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            await pg.click('#layer [data-s="real"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Тебя показывают как «Rate»')", timeout=5000)
+            src2 = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
+            check('rating: the award toast says 1st place of the ranking in ru / en / et', all(k in src2 for k in ('Вы заняли первое место в рейтинге недели!', 'You took 1st place in last week’s ranking!', 'Sa said eelmise nädala edetabelis 1. koha!')) and 'самый активный и точный на прошлой' not in src2)
             await pg.click('#rateBox [data-act=rateGear]')
             await pg.wait_for_selector('#layer .sitem')
             await pg.click('#layer [data-s="del"]')

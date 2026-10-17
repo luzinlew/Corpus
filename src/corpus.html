@@ -659,6 +659,7 @@ button.ppitem{padding:0;background:none;text-align:left}
 #chat{position:fixed;z-index:90;right:0;top:0;bottom:0;width:min(400px,40vw);display:flex;flex-direction:column;background:var(--surface);border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(0,0,0,.08);transform:translateX(104%);transition:transform .34s cubic-bezier(.2,.9,.25,1);visibility:hidden}
 #chat.on{transform:none;visibility:visible}
 @media (min-width:900px){body.chat-open #app{margin-right:min(400px,40vw);transition:margin .34s cubic-bezier(.2,.9,.25,1)}}
+body #app:has(>.full),body.chat-open #app:has(>.full){transition:none}   /* these screens lay themselves out in JS: the container must change at once, not over .34s */
 @media (max-width:899px){#chat{top:auto;left:0;width:auto;height:64%;border-left:none;border-top:1px solid var(--line);border-radius:20px 20px 0 0;box-shadow:0 -12px 32px rgba(0,0,0,.14);transform:translateY(104%);height:56%}}
 .ch-head{display:flex;align-items:center;gap:6px;padding:10px 10px 8px 14px;border-bottom:1px solid var(--line);flex:none}
 .ch-head b{flex:1;font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
@@ -8921,7 +8922,9 @@ function chatToggle(on){
   CH.open=on;const el=chatEnsure();el.classList.toggle('on',on);document.body.classList.toggle('chat-open',on);
   if(on){chatRender();if(matchMedia('(pointer:fine)').matches)setTimeout(()=>{const i=$('#chIn');if(i)i.focus();},120);}
   else{CH.pin=null;blurActive();}
-  setTimeout(()=>{applyStudyLayout();if(view.name==='crop')layoutCrop();else layoutStage();},360);
+  const relayout=()=>{applyStudyLayout();if(view.name==='crop')layoutCrop();else layoutStage();};
+  if(app.querySelector(':scope>.full')){relayout();if(!RM()&&app.animate&&matchMedia('(min-width:900px)').matches)app.animate([{opacity:.55},{opacity:1}],{duration:200,easing:'ease-out'});}   // JS-laid-out screen: recompute right away, no frames with the old layout
+  setTimeout(relayout,360);
 }
 function chatSync(){if(CH.open)chatRenderCtx();}
 function chatRenderCtx(){

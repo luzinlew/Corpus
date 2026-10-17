@@ -106,7 +106,7 @@ let w = await week(U1);
 ok("days outside the week and in the future are ignored; n capped at 400; ok scaled with it (500/450 -> 400/360)", w.length === 1 && w[0].ws === WS && w[0].answers === 410 && w[0].correct === 365 && w[0].active_days === 2, JSON.stringify(w));
 ok("points use at most 150 correct a day", w[0].points === 5 + 150 && w[0].correct === 5 + 360, JSON.stringify(w));
 const prof = (await sql(`select mode, asked from public.rating_profile where user_id = '${U1}'`)).rows!;
-ok("submit creates a profile (real, not asked)", prof.length === 1 && prof[0].mode === "real" && prof[0].asked === false, JSON.stringify(prof));
+ok("submit creates a profile (anon, not asked)", prof.length === 1 && prof[0].mode === "anon" && prof[0].asked === false, JSON.stringify(prof));
 
 await submit(U2, { "2026-10-13": { n: 300, ok: 300 } });
 w = await week(U2);
@@ -284,7 +284,7 @@ ok("0 points: not in points, but in accuracy", zeroP.me.eligible === false && (a
 const hid = await get(id(122), "points");
 ok("a hidden person sees themselves as not in the table", hid.me.rank === null && hid.me.eligible === false && hid.me.mode === "hidden" && hid.me.asked === true && hid.me.points === 150, JSON.stringify(hid.me));
 const np = await get(NOBODY);
-ok("a person with no profile and no data: real, not asked, default name, not in the table", np.me.mode === "real" && np.me.asked === false && np.me.name === "Студент" && np.me.rank === null && np.me.eligible === false && np.me.answers === 0 && np.around.length === 0, JSON.stringify(np.me));
+ok("a person with no profile and no data: anon, not asked, default name, not in the table", np.me.mode === "anon" && np.me.asked === false && np.me.name === "Студент" && np.me.rank === null && np.me.eligible === false && np.me.answers === 0 && np.around.length === 0, JSON.stringify(np.me));
 // ranking by the exact share: 84.96% on 2500 answers vs 85.04% on 1250 answers (both shown as 85.0)
 {
   const XA = id(130), XB = id(131);
@@ -374,7 +374,7 @@ s = await sp("hidden", "ignored");
 ok("hidden clears the alias", s.ok && s.rows![0].r.alias === null && s.rows![0].r.mode === "hidden", JSON.stringify(s.rows));
 ok("…the stored alias is null", (await sql(`select alias from public.rating_profile where user_id = '${P}'`)).rows![0].alias === null);
 gp = await get(P);
-ok("hidden: not in the table", gp.me.eligible === false && !gp.top.some((t: any) => t.me) && gp.me.name === "Pat P.", JSON.stringify(gp.me));
+ok("hidden: not in the table", gp.me.eligible === false && !gp.top.some((t: any) => t.me) && gp.me.name === "Студент", JSON.stringify(gp.me));
 s = await sp("real", "ignored");
 ok("real clears the alias and shows the email name", s.ok && s.rows![0].r.alias === null && s.rows![0].r.name === "Pat P.", JSON.stringify(s.rows));
 ok("back to real: in the table again", (await get(P)).me.eligible === true);
@@ -383,6 +383,30 @@ ok("submit does not reset the chosen mode", (await get(P)).me.mode === "real" &&
 await sp("hidden");
 await run(P, `select public.corpus_rating_submit('{"2026-10-13":{"n":4,"ok":3}}'::jsonb)`);
 ok("submit keeps 'hidden'", (await get(P)).me.mode === "hidden");
+
+// anon: in the tables as «Студент», alias cleared, asked
+s = await sp("alias", "Pat3");
+s = await sp("anon", "ignored");
+ok("set_profile('anon'): mode anon, alias cleared, name «Студент»", s.ok && s.rows![0].r.mode === "anon" && s.rows![0].r.alias === null && s.rows![0].r.name === "Студент", JSON.stringify(s.rows) + s.msg);
+{
+  const pa = (await sql(`select mode, alias, asked from public.rating_profile where user_id = '${P}'`)).rows![0];
+  ok("…stored as anon, asked true", pa.mode === "anon" && pa.alias === null && pa.asked === true, JSON.stringify(pa));
+  gp = await get(P);
+  ok("anon is in the table under «Студент», no email name", gp.me.mode === "anon" && gp.me.eligible === true && gp.around.some((t: any) => t.me && t.name === "Студент") && !JSON.stringify(gp).includes("Pat P"), JSON.stringify(gp.me));
+  ok("get carries reward_units (default 20)", gp.reward_units === 20, String(gp.reward_units));
+  await sql(`insert into private.settings (key, value) values ('ai_week_reward', '30') on conflict (key) do update set value = '30'`);
+  ok("reward_units follows private.settings ai_week_reward", (await get(P)).reward_units === 30);
+  await sql(`insert into private.settings (key, value) values ('ai_week_reward', 'abc') on conflict (key) do update set value = 'abc'`);
+  ok("…a value that is not a plain number gives 20", (await get(P)).reward_units === 20);
+  await sql(`delete from private.settings where key = 'ai_week_reward'`);
+  ok("…a missing setting gives 20", (await get(P)).reward_units === 20);
+}
+// real with asked=false still shows «Студент» (protection), real with asked=true shows the email name
+await sql(`update public.rating_profile set mode = 'real', asked = false where user_id = '${P}'`);
+ok("real but not asked: «Студент»", (await get(P)).me.name === "Студент");
+await sql(`update public.rating_profile set mode = 'real', asked = true where user_id = '${P}'`);
+ok("real and asked: the email name", (await get(P)).me.name === "Pat P.");
+await sp("anon");
 
 // ---- delete_mine: results go, the person stays hidden until they choose again ----
 await sql(`delete from public.rating_week where user_id = '${P}'`);
@@ -427,6 +451,29 @@ const snap0 = await snap();
 const e3 = await tryExec(rating);
 ok("rating.sql on a filled database: no errors, all rows kept", e3 === "" && snap0.length > 500 && (await snap()) === snap0, e3);
 ok("…and the functions still work", (await get(ME)).total > 0);
+
+// ---- migration from the previous model: check without 'anon', default 'real', rows real+asked=false ----
+{
+  const M1 = id(500), M2 = id(501), M3 = id(502);
+  await sql(`insert into auth.users values ('${M1}', 'mig.one@x.ee'), ('${M2}', 'mig.two@x.ee'), ('${M3}', 'mig.three@x.ee')`);
+  await db.exec(`update public.rating_profile set mode = 'real', asked = false where mode = 'anon';
+    alter table public.rating_profile drop constraint rating_profile_mode_check;
+    alter table public.rating_profile add constraint rating_profile_mode_check check (mode in ('real', 'alias', 'hidden'));
+    alter table public.rating_profile alter column mode set default 'real'`);
+  ok("old model: 'anon' is refused by the old check", !!(await tryExec(`insert into public.rating_profile (user_id, mode) values ('${M1}', 'anon')`)));
+  await sql(`insert into public.rating_profile (user_id, mode, asked) values ('${M1}', 'real', false), ('${M2}', 'real', true)`);
+  await sql(`insert into public.rating_profile (user_id, mode, alias, asked) values ('${M3}', 'alias', 'Mig3', true)`);
+  const eM = await tryExec(rating);
+  const mp = (await sql(`select user_id, mode, asked from public.rating_profile where user_id in ('${M1}','${M2}','${M3}') order by user_id`)).rows!;
+  ok("migration: real+asked=false -> anon; real+asked, alias stay", eM === "" && mp.map((x) => x.mode).join() === "anon,real,alias", eM + JSON.stringify(mp));
+  ok("…default is anon, the new check accepts 'anon'", (await tryExec(`insert into public.rating_profile (user_id) select '${id(503)}' where false`)) === ""
+    && (await sql(`select column_default d from information_schema.columns where table_name = 'rating_profile' and column_name = 'mode'`)).rows![0].d.includes("anon"));
+  ok("…and the check still refuses unknown modes", !!(await tryExec(`insert into public.rating_profile (user_id, mode) values ('${M1}', 'x') on conflict (user_id) do update set mode = 'x'`)));
+  const eM2 = await tryExec(rating);
+  const mp2 = (await sql(`select mode from public.rating_profile where user_id in ('${M1}','${M2}','${M3}') order by user_id`)).rows!;
+  ok("migration is repeatable: second run changes nothing", eM2 === "" && mp2.map((x) => x.mode).join() === "anon,real,alias");
+  await sql(`delete from auth.users where id in ('${M1}','${M2}','${M3}')`);
+}
 
 // ---- rollback ----
 const r1 = await tryExec(rollback), r2 = await tryExec(rollback);

@@ -2018,6 +2018,19 @@ async def main():
             await pg.evaluate("go({name:'library'})")
             await pg.wait_for_selector('.page.tabbed')
             check('hard deck: tile shown in the library while a card has misses', await pg.evaluate("!!document.querySelector('.deck.hardrow[data-act=openHardDeck]') && hardCards(S.decks.map(d=>d.id)).length>0"))
+            # the name of the «Hard» tile and of its screen is a UI string, not a deck name: it is translated; the language switch lists Eesti, English, Русский in that order
+            await pg.evaluate("setLang('et');go({name:'library'})")
+            await pg.wait_for_timeout(200)
+            check('hard deck: tile name is translated in Estonian', await pg.evaluate("document.querySelector('.deck.hardrow .dname').textContent==='Rasked'"))
+            await pg.click('.deck.hardrow')
+            await pg.wait_for_selector('.hardscreen')
+            check('hard deck: screen title is translated in Estonian', await pg.evaluate("document.querySelector('.hardscreen h1').textContent==='Rasked'"))
+            await pg.evaluate("setLang('en');go({name:'library'})")
+            await pg.wait_for_timeout(200)
+            check('hard deck: tile name is translated in English', await pg.evaluate("document.querySelector('.deck.hardrow .dname').textContent==='Hard ones'"))
+            await pg.evaluate("setLang('ru');go({name:'settings'})")
+            check('language switch order: Eesti, English, Русский', await pg.evaluate("[...document.querySelectorAll('#app [data-act=setLang]')].map(b=>b.dataset.v).join()==='et,en,ru'"))
+            await pg.evaluate("go({name:'library'})")
             await pg.evaluate("go({name:'folder',folderId:S.folders[0].id})")
             await pg.evaluate("S.cards.forEach(c=>{c.miss=0;c.lapses=0;delete c.lapsesBase;delete c.hardOk;})")
             await pg.evaluate("go({name:'library'})")
@@ -5507,15 +5520,16 @@ async def main():
             await pg.wait_for_selector('#layer .dlg .rate-ch', timeout=8000)
             check('rating: the block «Рейтинг недели» is on Statistics for a signed-in person', await pg.evaluate("!!document.querySelector('#app #rateBox h3')&&document.querySelector('#rateBox h3').textContent==='Рейтинг недели'"))
             dtxt = await pg.inner_text('#layer .dlg')
-            check('rating: first visit asks «Как показывать тебя в рейтинге?» with the explanation and four buttons', 'Как показывать тебя в рейтинге?' in dtxt and 'другие видят тебя как «Студент»' in dtxt and 'отключить в любой момент' in dtxt
-                  and await pg.eval_on_selector_all('#layer .rate-ch button', 'els => els.map(e => e.textContent)') == ['По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже'], dtxt)
+            check('rating: first visit asks «Как показывать тебя в рейтинге?» with the explanation and five buttons (the first, main one: stay anonymous)', 'Как показывать тебя в рейтинге?' in dtxt and 'Ты уже в рейтинге, другие видят тебя как «Студент». Имя можно открыть в любой момент.' in dtxt
+                  and await pg.eval_on_selector_all('#layer .rate-ch button', 'els => els.map(e => e.textContent)') == ['Остаться анонимным («Студент»)', 'Показывать имя из почты', 'Придумать псевдоним…', 'Скрыть из рейтинга', 'Позже']
+                  and await pg.eval_on_selector('#layer .rate-ch button', 'e => e.classList.contains("primary") && e.dataset.s') == 'anon', dtxt)
             rws = await rt_rows(pg)
             check('rating: until the person answers, others show as «Студент» (no e-mail name), hidden people are absent', any('|Студент|' in r for r in rws) and not any('Secret' in r or 'secret' in r.lower() or 'Hidden' in r for r in rws), json.dumps(rws, ensure_ascii=False))
             check('rating: a name with markup is text, not an element', await pg.evaluate("document.querySelectorAll('#rateBox img').length===0&&!window.__xss") and any('<img src=x' in r for r in rws))
             await pg.click('#layer [data-s=""]')
             await pg.wait_for_function("!document.querySelector('#layer .dlg')")
             prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
-            check('rating: «Позже» does not save the answer (asked stays false)', len(prof) == 1 and prof[0]['asked'] is False, json.dumps(prof))
+            check('rating: «Позже» does not save the answer (asked stays false); without a choice the person is anon', len(prof) == 1 and prof[0]['asked'] is False and prof[0]['mode'] == 'anon', json.dumps(prof))
             await pg.evaluate("go({name:'home'})")
             await pg.evaluate("go({name:'globalStats'})")
             await pg.wait_for_selector('#rateBox .rate-list')
@@ -5616,6 +5630,10 @@ async def main():
                 await pg.evaluate('void rateAsk()')
                 await pg.wait_for_selector('#layer .rate-ch')
                 await rt_sweep(f'{lg} first-visit dialog', '#layer')
+                dl = await pg.evaluate("""(()=>{const d=document.querySelector('#layer .dlg'),bs=[...d.querySelectorAll('.rate-ch button')],de=document.documentElement;
+                  return {n:bs.length,w:window.innerWidth,doc:de.scrollWidth,dlg:d.scrollWidth<=d.clientWidth,right:Math.max(...bs.map(b=>b.getBoundingClientRect().right)),
+                    small:bs.filter(b=>b.getBoundingClientRect().height<40).map(b=>b.textContent),clipped:bs.filter(b=>b.scrollWidth>b.clientWidth+1||b.scrollHeight>b.clientHeight+1).map(b=>b.textContent)}})()""")
+                check(f'rating {lg}: the first-visit dialog at 390 px: 5 buttons, no sideways scroll, buttons at least 40 px high, no clipped text', dl['n'] == 5 and dl['w'] == 390 and dl['doc'] <= 390 and dl['dlg'] and dl['right'] <= 390 and dl['small'] == [] and dl['clipped'] == [], json.dumps(dl, ensure_ascii=False))
                 await pg.click('#layer [data-s="alias"]')
                 await pg.wait_for_selector('#dlgIn')
                 await rt_sweep(f'{lg} nickname dialog', '#layer')
@@ -5625,7 +5643,7 @@ async def main():
             # the dictionary has the new strings (I18N_DICT is not reachable from the page: read the source)
             src = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
             need = ['Рейтинг недели', 'Верные', 'Подготовлен', 'Меньше ошибок', 'Ответь на карточки, и ты появишься в таблице', 'Загрузка…', 'Нет связи', 'Пока в таблице никого нет', 'Ты скрыт из рейтинга', 'Вернуться в рейтинг',
-                    'Как показывать тебя в рейтинге?', 'Пока ты не выберешь, другие видят тебя как «Студент». Рейтинг можно отключить в любой момент.', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже', 'Не удалось загрузить рейтинг. Попробуй позже', 'Повторить',
+                    'Как показывать тебя в рейтинге?', 'Ты уже в рейтинге, другие видят тебя как «Студент». Имя можно открыть в любой момент.', 'Остаться анонимным («Студент»)', 'Остаться анонимным', 'Показывать имя из почты', 'Скрыть из рейтинга', 'По имени из почты', 'Придумать псевдоним…', 'Скрыть меня', 'Позже', 'Не удалось загрузить рейтинг. Попробуй позже', 'Повторить',
                     'Показывать по имени из почты', 'Псевдоним…', 'Удалить мои данные рейтинга', 'Удалить мои данные рейтинга?', 'Псевдоним', '2–20 символов: буквы, цифры, пробел . _ -']
             lost = [k for k in need if not re.search(r'\["' + re.escape(k) + r'"\s*,\s*"[^"]+"\s*,\s*"[^"]+"\]', src)]
             check('rating: every new interface string has an [ru, en, et] entry in I18N_DICT', lost == [], json.dumps(lost, ensure_ascii=False))
@@ -5634,7 +5652,7 @@ async def main():
             await pg.click('#rateBox [data-act=rateGear]')
             await pg.wait_for_selector('#layer .sitem')
             items = await pg.eval_on_selector_all('#layer .sitem', 'els => els.map(e => [e.textContent.trim(), e.classList.contains("on")])')
-            check('rating: the gear offers name / nickname / hide / delete, the current choice is ticked', [i[0] for i in items] == ['Показывать по имени из почты', 'Псевдоним…', 'Скрыть меня', 'Удалить мои данные рейтинга', 'Отмена'] and [i[1] for i in items] == [False, True, False, False, False], json.dumps(items, ensure_ascii=False))
+            check('rating: the gear offers anonymous / name / nickname / hide / delete, the current choice is ticked', [i[0] for i in items] == ['Остаться анонимным', 'Показывать имя из почты', 'Псевдоним…', 'Скрыть из рейтинга', 'Удалить мои данные рейтинга', 'Отмена'] and [i[1] for i in items] == [False, False, True, False, False, False], json.dumps(items, ensure_ascii=False))
             await pg.click('#layer [data-s="hidden"]')
             await pg.wait_for_function("document.querySelector('#rateBox [data-act=rateBack]')", timeout=5000)
             check('rating: hidden → «Ты скрыт из рейтинга» and the button to come back, no tables', await pg.inner_text('#rateBox .rate-me') == 'Ты скрыт из рейтинга' and not await pg.query_selector('#rateBox .rate-list') and not await pg.query_selector('#rateBox .rate-chips')
@@ -5657,6 +5675,43 @@ async def main():
             prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
             check('rating: coming back by the e-mail name shows «Rate» (from rate@test.ee), my row is back', prof[0]['mode'] == 'real' and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Rate'"))
             my_id = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee'][0]['id']
+            # --- anonymous: «Студент» in the list, the mode is ticked, the toast; the reward line only under «Верные» ---
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            await pg.click('#layer [data-s="anon"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Ты в рейтинге анонимно')", timeout=5000)
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            prof = [p for p in rt_api()['profiles'] if p['email'] == 'rate@test.ee']
+            check('rating: «Остаться анонимным» saves anon (asked), my row shows «Студент», no email name', prof[0]['mode'] == 'anon' and prof[0]['asked'] is True and prof[0]['alias'] is None
+                  and await pg.evaluate("document.querySelector('#rateBox .rate-r.me .rate-nm').textContent==='Студент'&&META.ratingMode==='anon'"))
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            items = await pg.eval_on_selector_all('#layer .sitem', 'els => els.map(e => e.classList.contains("on"))')
+            check('rating: the gear ticks «Остаться анонимным» for anon', items == [True, False, False, False, False, False], json.dumps(items))
+            await pg.click('#layer .sitem:last-child')
+            await pg.wait_for_function("!document.querySelector('#layer .sitem')")
+            await pg.click('#rateBox [data-v=points]')
+            await pg.wait_for_function("document.querySelector('#rateBox [data-v=points]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-r')", timeout=8000)
+            cap = lambda: pg.evaluate("(document.querySelector('#rateBox .rate-reward')||{}).textContent||null")
+            check('rating: under «Верные» a small line says «Награда за 1-е место недели: +20 запросов к ИИ (от 3 дней занятий и 70% верных)»', await cap() == 'Награда за 1-е место недели: +20 запросов к ИИ (от 3 дней занятий и 70% верных)')
+            for mt in ('accuracy', 'errors'):
+                await pg.click(f'#rateBox [data-v={mt}]')
+                await pg.wait_for_function(f"document.querySelector('#rateBox [data-v={mt}]').getAttribute('aria-pressed')==='true'&&document.querySelector('#rateBox .rate-me')", timeout=8000)
+                await pg.wait_for_timeout(300)
+                check(f'rating: no reward line under «{mt}»', await cap() is None)
+            await pg.click('#rateBox [data-v=points]')
+            await pg.wait_for_function("document.querySelector('#rateBox .rate-reward')", timeout=8000)
+            for lg, txt in (('en', 'Reward for 1st place of the week: +20 AI requests (from 3 days of study and 70% correct)'), ('et', 'Nädala 1. koha preemia: +20 TI päringut (alates 3 õppepäevast ja 70% õigetest)')):
+                await pg.evaluate(f"setLang('{lg}',false);go({{name:'home'}});go({{name:'globalStats'}})")
+                await pg.wait_for_selector('#rateBox .rate-r.me')
+                check(f'rating {lg}: the reward line is translated', await cap() == txt, str(await cap()))
+                await rt_sweep(f'{lg} anon list')
+            await pg.evaluate("setLang('ru',false);go({name:'home'});go({name:'globalStats'})")
+            await pg.wait_for_selector('#rateBox .rate-r.me')
+            await pg.click('#rateBox [data-act=rateGear]')
+            await pg.wait_for_selector('#layer .sitem')
+            await pg.click('#layer [data-s="real"]')
+            await pg.wait_for_function("[...document.querySelectorAll('.toast')].some(t=>t.textContent==='Тебя показывают как «Rate»')", timeout=5000)
             await pg.click('#rateBox [data-act=rateGear]')
             await pg.wait_for_selector('#layer .sitem')
             await pg.click('#layer [data-s="del"]')
@@ -5733,6 +5788,71 @@ async def main():
             check('rating: …and nothing is called again in this session', rq == [] and not await pg.query_selector('#rateBox'), json.dumps(rq))
             check('rating: …without errors in the console', errs_t[n_err:] == [], '; '.join(errs_t[n_err:])[:300])
             rt_api('?mode=')
+            # --- the winner's toast (corpus_week_award is driven by /__rating?award=…): once per week, in three languages; none for others / no week ---
+            AW = {'week': '2026-10-12', 'me': True, 'fresh': True, 'units': 20, 'winner': 'Студент', 'balance': 20}
+            award_txt = {'ru': 'Вы заняли первое место в рейтинге недели! +20 запросов ИИ', 'en': 'You took 1st place in last week’s ranking! +20 AI requests', 'et': 'Sa said eelmise nädala edetabelis 1. koha! +20 TI päringut'}
+            async def award_ctx(lg, award):
+                rt_api('?award=' + urllib.parse.quote(json.dumps(award) if award is not None else ''))
+                c2, p2, e2 = await open_ctx()
+                await c2.add_init_script(f"try{{localStorage.setItem('corpus.lang','{lg}');}}catch(e){{}}")
+                await p2.goto(SITE)
+                await p2.wait_for_selector('.cw-auth input[name=email]')
+                await p2.fill('input[name=email]', 'rate@test.ee')
+                await p2.fill('input[name=password]', 'kolju2026')
+                await p2.click('.cw-go')
+                await app_ready(p2)
+                return c2, p2, e2
+            toasts = "[...document.querySelectorAll('.toast')].map(t=>t.textContent)"
+            for lg in ('ru', 'en', 'et'):
+                c2, p2, e2 = await award_ctx(lg, AW)
+                await p2.wait_for_function(f"{toasts}.some(t=>t==={json.dumps(award_txt[lg], ensure_ascii=False)})", timeout=8000)
+                check(f'award {lg}: the winner is told once with the reward ({lg} text)', await p2.evaluate("localStorage.getItem('corpus.award')") == '2026-10-12')
+                await p2.reload()
+                await app_ready(p2)
+                await p2.wait_for_timeout(3500)
+                check(f'award {lg}: after a reload the toast is not shown again', not any(award_txt[lg] == t for t in await p2.evaluate(toasts)) and await p2.evaluate("localStorage.getItem('corpus.award')") == '2026-10-12')
+                await c2.close()
+            for tag, aw in (('me is false', dict(AW, me=False)), ('week is null', {'week': None})):
+                c2, p2, e2 = await award_ctx('ru', aw)
+                await p2.wait_for_timeout(3500)
+                check(f'award: {tag} → no toast, nothing remembered', not any('место в рейтинге' in t for t in await p2.evaluate(toasts)) and await p2.evaluate("localStorage.getItem('corpus.award')") is None)
+                await c2.close()
+            rt_api('?award=')
+
+            # --- the cached mode follows the server: changed behind the client's back, anon ↔ hidden; hidden does not send, anon does ---
+            def mode_ctx(mode):
+                rt_api('', [{'email': 'rate@test.ee', 'mode': mode, 'asked': True}])
+            c3, p3, e3 = await open_ctx()
+            await c3.add_init_script("window.__RATE_TEST__=true;")
+            mode_ctx('anon')
+            await p3.goto(SITE)
+            await p3.wait_for_selector('.cw-auth input[name=email]')
+            await p3.fill('input[name=email]', 'rate@test.ee')
+            await p3.fill('input[name=password]', 'kolju2026')
+            await p3.click('.cw-go')
+            await app_ready(p3)
+            send_try = "localStorage.removeItem('corpus.ratingAt.'+CORPUS_WEB.uid);S.decks.some(d=>d.id==='rd1')||S.decks.push({id:'rd1',name:'Rating',newPerDay:20,mode:'hideAll',createdAt:Date.now()});S.stats.rd1={id:'rd1',days:{[dayKey()]:{n:33,ok:20}}};rateSubmit()"
+            await p3.evaluate("go({name:'globalStats'})")
+            await p3.wait_for_function("META.ratingMode==='anon'", timeout=8000)
+            check('rating: the server says anon → the cached mode is anon', await p3.evaluate("META.ratingMode") == 'anon')
+            mode_ctx('hidden')
+            await p3.reload(); await app_ready(p3)
+            await p3.evaluate("go({name:'globalStats'})")
+            await p3.wait_for_function("META.ratingMode==='hidden'", timeout=8000)
+            await p3.wait_for_timeout(3200)
+            n0 = len(rt_api()['submits'])
+            await p3.evaluate(send_try); await p3.wait_for_timeout(800)
+            check('rating: changed to hidden on the server → the cache follows and nothing is sent', len(rt_api()['submits']) == n0 and await p3.evaluate("META.ratingMode")=='hidden')
+            mode_ctx('anon')
+            await p3.reload(); await app_ready(p3)
+            await p3.evaluate("go({name:'globalStats'})")
+            await p3.wait_for_function("META.ratingMode==='anon'", timeout=8000)
+            await p3.wait_for_timeout(3200)
+            n0 = len(rt_api()['submits'])
+            await p3.evaluate(send_try); await p3.wait_for_timeout(800)
+            check('rating: back to anon on the server → the cache follows and the week is sent again', len(rt_api()['submits']) == n0 + 1, str((n0, len(rt_api()['submits']))))
+            await c3.close()
+
             # --- the real branch: without the test switches the first-visit question appears on Statistics (asked=false) ---
             import base64 as _b64
             tok_p = signup_token('prod@test.ee')

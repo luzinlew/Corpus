@@ -1893,6 +1893,25 @@ async def main():
             await pg.wait_for_selector('.full.study')
             await nudge_step(1)
             check('AI visibility: another day → the line is back and the counter restarts', await pg.evaluate("!!document.querySelector('.ainudge')&&META.aiNudge.n===1&&META.aiNudge.day===window.__today"))
+            # T-043: opening/closing the chat must not make the study layout jump (wide <-> narrow only at once, the picture does not change width later)
+            SAMPLE_JS = """(async(on)=>{const q=()=>document.querySelector('.full.study>.vpwrap,.full.study>.tstage'),w=()=>{const e=q();return e?Math.round(e.getBoundingClientRect().width):-1;};
+              const out=[{t:-1,wide:app.classList.contains('wide'),w:w()}],t0=performance.now();
+              (on?document.querySelector('.full.study [data-act=askOpen]'):document.querySelector('#chClose')).click();
+              await new Promise(res=>{const k=()=>{const t=performance.now()-t0;out.push({t:Math.round(t),wide:app.classList.contains('wide'),w:w()});if(t<600)setTimeout(k,30);else res();};k();});return out;})"""
+            try:
+                await pg.set_viewport_size({'width': 1024, 'height': 768})
+                await asyncio.sleep(0.4)
+                for on in (True, False):
+                    smp = await pg.evaluate(SAMPLE_JS + ('(true)' if on else '(false)'))
+                    chg = [x['t'] for i, x in enumerate(smp) if i and x['wide'] != smp[i-1]['wide']]
+                    late = [x['w'] for x in smp if x['t'] >= 150]
+                    nm = 'open' if on else 'close'
+                    check(f'chat {nm} (1024x768): the layout switches wide/narrow at most once, right away', len(chg) <= 1 and all(t <= 150 for t in chg) and smp[0]['wide'] != smp[-1]['wide'], f'changes at {chg} ms, wide {smp[0]["wide"]}->{smp[-1]["wide"]}')
+                    check(f'chat {nm} (1024x768): the picture width stays the same after 150 ms', bool(late) and max(late) - min(late) <= 1 and late[0] > 0, f'{min(late)}..{max(late)}')
+                    await asyncio.sleep(0.2)
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await asyncio.sleep(0.3)
             # not on the answer side
             await pg.evaluate('doReveal()')
             await pg.wait_for_function("SS.phase==='answer'", timeout=5000)

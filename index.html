@@ -1461,6 +1461,7 @@ function cardById(id){
 const folderById=id=>S.folders.find(f=>f.id===id);
 const decksInFolder=fid=>S.decks.filter(d=>d.folderId===fid).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
 function plateExcluded(p){return !!(p&&p.excluded);}
+const cardUnframed=c=>!!(c&&c.knowledgeId&&c.kind!=='text'&&!(c.w>0));   // a card of a lesson v2 whose structure has no frame on the picture (not excluded from learning)
 function cardExcluded(c){return plateExcluded(plateById(c.plateId))||(c.shape==='arrow'&&!c.term)||!!c.noframe;}   // noframe: a card of a built course that has no frame yet
 /* one label on several photos of a deck: cards that share `grp` are learned as ONE card —
    a rating applies to all of them, queues and counts take one of them, and each review shows one of the photos */
@@ -2723,7 +2724,7 @@ function startSession(scope,cram,subset,mode){
   const order={};plates.forEach((p,i)=>order[p.id]=i);
   const groups={};pool.filter(c=>c.type==='new').forEach(c=>(groups[c.plateId]=groups[c.plateId]||[]).push(c));
   const inPool=new Set(pool.map(c=>c.id)),intro=!cram&&!scope.hard&&introOn();
-  const newOrder=Object.keys(groups).sort((a,b)=>(order[a]||0)-(order[b]||0)).reduce((acc,k)=>{const plan=intro&&introPlan(cardsOfPlate(k).filter(c=>!cardExcluded(c)&&inPool.has(c.id)));return acc.concat(plan?introNewOrder(plan,id=>inPool.has(id)):shuffle(groups[k]).map(c=>c.id));},[]);
+  const newOrder=Object.keys(groups).sort((a,b)=>(order[a]||0)-(order[b]||0)).reduce((acc,k)=>{const plan=intro&&introPlan(cardsOfPlate(k).filter(c=>!cardExcluded(c)&&!cardUnframed(c)&&inPool.has(c.id)));return acc.concat(plan?introNewOrder(plan,id=>inPool.has(id)).concat(shuffle(groups[k].filter(cardUnframed)).map(c=>c.id)):shuffle(groups[k]).map(c=>c.id));},[]);
   SS={deckId:scope.deckId||null,deckIds:deckIds,folderId:scope.folderId||null,examId:scope.examId||null,mode:mode,cram:!!cram,hard:!!scope.hard,hardFolderId:scope.hardFolderId||null,cramQueue:(cram||scope.hard)?weakOrder(uniqGrp(pool)):[],
     reviewOrder:weakOrder(pool.filter(c=>c.type==='review'&&c.due<eod)),newOrder:newOrder,
     exclude:subset?new Set(S.cards.filter(c=>deckIds.indexOf(c.deckId)>=0&&pool.indexOf(c)<0).map(c=>c.id)):null,
@@ -2778,8 +2779,9 @@ function setupCard(){
       if(m==='choice'){const ds=distractors(c);if(!ds.length){m='hideAll';SS.fallback='few';}else SS.opts=shuffle([aOf(c)].concat(ds));}
       SS.cm=m;return;
     }
-    if(m==='mixed'){const ms=['hideAll'];if(c.term){ms.push('type');if(!isArrow(c)||cardsOfPlate(c.plateId).length>1)ms.push('find');if(distractors(c).length)ms.push('choice');}m=ms[Math.floor(Math.random()*ms.length)];}
+    if(m==='mixed'){const ms=['hideAll'];if(c.term){ms.push('type');if((!isArrow(c)||cardsOfPlate(c.plateId).length>1)&&!cardUnframed(c))ms.push('find');if(distractors(c).length)ms.push('choice');}m=ms[Math.floor(Math.random()*ms.length)];}
     else if((m==='choice'||m==='type'||m==='find')&&!c.term){m='hideAll';SS.fallback=true;}
+    else if((m==='find'||m==='hideOne')&&cardUnframed(c))m='hideAll';   // no frame to look for or to hide
     if(m==='choice'){const ds=distractors(c);if(!ds.length){m='hideAll';SS.fallback=true;}else SS.opts=shuffle([c.term].concat(ds));}
     SS.cm=m;
   }catch(e){throw tagErr('setupCard',e);}
@@ -2812,7 +2814,7 @@ function studyMasks(){
     else if(t){if(ans)cls+=' open';else{cls+=' tgt';inner='?';}}
     else if(SS.peek.has(o.id))cls+=' peek';
     else if(META.seeThrough&&m==='hideAll')cls+=' ghost';
-    return rectsOf(o).map(g=>'<div class="'+cls+'" data-id="'+o.id+'" style="'+geo(g)+'">'+inner+'</div>').join('');
+    return rectsOf(o).filter(g=>g.w>0).map(g=>'<div class="'+cls+'" data-id="'+o.id+'" style="'+geo(g)+'">'+inner+'</div>').join('');
   }).join('')+(arr.length?arrowSvg(arr,plateAspect(p),pxUnit($('#stage'))):'');
 }
 /* the drag ring is a gesture: with touch gestures off the plain buttons are back */
@@ -2840,16 +2842,21 @@ function textPanel(c){
   else if(m==='choice')top=SS.result?'<div class="verdict ok">Верно</div>':'<div class="verdict bad">Неверно: вы выбрали <span'+(al?' class="latin"':'')+'>'+esc(SS.picked)+'</span></div>';
   return top+rateHtml(c);
 }
+function unfNoteHtml(c){
+  const n=String(crNoteOf(c)||'').trim();if(!n)return '';
+  const k=crMaskTerm(c);return '<div class="anote" data-noi18n>'+esc(k?n.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'),'…'):n)+'</div>';
+}
 function studyPanel(){
   const c=cardById(SS.cur);if(!c)return '';const m=SS.cm;
   if(isText(c))return textPanel(c);
   const fb=SS.fallback?'<div class="fallback">У этой рамки нет названия — вспомните подпись на рисунке.</div>':'';
   const AR=isArrow(c),pAll=cardsOfPlate(c.plateId),hasAr=pAll.some(isArrow),hasBx=pAll.some(o=>!isArrow(o));
+  const UF=cardUnframed(c),ufn=UF?unfNoteHtml(c):'';   // a structure with no frame on the picture: the question is its explanation, not a frame
   if(SS.phase==='ask'){
-    if(m==='choice')return '<div class="ask-q">'+(AR?'Что показывает стрелка?':'Что под выделенной рамкой?')+'</div>'+hintHtml(c)+'<div class="opts">'+SS.opts.map((o,i)=>'<button class="opt latin" data-act="pick" data-i="'+i+'">'+esc(o)+'</button>').join('')+'</div>';
-    if(m==='type')return '<div class="ask-q">'+(AR?'Напишите, что показывает стрелка':'Напишите название под выделенной рамкой')+'</div>'+(hintOn(c)&&c.hint.length>22?hintHtml(c):'')+'<div class="typein"><input id="typeIn" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="'+esc(hintOn(c)&&c.hint.length<=22?c.hint:'на латыни')+'"><button class="btn primary" data-act="check">Проверить</button></div><button class="btn quiet block" data-act="dunno" style="margin-top:6px">Не помню</button>';
+    if(m==='choice')return '<div class="ask-q">'+(UF?T3('Какая это структура?','Which structure is this?','Mis struktuur see on?'):AR?'Что показывает стрелка?':'Что под выделенной рамкой?')+'</div>'+ufn+hintHtml(c)+'<div class="opts">'+SS.opts.map((o,i)=>'<button class="opt latin" data-act="pick" data-i="'+i+'">'+esc(o)+'</button>').join('')+'</div>';
+    if(m==='type')return '<div class="ask-q">'+(UF?T3('Напишите название структуры','Type the name of the structure','Kirjuta struktuuri nimi'):AR?'Напишите, что показывает стрелка':'Напишите название под выделенной рамкой')+'</div>'+ufn+(hintOn(c)&&c.hint.length>22?hintHtml(c):'')+'<div class="typein"><input id="typeIn" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="'+esc(hintOn(c)&&c.hint.length<=22?c.hint:'на латыни')+'"><button class="btn primary" data-act="check">Проверить</button></div><button class="btn quiet block" data-act="dunno" style="margin-top:6px">Не помню</button>';
     if(m==='find')return '<div class="ask-q">Найдите на рисунке</div><div class="find-t latin">'+esc(c.term)+'</div><div class="hint">'+(hasAr&&hasBx?'Нажмите на нужную рамку или стрелку':hasAr?'Нажмите на нужную стрелку':'Нажмите на нужную рамку')+'</div>';
-    return fb+'<div class="ask-q">'+(AR?'Что показывает стрелка?':m==='hideOne'?'Вспомните закрытую подпись':'Вспомните подпись под выделенной рамкой')+'</div>'+hintHtml(c)+revealHtml(c);
+    return fb+'<div class="ask-q">'+(UF?T3('Вспомните название структуры','Recall the name of the structure','Meenuta struktuuri nimi'):AR?'Что показывает стрелка?':m==='hideOne'?'Вспомните закрытую подпись':'Вспомните подпись под выделенной рамкой')+'</div>'+ufn+hintHtml(c)+revealHtml(c);
   }
   let top='';
   if(m==='type'){
@@ -2913,7 +2920,7 @@ function updStudy(){
   if(SS.phase==='ask'&&SS.cm==='type'&&!CH.open){const i=$('#typeIn');if(i)setTimeout(()=>i.focus(),30);}
   chatSync();
 }
-function focusTarget(){const c=cardById(SS.cur);if(!c||isText(c)||STG.zoom<=1)return;if(SS.cm==='find'&&SS.phase==='ask'){centerOn({x:25,y:25,w:50,h:50});return;}centerOn(c);}
+function focusTarget(){const c=cardById(SS.cur);if(!c||isText(c)||STG.zoom<=1)return;if(SS.cm==='find'&&SS.phase==='ask'){centerOn({x:25,y:25,w:50,h:50});return;}if(c.w>0)centerOn(c);}
 function studyMaskClick(e){
   const el=e.target.closest('.mk,.arw');if(!el||!SS)return;const id=el.dataset.id;
   if(el.classList.contains('arw')&&!(SS.cm==='find'&&SS.phase==='ask'))return;
@@ -3039,7 +3046,7 @@ function introPlan(labels,size,min){
 }
 /* new cards of a photo in learning order: chunk after chunk, shuffled inside a chunk (as before inside a photo) */
 function introNewOrder(plan,inPool){return plan.chunks.slice(plan.k).reduce((acc,g)=>acc.concat(shuffle(g.filter(inPool))),[]);}
-function introLabels(pid){return cardsOfPlate(pid).filter(c=>!cardExcluded(c)&&!(SS&&SS.exclude&&SS.exclude.has(c.id)));}
+function introLabels(pid){return cardsOfPlate(pid).filter(c=>!cardExcluded(c)&&!cardUnframed(c)&&!(SS&&SS.exclude&&SS.exclude.has(c.id)));}
 function introOn(){return metaOn('intro');}
 /* called whenever the session picks a card: a new card opening a fresh chunk starts its introduction */
 function maybeIntro(){
@@ -3063,7 +3070,7 @@ function introEnd(){
 function startIntroReview(did,pids){
   const d=deckById(did);if(!d)return;
   const q=[];
-  pids.forEach(pid=>{const ch=introChunks(introOrder(cardsOfPlate(pid).filter(c=>!cardExcluded(c)&&!(isArrow(c)&&!c.term))));ch.forEach((g,k)=>q.push({plateId:pid,ids:g.map(c=>c.id),k:k,n:ch.length,key:pid+'#'+k}));});
+  pids.forEach(pid=>{const ch=introChunks(introOrder(cardsOfPlate(pid).filter(c=>!cardExcluded(c)&&!cardUnframed(c)&&!(isArrow(c)&&!c.term))));ch.forEach((g,k)=>q.push({plateId:pid,ids:g.map(c=>c.id),k:k,n:ch.length,key:pid+'#'+k}));});
   if(!q.length){toast('Сначала добавьте рамки на фото');return;}
   startSession({deckId:did,deckIds:[did]},true,cardsOfDeck(did).filter(c=>pids.indexOf(c.plateId)>=0),d.mode||'hideAll');
   if(!SS)return;
@@ -3077,7 +3084,7 @@ function introGo(d){
 function introMasks(){
   const I=SS.intro,cur=I.ids[I.i],seen=new Set(I.ids.slice(0,I.i));
   const all=cardsOfPlate(I.plateId);
-  const boxes=all.filter(o=>!isArrow(o)).map(o=>{const cls=o.id===cur?'mk open':seen.has(o.id)?'mk peek':'mk';return rectsOf(o).map(g=>'<div class="'+cls+'" data-id="'+o.id+'" style="'+geo(g)+'"></div>').join('');}).join('');
+  const boxes=all.filter(o=>!isArrow(o)).map(o=>{const cls=o.id===cur?'mk open':seen.has(o.id)?'mk peek':'mk';return rectsOf(o).filter(g=>g.w>0).map(g=>'<div class="'+cls+'" data-id="'+o.id+'" style="'+geo(g)+'"></div>').join('');}).join('');
   const ars=all.filter(o=>isArrow(o)&&o.term&&(o.id===cur||seen.has(o.id))).map(o=>({c:o,cls:o.id===cur?'open':'pick neutral'}));
   const c=cardById(cur);
   return boxes+(ars.length?arrowSvg(ars,plateAspect(plateById(I.plateId)),pxUnit($('#stage'))):'')+(c&&isArrow(c)?alabHtml(c):'');
@@ -4024,7 +4031,7 @@ let PR=null;
 function openPractice(pid,back){PR={plateId:pid,open:new Set(),last:null,back:back||null};go({name:'practice'});}
 function prMasks(){
   const cs=cardsOfPlate(PR.plateId),ars=cs.filter(c=>isArrow(c)&&c.term);
-  return cs.filter(c=>!isArrow(c)).map(c=>rectsOf(c).map(g=>'<div class="mk'+(PR.open.has(c.id)?' open':'')+'" data-id="'+c.id+'" style="'+geo(g)+'"></div>').join('')).join('')+
+  return cs.filter(c=>!isArrow(c)).map(c=>rectsOf(c).filter(g=>g.w>0).map(g=>'<div class="mk'+(PR.open.has(c.id)?' open':'')+'" data-id="'+c.id+'" style="'+geo(g)+'"></div>').join('')).join('')+
     (ars.length?arrowSvg(ars.map(c=>({c:c,cls:'pick '+(PR.open.has(c.id)?'open':'neutral')})),plateAspect(plateById(PR.plateId)),pxUnit($('#stage')))+ars.filter(c=>PR.open.has(c.id)).map(alabHtml).join(''):'');
 }
 function prPanel(){
@@ -5156,7 +5163,7 @@ function cnRunErr(e){
 async function cnOcrLabels(img,hook){
   const det=detectLabels(img,img.naturalWidth,img.naturalHeight,{merge:false});
   let w;try{w=await ocrWorker();}catch(e){throw {code:'ocr'};}
-  const bs=det.boxes.slice().sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,150),got=[],out=[],seen=new Set();let ok=false;
+  const bs=det.boxes.slice().sort((a,b)=>(a.y-b.y)||(a.x-b.x)).slice(0,Math.max(1,Math.min(150,hook.max||150))),got=[],out=[],seen=new Set();let ok=false;
   hook.step(0,bs.length);
   for(let k=0;k<bs.length;k++){
     if(hook.stop())break;
@@ -6702,7 +6709,9 @@ function cnKnowledgeLessonStatusHtml(p){
   if(warnings.some(x=>x&&x.code==='visual_caption_candidate'))lines.push(T3('Страница выбрана по совпадению текстовой подписи. Связь с темой требует проверки; содержание изображения не распознано.','The page was selected by a text-caption match. Its topic link needs review; the image content was not recognized.','Leht valiti tekstilise pealkirja vaste järgi. Seos teemaga vajab kontrolli; pildi sisu ei tuvastatud.'));
   if(warnings.some(x=>x&&x.code==='source_refs_not_included'))lines.push(T3('В экспорте отсутствуют исходные фрагменты для части ссылок; проверьте их отдельно.','Source excerpts for some references are missing from this export; review them separately.','Mõne viite lähtelõigud puuduvad ekspordist; kontrolli neid eraldi.'));
   if(warnings.some(x=>x&&x.code==='source_files_not_included'))lines.push(T3('Извлечённые фрагменты и цитаты сохранены, но исходные файлы не вложены; полнота исходника не подтверждена.','Extracted excerpts and quotes are preserved, but original files are not included; source completeness is not established.','Eraldatud lõigud ja tsitaadid on säilitatud, kuid algfaile ei lisatud; lähtematerjali täielikkust ei kinnitata.'));
-  if(p&&p.visualStatus==='source_page_shown_unresolved')lines.push(T3('Картинка не разобрана: показана страница источника целиком.','Image not analysed: the whole source page is shown.','Pilti ei analüüsitud: näidatakse kogu lähtelehekülge.'));
+  const nst=(Array.isArray(p&&p.knowledgeUnits)?p.knowledgeUnits:[]).filter(u=>u&&(u.type==='term'||u.type==='definition')).length,framed=p&&Number.isSafeInteger(p.frameCount)?p.frameCount:0;   // frameCount: the structures whose frame was put by a caption on the picture
+  if(framed>0&&framed<=nst&&(p.visualStatus==='source_page_shown_unresolved'||p.visualStatus==='source_object_shown'))lines.push(T3('Рамки поставлены по подписям: '+framed+' из '+nst+' структур; содержание картинки не проверено.','Frames were placed by captions: '+framed+' of '+nst+' structures; the image content was not checked.','Raamid pandi sildite järgi: '+framed+' / '+nst+' struktuurist; pildi sisu ei kontrollitud.'));
+  else if(p&&p.visualStatus==='source_page_shown_unresolved')lines.push(T3('Картинка не разобрана: показана страница источника целиком.','Image not analysed: the whole source page is shown.','Pilti ei analüüsitud: näidatakse kogu lähtelehekülge.'));
   if(p&&p.generationStatus==='partial')lines.push(T3('Часть AI-объяснений отсутствует или не прошла локальную проверку; для этих пунктов показан исходный текст.','Some AI explanations are missing or did not pass local validation; those items show source content.','Osa TI-selgitusi puudub või ei läbinud kohalikku kontrolli; nende punktide juures näidatakse lähtesisu.'));
   if(p&&p.generationStatus==='fallback')lines.push(T3('AI-объяснения не сохранены. Показаны исходные пункты и плановый порядок.','AI explanations were not saved. The source-linked items and planned order are shown.','TI-selgitusi ei salvestatud. Näidatakse allikaga seotud punkte ja plaanitud järjestust.'));
   lines.push(T3('Полнота исходного документа не подтверждена. Ссылки и цитаты показывают происхождение текста, но не доказывают его смысловую корректность.','Completeness of the source document is not established. Links and quotes show text provenance, not semantic correctness.','Algdokumendi täielikkust ei kinnitata. Viited ja tsitaadid näitavad teksti päritolu, mitte tähenduslikku õigsust.'));
@@ -6911,7 +6920,7 @@ function cnPageCands(items,vp,imgs){
   return (imgs&&imgs.length)?out.filter(c=>c.img).concat(out.filter(c=>!c.img)):out;
 }
 /* → {blob, w, h, labels:[{t,x,y,w,h}], name, page} */
-async function cnBldPic(d,b,ref,terms){
+async function cnBldPic(d,b,ref,terms,opts){
   const a=String(ref).split(':'),m=d.mats.find(x=>x.id===a[1]);
   if(!m)throw {code:'pic'};
   if(a[0]==='p'){
@@ -6939,9 +6948,9 @@ async function cnBldPic(d,b,ref,terms){
     }
     try{const tc=await cnTO(pg.getTextContent());labels=cnPageCands(tc.items,vp,imgs);}catch(e){}
     /* the captions of an atlas are part of the picture, the text layer of the page does not have them: when the text gave a name to fewer than half of the structures, the drawn page is read like a photo */
-    if(terms&&terms.length&&cnBldMatch(terms,labels).size*2<terms.length){
-      cv.naturalWidth=cv.width;cv.naturalHeight=cv.height;
-      try{const r=await cnOcrLabels(cv,{stop:()=>b.cancel,step:()=>{}});labels=labels.concat(r.out);}catch(e){}
+    if(terms&&terms.length&&!(opts&&opts.ocr===false)&&cnBldMatch(terms,labels).size*2<terms.length){
+      cv.naturalWidth=cv.width;cv.naturalHeight=cv.height;window.__cnOcrRuns=(window.__cnOcrRuns|0)+1;
+      try{const r=await cnOcrLabels(cv,{stop:()=>b.cancel,step:()=>{},max:opts&&opts.max});labels=labels.concat(r.out);}catch(e){}
     }
     const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.86));if(!blob)throw {code:'pic'};
     return {blob:blob,w:cv.width,h:cv.height,labels:labels,name:cnNameOf(m.name)+', '+T3('стр.','p.','lk')+' '+n,page:n};
@@ -7035,6 +7044,58 @@ function cnKnowledgeVisualRef(d,prepared){
   for(const w of prepared.warnings||[]){if(w.code!=='visual_unresolved')continue;for(const s of w.sources||[]){const m=(d.mats||[]).find(x=>x.id===s.materialId);if(m&&m.kind==='pdf'&&Number.isSafeInteger(s.page)&&s.page>0)return {ref:'g:'+m.id+':'+s.page,unitId:w.id,unresolved:true};if(m&&m.kind==='img'&&Number.isSafeInteger(s.photoIndex)&&s.photoIndex>=0)return {ref:'p:'+m.id+':'+s.photoIndex,unitId:w.id,unresolved:true};}}
   return null;
 }
+/* T-046: the page (or photo) of a «Pictures» material that shows the structures of a lesson v2. The structures are the terms and definitions of the lesson; a page names a structure when a short
+   line of its text layer (or a label of a photo) equals the name (cnNorm, then the stems: the same rule as the frames, cnBldMatch). The page with the most structures wins (at least 2, or 1 and the page of the
+   heading); a tie goes to the page of the heading, then to a page no earlier lesson of the course used, then to the earlier page. Nothing is sent anywhere. */
+function cnKnowledgePicCount(structs,texts){
+  const cands=(texts||[]).map(x=>String(x==null?'':x).replace(/\s+/g,' ').trim()).filter(x=>x&&x.length<=50).map(t=>({t:t,x:0,y:0,w:1,h:1}));
+  return cands.length&&structs&&structs.length?cnBldMatch(structs,cands).size:0;
+}
+function cnKnowledgePicRank(cands,used){
+  const u=used||new Set(),ok=(cands||[]).filter(c=>c.matched>=2||(c.matched>=1&&c.head));
+  ok.sort((a,b)=>b.matched-a.matched||(b.head?1:0)-(a.head?1:0)||(u.has(a.ref)?1:0)-(u.has(b.ref)?1:0)||a.order-b.order);
+  return ok[0]||null;
+}
+/* the pages the lessons that come EARLIER in the plan took (their plates carry picRef): the same answer in any order of building and on a retry */
+function cnKnowledgePicUsed(d,lessonId,plates){
+  const order=[];((d._plan&&d._plan.parts)||[]).forEach(pt=>(pt.lessons||[]).forEach(l=>order.push(l.id)));
+  const at=order.indexOf(lessonId),before=new Set(order.slice(0,Math.max(0,at)).map(id=>d.id+'|'+((d._plan&&d._plan.at)||0)+'|'+id)),used=new Set();
+  (plates||[]).forEach(x=>{if(x&&x.picRef&&before.has(x.cb))used.add(x.picRef);});
+  return used;
+}
+/* OCR of the drawn page only when the page was chosen by captions of its text layer (at least one structure found) and then at most 40 boxes; the old way (no choice) reads nothing */
+function cnKnowledgePicOcr(chosen){return chosen&&chosen.matched>=1?{ocr:true,max:40}:{ocr:false,max:0};}
+async function cnKnowledgePicPick(d,structs,head,used,cache){
+  if(!structs||!structs.length)return null;
+  const cands=[],mats=(d.mats||[]).filter(m=>m.role==='pics'&&m.status==='ready'),hp=head&&head.ref?String(head.ref):'';
+  for(let mi=0;mi<mats.length;mi++){
+    const m=mats[mi];
+    /* the text of the pages (the captions of the photos) is read once for a build: the cache is kept by the build (b.picPages) */
+    let rows=cache&&cache.get(m.id);
+    if(!rows){
+      rows=[];
+      if(m.kind==='pdf'){
+        let pages=null;try{pages=await cnPagesOf(m);}catch(e){pages=null;}
+        for(const p of pages||[]){
+          const n=+(p&&p.n);if(!p||!p.diag||p.diag.visual!==true||!Number.isSafeInteger(n)||n<1)continue;
+          rows.push({ref:'g:'+m.id+':'+n,order:n,texts:String(p.text||'').split(/\r?\n/)});
+        }
+      }else if(m.kind==='img'){
+        const labs=Array.isArray(m.lab)?m.lab:[];
+        for(let i=0;i<labs.length&&i<60;i++){
+          if(!labs[i]||labs[i]==='-')continue;
+          let o=null;try{o=await cnDocData('ctext',labs[i]);}catch(e){}
+          rows.push({ref:'p:'+m.id+':'+i,order:i,texts:(o&&Array.isArray(o.labels)?o.labels:[]).map(x=>x&&x.t)});
+        }
+      }
+      if(cache)cache.set(m.id,rows);
+    }
+    rows.forEach(r=>cands.push({ref:r.ref,order:mi*100000+r.order,matched:cnKnowledgePicCount(structs,r.texts),head:r.ref===hp}));
+  }
+  const best=cnKnowledgePicRank(cands,used);if(!best)return null;
+  const a=best.ref.split(':'),vu=((d._plan&&d._plan.knowledgeIndex)||[]).find(u=>u.type==='visual'&&(u.sources||[]).some(s=>s.materialId===a[1]&&(a[0]==='g'?s.page===+a[2]:s.photoIndex===+a[2])));
+  return {ref:best.ref,matched:best.matched,unitId:vu?vu.id:''};
+}
 function cnKnowledgeClaimText(items){return (items||[]).map(x=>x.text).join(' ');}
 function cnKnowledgeFallbackText(){return T3('Объяснение ИИ не сохранено. Ниже показан исходный пункт; его смысл автоматически не подтверждён.','No AI explanation was saved. The source-linked item is shown below; its meaning was not automatically verified.','TI-selgitust ei salvestatud. Allpool näidatakse lähtesisu; selle tähendust ei kontrollitud automaatselt.');}
 async function cnBldKnowledgeOne(d,b,it){
@@ -7045,9 +7106,17 @@ async function cnBldKnowledgeOne(d,b,it){
   if(b.cancel)return null;
   b.dt.units=prepared.units.length;b.dt.blocks=prepared.blocks.length;b.dt.pic='';
   if(prepared.inputChars>CN_KLESSON.inputChars)return fail('lesson_limit');
-  let pic=null,up=null,visualStatus='not_used';const visual=cnKnowledgeVisualRef(d,prepared);
+  let pic=null,up=null,visualStatus='not_used',chosen=null,visual=cnKnowledgeVisualRef(d,prepared);
+  /* the structures of the lesson (terms, definitions) choose the picture and get their frames from the captions; a page no earlier lesson of this course used is preferred when the counts are equal */
+  const structs=prepared.units.filter(u=>u.type==='term'||u.type==='definition').map(u=>({id:u.id,la:cnKnowledgeLessonLabel(u)})).filter(t=>t.la);
+  {
+    const used=cnKnowledgePicUsed(d,l.id,S.plates);if(!b.picPages)b.picPages=new Map();
+    try{chosen=await cnKnowledgePicPick(d,structs,visual,used,b.picPages);}catch(e){chosen=null;}
+    if(b.cancel)return null;
+    if(chosen)visual={ref:chosen.ref,unitId:chosen.unitId||(visual&&visual.unitId)||'',unresolved:chosen.ref.charAt(0)==='g'?(visual&&visual.ref===chosen.ref?!!visual.unresolved:true):false};
+  }
   if(visual){
-    try{pic=await cnBldPic(d,b,visual.ref,[]);visualStatus=visual.unresolved?'source_page_shown_unresolved':'source_object_shown';b.dt.pic=pic.name||'';}
+    try{pic=await cnBldPic(d,b,visual.ref,structs,cnKnowledgePicOcr(chosen));visualStatus=visual.unresolved?'source_page_shown_unresolved':'source_object_shown';b.dt.pic=pic.name||'';}
     catch(e){if(b.cancel)return null;visualStatus='source_object_unavailable';prepared.warnings.push({code:'visual_unavailable',unitId:visual.unitId});}
     if(pic&&S.assets){try{up=await akUpload(pic.blob);}catch(e){if(b.cancel)return null;visualStatus='source_object_unavailable';prepared.warnings.push({code:'visual_unavailable',unitId:visual.unitId});pic=null;}}
     else if(pic){visualStatus='source_object_unavailable';prepared.warnings.push({code:'visual_unavailable',unitId:visual.unitId});pic=null;}
@@ -7077,9 +7146,13 @@ async function cnBldKnowledgeOne(d,b,it){
   const sourceWarnings=prepared.warnings.slice();if(visualStatus==='source_object_unavailable')sourceWarnings.push({code:'visual_unavailable'});
   const p={id:newId('plates'),deckId:dk.id,createdAt:dk.createdAt+CN_BLD.lsStep*(it.li+1),title:l.title.slice(0,200),cb:key,lessonVersion:CN_KLESSON.version,knowledgeIds:l.knowledgeIds.slice(),generationStatus:ai.generationStatus,sourceStatus:prepared.sourceStatus,sourceCompleteness:'not_proven',sourceWarnings:sourceWarnings,visualStatus:visualStatus,intro:intro,knowledgeIntroEvidence:ai.intro,knowledgeUnits:units};
   const lg=cnLangOk(LANG);if(lg)p.lang=lg;
-  if(pic&&up){p.assetId=up.id;p.w=pic.w;p.h=pic.h;if(lessonPage(pic.page)&&pic.page)p.page=pic.page;}
+  const labs=pic&&Array.isArray(pic.labels)?pic.labels:[],frames=pic&&up?cnBldMatch(structs,labs):new Map();b.dt.labels=labs.length;b.dt.frames=frames.size;
+  if(pic&&up&&frames.size===0&&visualStatus==='source_object_shown')visualStatus='source_page_shown_unresolved';   // a photo whose captions gave no frame is not analysed either
+  if(pic&&up){p.assetId=up.id;p.w=pic.w;p.h=pic.h;p.picRef=visual.ref;if(frames.size)p.frameCount=frames.size;if(lessonPage(pic.page)&&pic.page)p.page=pic.page;}
   const cards=[];let k=0;
-  for(const u of prepared.units){const claims=ai.units.get(u.id)||[],note=claims.length?cnKnowledgeClaimText(claims):cnKnowledgeFallbackText(),c={id:newId('terms'),deckId:dk.id,plateId:p.id,term:cnKnowledgeLessonLabel(u),kind:u.type,knowledgeId:u.id,createdAt:p.createdAt+(++k),type:'new',prio:1,note:note};cleanLessonCard(c);cards.push(normCard(c));}
+  for(const u of prepared.units){const claims=ai.units.get(u.id)||[],note=claims.length?cnKnowledgeClaimText(claims):cnKnowledgeFallbackText(),c={id:newId('terms'),deckId:dk.id,plateId:p.id,term:cnKnowledgeLessonLabel(u),kind:u.type,knowledgeId:u.id,createdAt:p.createdAt+(++k),type:'new',prio:1,note:note};
+    if(pic&&up){const rc=frames.get(u.id);if(rc){c.x=rc.x;c.y=rc.y;c.w=rc.w;c.h=rc.h;}else{c.x=0;c.y=0;c.w=0;c.h=0;}}   // a frame by its caption on the picture; none found: the card stays in learning, but without a frame (it is not asked as «find it on the picture»)
+    cleanLessonCard(c);cards.push(normCard(c));}
   const expected=p.knowledgeIds.slice().sort(),stored=units.map(x=>x.id).sort();
   if(expected.length!==stored.length||expected.some((x,i)=>x!==stored[i])||JSON.stringify({plate:p,cards:cards}).length>CN_KLESSON.savedChars){if(up&&S.assets)S.assets.delete(up.id).catch(()=>{});return fail(expected.length!==stored.length?'knowledge_coverage':'lesson_limit');}
   if(b.cancel){if(up&&S.assets)S.assets.delete(up.id).catch(()=>{});return null;}
@@ -7388,10 +7461,10 @@ function crProg(frac){
 function crDraw(mode,cls,pt){
   const m=$('#masks');if(!m||!CL)return;cls=cls||{};
   m.innerHTML=CL.L.items.map(it=>{const c=cls[it.id];if(mode==='none'&&!c)return '';
-    return rectsOf(it).map(g=>'<div class="cm '+(c||'')+'" style="'+geo(g)+'">'+(c==='tgt'?'?':'')+'</div>').join('');}).join('')+
+    return rectsOf(it).filter(g=>g.w>0).map(g=>'<div class="cm '+(c||'')+'" style="'+geo(g)+'">'+(c==='tgt'?'?':'')+'</div>').join('');}).join('')+
     (pt&&pt.pt?'<div class="cpt" style="left:'+pt.pt[0]+'%;top:'+pt.pt[1]+'%"></div>':'');
 }
-function crFocus(it){CL.focus=it||null;if(it&&$('#stage'))centerOn(it);}
+function crFocus(it){CL.focus=it||null;if(it&&it.w>0&&$('#stage'))centerOn(it);}
 SCREENS.courseLesson={
   html(){
     const p=CL&&plateById(CL.pid);if(!p){view={name:'courses'};return SCREENS.courses.html();}
@@ -7629,7 +7702,7 @@ async function cropApply(){
     const tfp=(x,y)=>{let g={x:x,y:y,w:0,h:0};for(let i=0;i<CR.rot;i++)g=rotRect(g);return {x:(g.x-rc.x)/rc.w*100,y:(g.y-rc.y)/rc.h*100};};
     const inb=q=>q.x>=0&&q.x<=100&&q.y>=0&&q.y<=100;
     const moved=cardsOfPlate(CR.plateId).map(c=>isArrow(c)?{c:c,arr:{a:tfp(c.ax,c.ay),b:tfp(c.bx,c.by)}}:{c:c,g:tf(c),ex:Array.isArray(c.extra)?c.extra.map(tf):null});
-    moved.forEach(t=>{if(t.arr)t.lost=!inb(t.arr.a);else t.lost=t.g.w<0.8||t.g.h<0.5;});
+    moved.forEach(t=>{if(t.arr)t.lost=!inb(t.arr.a);else t.lost=!cardUnframed(t.c)&&(t.g.w<0.8||t.g.h<0.5);});
     const lost=moved.filter(t=>t.lost).length;
     if(lost&&!(await confirmDialog({title:'Часть рамок окажется за краем',text:pl(lost,'рамка будет удалена','рамки будут удалены','рамок будут удалены')+' вместе с прогрессом.',ok:'Обрезать'})))return;
     CR._moved=moved;
@@ -7643,7 +7716,7 @@ async function cropApply(){
   let assetId=null;
   if(S.assets&&!p._local){try{assetId=(await S.assets.upload(blob)).id;}catch(e){hideBusy();toast(uploadErrText(e));return;}}
   const old=p.assetId;
-  CR._moved.forEach(t=>{if(t.lost)removeCard(t.c.id);else if(t.arr){setArrow(t.c,t.arr.a.x,t.arr.a.y,t.arr.b.x,t.arr.b.y);persist('terms',t.c.id);}else{Object.assign(t.c,{x:r2(t.g.x),y:r2(t.g.y),w:r2(t.g.w),h:r2(t.g.h)});if(t.ex)t.c.extra=t.ex.filter(g=>g.w>=0.8&&g.h>=0.5).map(g=>({x:r2(g.x),y:r2(g.y),w:r2(g.w),h:r2(g.h)}));persist('terms',t.c.id);}});
+  CR._moved.forEach(t=>{if(t.lost)removeCard(t.c.id);else if(t.arr){setArrow(t.c,t.arr.a.x,t.arr.a.y,t.arr.b.x,t.arr.b.y);persist('terms',t.c.id);}else if(!cardUnframed(t.c)){Object.assign(t.c,{x:r2(t.g.x),y:r2(t.g.y),w:r2(t.g.w),h:r2(t.g.h)});if(t.ex)t.c.extra=t.ex.filter(g=>g.w>=0.8&&g.h>=0.5).map(g=>({x:r2(g.x),y:r2(g.y),w:r2(g.w),h:r2(g.h)}));persist('terms',t.c.id);}});
   if(assetId)p.assetId=assetId;else{p._url=URL.createObjectURL(blob);}
   p.w=sw;p.h=sh;persist('plates',p.id);
   if(old&&assetId&&S.assets)afterWrites(()=>S.assets.delete(old).catch(()=>{}));
@@ -7809,6 +7882,7 @@ function cnKnowledgeLessonMetaClean(o,imported){
   if(imported)warnings.push({code:snapshots.sourceSnapshotStatus==='complete'||snapshots.sourceSnapshotStatus==='not_applicable'?'source_files_not_included':'source_refs_not_included'});
   const visualStatus=['not_used','source_object_shown','source_page_shown_unresolved','source_object_unavailable'].includes(o.visualStatus)?o.visualStatus:'not_used';
   const result={lessonVersion:2,knowledgeIds:knowledgeIds,generationStatus:['ai','partial','fallback'].includes(o.generationStatus)?o.generationStatus:'fallback',sourceStatus:status,sourceCompleteness:'not_proven',sourceWarnings:warnings,visualStatus,sourceSnapshotStatus:snapshots.sourceSnapshotStatus,sourceBlocks:snapshots.sourceBlocks,knowledgeIntroEvidence:citations(o.knowledgeIntroEvidence),knowledgeUnits:units};
+  if(Number.isSafeInteger(o.frameCount)&&o.frameCount>0&&o.frameCount<=units.filter(u=>u.type==='term'||u.type==='definition').length)result.frameCount=o.frameCount;   // T-046: frames put by captions
   if(JSON.stringify(result).length>CN_KLESSON.savedChars)return null;
   return result;
 }
@@ -10109,6 +10183,7 @@ if(window.__TEST__){
   window.__cnOutRequireEmphasis0=cnOutRequireEmphasis;
   window.cnPageAudit=cnPageAudit;
   if(window.__TEST_LEGACY_PLAN__){cnKnowledgePlanInput=async()=>null;cnOutRequireEmphasis=t=>t;}   // test stand: plan like a draft made before the knowledge registry (no registry → the v1 plan; the outline topics are the AI's own)
+  window.cardUnframed=cardUnframed;window.__setSS=o=>{SS=o;};
   Object.defineProperty(window,'SS',{get:()=>SS});Object.defineProperty(window,'CR_OPEN',{get:()=>CR_OPEN});
   Object.defineProperty(window,'ED',{get:()=>ED});
   Object.defineProperty(window,'CL',{get:()=>CL});window.A=A;window.dropPlate=dropPlate;window.removeDoc=removeDoc;window.WQ=WQ;

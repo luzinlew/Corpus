@@ -570,7 +570,7 @@ async function main() {
   const buildSandbox = vm.createContext({
     CN_KLESSON: logic.CN_KLESSON, CN_BLD: { lsStep: 100, ptStep: 10000 }, LANG: "en", S: { ...savedState, assets: null }, window: { CORPUS_WEB: { courseAI: { lesson: async (_lang, input) => { generatedCalls++; assert.equal(input.units.length, prepared.units.length); return mockLesson; } } } },
     T3: (_ru, en) => en, cnKnowledgeLessonPrepare: async () => JSON.parse(JSON.stringify(prepared)),
-    cnKnowledgeVisualRef: () => null, cnKnowledgeLessonCall: async (p, invoke) => { const raw = await invoke(p.input); return { raw, result: logic.cnKnowledgeLessonClean(raw, p) }; },
+    cnKnowledgeVisualRef: () => null, cnKnowledgePicPick: async () => null, cnKnowledgePicUsed: vm.runInContext("cnKnowledgePicUsed", context), cnKnowledgePicOcr: vm.runInContext("cnKnowledgePicOcr", context), cnBldMatch: () => new Map(), cnKnowledgeLessonCall: async (p, invoke) => { const raw = await invoke(p.input); return { raw, result: logic.cnKnowledgeLessonClean(raw, p) }; },
     cnUsageAdd: () => {}, cnSpend: () => {}, cnBPaint: () => {}, cnCourseName: () => "Synthetic course", cnLangOk: () => "en",
     newId: prefix => prefix + "-stagec-" + (++generatedId), persist: () => {}, cnSave: () => {},
     folderById: id => buildSandbox.S.folders.find(x => x.id === id), deckById: id => buildSandbox.S.decks.find(x => x.id === id),

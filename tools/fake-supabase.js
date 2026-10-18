@@ -512,8 +512,8 @@ http.createServer(async (req, res) => {
         const bl = new Map((inp.sourceBlocks || []).map((x) => [x.id, x]));
         const ev = (id) => { const x = bl.get(id); return [{ blockId: id, quote: (String(x ? x.text : '').split('\n').map((y) => y.trim()).find((y) => y.length >= 3) || '').slice(0, 300).trim() }]; };
         const first = (inp.sourceBlocks || [])[0];
-        /* T-047: with lessonDepth 2 (the deeper lesson) the answer holds the most the prompt allows: max(1,min(4,floor(64/n))) claims per unit, 2 intro claims; an input without it is an older client: one claim, as before */
-        const per = inp.lessonDepth === 2 ? Math.max(1, Math.min(4, Math.floor(64 / Math.max(1, (inp.units || []).length)))) : 1;
+        /* T-047: with lessonDepth 2 (the deeper lesson) the answer holds the most the prompt allows: max(1,min(4,floor(40/n))) claims per unit, 2 intro claims; an input without it is an older client: one claim, as before */
+        const per = inp.lessonDepth === 2 ? Math.max(1, Math.min(4, Math.floor(40 / Math.max(1, (inp.units || []).length)))) : 1;
         ans = { intro: Array.from({ length: inp.lessonDepth === 2 ? 2 : 1 }, (_, k) => ({ text: '[' + lm[1] + '] Overview of ' + evil(inp.title) + '.' + (k ? ' (' + (k + 1) + ')' : ''), evidence: ev(first && first.id) })),
           units: (inp.units || []).map((u) => ({ id: u.id, claims: Array.from({ length: per }, (_, k) => ({ text: '[' + lm[1] + '] The source states this (' + u.type + ').' + (k ? ' Point ' + (k + 1) + '.' : ''), evidence: ev(u.sourceBlockIds[0]) })) })) };
         if (FN_DROP) delete ans.units;

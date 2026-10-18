@@ -335,7 +335,7 @@ function planPrompt(lang: string, input: any): string {
 }
 
 // ---- the lesson task of course creation ----
-const LS_TERMS = 40, LS_TEXT = 20_000, LS_EXAM = 30, LS_SUM_MAX = 40_000, LS_MAX_TOKENS = 4000, LS_KNOWLEDGE_MAX_TOKENS = 6000;
+const LS_TERMS = 40, LS_TEXT = 20_000, LS_EXAM = 30, LS_SUM_MAX = 40_000, LS_MAX_TOKENS = 4000, LS_KNOWLEDGE_MAX_TOKENS = 8000;
 const LS_KNOWLEDGE_UNITS = 40, LS_KNOWLEDGE_BLOCKS = 240, LS_KNOWLEDGE_BLOCK_TEXT = 6000;
 function checkKnowledgeLessonInput(inp: any): string {
   if (!isObj(inp) || !onlyKeys(inp, ["kind", "title", "units", "sourceBlocks", "sourceStatus", "lessonDepth"]) || inp.kind !== "knowledge-v1") return "knowledge input has an invalid shape";
@@ -388,7 +388,7 @@ function lessonPrompt(lang: string, input: any): string {
     "- Each text item is one factual claim. Every claim must cite one or more exact, verbatim quotes copied from a listed source block. For a unit explanation, cite only block IDs in that unit's sourceBlockIds. Never invent a quote, block ID, unit ID, formula step, table cell, image label, or factual bridge.\n" +
     "- If the source does not support an explanation, return no claims for that unit. It is better to omit an explanation than to guess. Do not say that citations prove a claim is semantically correct.\n" +
     (input.lessonDepth === 2
-      ? "- Use at most 6 intro claims and at most " + Math.max(1, Math.min(4, Math.floor(64 / Math.max(1, input.units.length)))) + " claims per unit, using only the claims needed to explain the supplied material. Keep each claim under 500 characters so the whole lesson fits the response limit. Cover every input unit ID exactly once in units, including an empty claims array when needed. Do not add any other IDs.\n" +
+      ? "- Use at most 6 intro claims and at most " + Math.max(1, Math.min(4, Math.floor(40 / Math.max(1, input.units.length)))) + " claims per unit, using only the claims needed to explain the supplied material. Keep each claim under 500 characters so the whole lesson fits the response limit. Cover every input unit ID exactly once in units, including an empty claims array when needed. Do not add any other IDs.\n" +
         "- The intro gives the general logic of the topic: what the section consists of, how its parts are connected, what is important to remember. Each intro claim has its own quotes.\n" +
         "- Do not repeat the name or wording of a unit as a claim. For each unit explain what it is, where it lies, what it borders on or connects with, what it contains or what passes through it, using ONLY the unit's own source blocks and its context_fragment blocks from the same section. If the source gives only the name, write one honest short claim or return an empty claims list.\n" +
         "- Keep every term and name exactly as written in the source, including Latin terms; never translate them. Write the explanations in the language of the user.\n"

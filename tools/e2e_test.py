@@ -4501,7 +4501,7 @@ async def main():
             check('lesson: 40 terms, a text of 20000 characters and 30 questions are accepted (%d characters as JSON, at most 40000)' % ln, status == 200 and ln <= 40000, json.dumps([status, j.get('code'), ln]))
             status, j = fn_call(tokp, 'POST', {'task': 'lesson', 'lang': 'ru', 'input': {'title': 'x', 'terms': [{'id': 't1', 'la': 'Os'}]}})
             check('lesson: text and exam are optional; purpose may be left out; without text the prompt asks only for a one-sentence intro («No passages were given»)', status == 200 and 'No passages were given' in lastai()['said'] and 'Write ONLY what the text passages state' not in lastai()['said'], json.dumps([status, j.get('code')]))
-            # --- T-047: the lesson of knowledge-v1 — 6000 tokens, the deeper prompt with lessonDepth 2, the older client's input keeps the old numbers ---
+            # --- T-047: the lesson of knowledge-v1 — 8000 tokens, the deeper prompt with lessonDepth 2, the older client's input keeps the old numbers ---
             def kv1(n_units, depth):
                 blocks_ = [{'id': f'b{i}', 'materialId': 'm1', 'sourceName': 'S', 'page': 1, 'order': {'materialIndex': 0, 'pageIndex': 1, 'block': i, 'offset': i}, 'text': f'Source line {i} about the skull.'} for i in range(n_units)]
                 units_ = [{'id': f'u{i}', 'type': 'term', 'content': f'Term {i}', 'sourceBlockIds': [f'b{i}'], 'order': {'materialIndex': 0, 'pageIndex': 1, 'block': i, 'offset': i}, 'verificationStatus': 'unverified'} for i in range(n_units)]
@@ -4511,10 +4511,10 @@ async def main():
             status, j = fn_call(tokp, 'POST', kv1(12, True))
             lk = lastai()
             ans_k = json.loads(j['text']) if status == 200 else {'units': [], 'intro': []}
-            check('lesson knowledge-v1 (T-047): 6000 output tokens (the legacy lesson 4000), lessonDepth 2 → the prompt says at most 6 intro claims and 4 claims per unit (12 units), the answer holds 4 claims per unit',
-                  status == 200 and lk['max_tokens'] == 6000 and 'at most 6 intro claims and at most 4 claims per unit' in lk['said'] and len(ans_k['units']) == 12 and all(len(u_['claims']) == 4 for u_ in ans_k['units']) and len(ans_k['intro']) == 2, json.dumps([status, lk.get('max_tokens'), len(ans_k['units'])]))
-            status, j = fn_call(tokp, 'POST', kv1(24, True))
-            check('…24 units → 2 claims per unit in the prompt and the answer', status == 200 and 'at most 2 claims per unit' in lastai()['said'] and all(len(u_['claims']) == 2 for u_ in json.loads(j['text'])['units']), json.dumps([status])[:300])
+            check('lesson knowledge-v1 (T-047): 8000 output tokens (the legacy lesson 4000), lessonDepth 2 → the prompt says at most 6 intro claims and 3 claims per unit (12 units), the answer holds 3 claims per unit',
+                  status == 200 and lk['max_tokens'] == 8000 and 'at most 6 intro claims and at most 3 claims per unit' in lk['said'] and len(ans_k['units']) == 12 and all(len(u_["claims"]) == 3 for u_ in ans_k['units']) and len(ans_k['intro']) == 2, json.dumps([status, lk.get('max_tokens'), len(ans_k['units'])]))
+            status, j = fn_call(tokp, 'POST', kv1(16, True))
+            check('…16 units → 2 claims per unit in the prompt and the answer', status == 200 and 'at most 2 claims per unit' in lastai()['said'] and all(len(u_['claims']) == 2 for u_ in json.loads(j['text'])['units']), json.dumps([status])[:300])
             status, j = fn_call(tokp, 'POST', kv1(36, True))
             check('…36 units → 1 claim per unit', status == 200 and 'at most 1 claims per unit' in lastai()['said'] and all(len(u_['claims']) == 1 for u_ in json.loads(j['text'])['units']), json.dumps([status])[:300])
             status, j = fn_call(tokp, 'POST', kv1(12, False))

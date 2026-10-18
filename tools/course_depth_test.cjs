@@ -37,6 +37,11 @@ const units = [
   unit("ku1_term", "term", "BASIS CRANII INTERNA", src("emphasis_fragment", 300, 320), 2),
   unit("ku1_plain", "statement", "Koljupõhi", src("text_fragment", 400, 409), 3),            // short, but not a heading block
   unit("ku1_part", "statement", "Koljupõhi osa", src("emphasis_fragment", 500, 560), 4),     // the quote is only a part of a longer block
+  unit("ku1_def", "statement", "Foramen magnum – suur ava.", src("emphasis_fragment", 600, 626), 5),
+  unit("ku1_sent", "statement", "Nervus vagus on X kraniaalnärv.", src("emphasis_fragment", 700, 731), 6),
+  unit("ku1_colon", "statement", "Koljupõhja avad:", src("emphasis_fragment", 800, 816), 7),
+  unit("ku1_eq", "statement", "F = m a", src("emphasis_fragment", 900, 907), 8),
+  unit("ku1_dash", "statement", "Os — luu", src("emphasis_fragment", 950, 958), 9),
 ];
 let plan;
 const run = async () => { plan = plan || await planOf(units); return plan; };
@@ -52,12 +57,28 @@ await ok("heading_only: a statement equal to its one emphasised quote, at most 6
 });
 await ok("heading_only: a long statement, a term, a short non-emphasis statement and a quote that is only a part stay", async () => {
   await run();
-  for (const id of ["ku1_long", "ku1_term", "ku1_plain", "ku1_part"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays a lesson unit"); assert.ok(!exOf(id), id); assert.equal(ixOf(id).eligible, true); }
+  for (const id of ["ku1_long", "ku1_term", "ku1_plain", "ku1_part", "ku1_def", "ku1_sent", "ku1_colon", "ku1_eq", "ku1_dash"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays a lesson unit"); assert.ok(!exOf(id), id); assert.equal(ixOf(id).eligible, true); }
 });
 await ok("heading_only: coverage counts the unit as not eligible; the others stay planned", async () => {
   await run();
-  assert.equal(plan.units.length, 4);
+  assert.equal(plan.units.length, 9);
   assert.equal(plan.index.filter(x => !x.eligible).length, 1);
+});
+await ok("heading_only: a material of headings only stops with a clear error (knowledge_empty), not silently", async () => {
+  await assert.rejects(planOf([unit("ku1_h1", "statement", "KOLJU TERVIKUNA", src("emphasis_fragment", 0, 15), 0), unit("ku1_h2", "statement", "FOSSA CRANII", src("emphasis_fragment", 20, 32), 1)]), e => e && e.code === "knowledge_empty");
+});
+await ok("heading_only: the reason survives the saved plan (cnKnowledgePlanDoc round trip) and the index stays not eligible", async () => {
+  await run();
+  const raw = { parts: [{ name: "P", lessons: [{ title: "L", knowledgeIds: plan.units.map(u => u.id), rationale: "Everything in source order." }] }] };
+  const built = ctx("cnKnowledgePlanBuild")(raw, plan);
+  const reloaded = ctx("cnKnowledgePlanDoc")(clone(built));
+  assert.ok(reloaded, "the saved plan reloads");
+  const h = reloaded.knowledgeIndex.find(x => x.id === "ku1_head");
+  assert.equal(h.reason, "heading_only"); assert.equal(h.eligible, false); assert.equal(h.coverageStatus, "not_eligible"); assert.equal(h.lessonId, null);
+  assert.ok(reloaded.knowledgeIndex.filter(x => x.eligible).every(x => !("reason" in x)), "no reason on lesson units");
+  assert.equal(reloaded.coverage.expected, 9);
+  const old = clone(built); old.knowledgeIndex.forEach(x => delete x.reason);
+  assert.ok(ctx("cnKnowledgePlanDoc")(old), "a plan saved before T-047 (no reason) reads as before");
 });
 await ok("heading_only: the function accepts the plan input with the new reason", async () => {
   await run();
@@ -70,9 +91,10 @@ await ok("heading_only: the function accepts the plan input with the new reason"
 const lim = ctx("cnKnowledgeClaimLimit");
 const promptOf = (k, depth) => fn.h.lessonPrompt("en", { kind: "knowledge-v1", title: "T", units: Array.from({ length: k }, (_, i) => ({ id: "u" + i })), sourceBlocks: [], ...(depth ? { lessonDepth: depth } : {}) });
 const perUnit = p => +/at most (\d+) claims per unit/.exec(p)[1];
-await ok("claim limit: max(1,min(4,floor(64/n))): 12 units → 4, 24 → 2, 36 → 1, 1 → 4, 40 → 1; the same number in the client and in the prompt of the function", async () => {
-  for (const [k, want] of [[1, 4], [12, 4], [16, 4], [17, 3], [24, 2], [32, 2], [36, 1], [40, 1]]) {
+await ok("claim limit: max(1,min(4,floor(40/n))): 1..10 units → 4, 12 → 3, 13 → 3, 20 → 2, 21 → 1, 40 → 1; the same number in the client and in the prompt of the function", async () => {
+  for (const [k, want] of [[1, 4], [10, 4], [12, 3], [13, 3], [20, 2], [21, 1], [36, 1], [40, 1]]) {
     assert.equal(lim(k), want, "client n=" + k);
+    assert.equal(lim(k, true), Math.max(1, Math.min(7, Math.floor(32 / k))), "client without lessonDepth n=" + k);
     assert.equal(perUnit(promptOf(k, 2)), want, "function n=" + k);
   }
 });
@@ -96,8 +118,8 @@ await ok("function: lessonDepth is an accepted key with the value 2 only", async
   assert.equal(fn.h.checkLesson({ purpose: "course", lang: "en", input: { ...base, lessonDepth: 2 } }), "");
   assert.match(fn.h.checkLesson({ purpose: "course", lang: "en", input: { ...base, lessonDepth: 3 } }), /lessonDepth/);
 });
-await ok("tokens: the lesson of knowledge-v1 gets 6000 output tokens, the legacy lesson keeps 4000", async () => {
-  assert.equal(fn.h.LS_KNOWLEDGE_MAX_TOKENS, 6000);
+await ok("tokens: the lesson of knowledge-v1 gets 8000 output tokens, the legacy lesson keeps 4000", async () => {
+  assert.equal(fn.h.LS_KNOWLEDGE_MAX_TOKENS, 8000);
   assert.equal(fn.h.LS_MAX_TOKENS, 4000);
   assert.match(serverSource, /body\.input\?\.kind === "knowledge-v1" \? LS_KNOWLEDGE_MAX_TOKENS : LS_MAX_TOKENS/);
 });
@@ -106,33 +128,61 @@ await ok("tokens: the lesson of knowledge-v1 gets 6000 output tokens, the legacy
 const blocks = Array.from({ length: 3 }, (_, i) => ({ id: "b" + i, materialId: "m1", sourceName: "S", page: 1, text: "Source sentence number " + i + " about the skull." }));
 const mkPrepared = k => ({ units: Array.from({ length: k }, (_, i) => ({ id: "u" + i, sourceBlockIds: ["b" + (i % 3)] })), blocks });
 const claim = (b, i) => ({ text: "Claim " + i, evidence: [{ blockId: "b" + b, quote: "Source sentence number " + b }] });
-await ok("validator: accepts exactly limit claims per unit (n=12 → 4) and 6 intro claims, nothing is reported", async () => {
-  const prep = mkPrepared(12), raw = { intro: Array.from({ length: 6 }, (_, i) => claim(0, i)), units: prep.units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 4 }, (_, j) => claim(i % 3, j)) })) };
+await ok("validator: accepts exactly limit claims per unit (n=12 → 3) and 6 intro claims, nothing is reported", async () => {
+  const prep = mkPrepared(12), raw = { intro: Array.from({ length: 6 }, (_, i) => claim(0, i)), units: prep.units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 3 }, (_, j) => claim(i % 3, j)) })) };
   const r = logic.cnKnowledgeLessonClean(raw, prep);
   assert.equal(r.generationStatus, "ai"); assert.deepEqual(clone(r.issues), []);
-  assert.equal(r.intro.length, 6); assert.ok([...r.units.values()].every(c => c.length === 4));
+  assert.equal(r.intro.length, 6); assert.ok([...r.units.values()].every(c => c.length === 3));
 });
-await ok("validator: more than limit claims (5 at n=12, 3 at n=24, 7 intro) are cut to the limit and reported claim_limit → partial", async () => {
-  const prep = mkPrepared(12), raw = { intro: [claim(0, 0)], units: prep.units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 5 }, (_, j) => claim(i % 3, j)) })) };
+await ok("validator: more than limit claims (4 at n=12, 2 at n=24, 7 intro) are cut to the limit and reported claim_limit → partial", async () => {
+  const prep = mkPrepared(12), raw = { intro: [claim(0, 0)], units: prep.units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 4 }, (_, j) => claim(i % 3, j)) })) };
   const r = logic.cnKnowledgeLessonClean(raw, prep);
-  assert.ok(r.issues.includes("claim_limit")); assert.equal(r.generationStatus, "partial"); assert.ok([...r.units.values()].every(c => c.length === 4));
-  const prep24 = mkPrepared(24), r24 = logic.cnKnowledgeLessonClean({ intro: [claim(0, 0)], units: prep24.units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 3 }, (_, j) => claim(i % 3, j)) })) }, prep24);
-  assert.ok(r24.issues.includes("claim_limit")); assert.ok([...r24.units.values()].every(c => c.length === 2));
+  assert.ok(r.issues.includes("claim_limit")); assert.equal(r.generationStatus, "partial"); assert.ok([...r.units.values()].every(c => c.length === 3));
+  const prep24 = mkPrepared(24), r24 = logic.cnKnowledgeLessonClean({ intro: [claim(0, 0)], units: prep24.units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 2 }, (_, j) => claim(i % 3, j)) })) }, prep24);
+  assert.ok(r24.issues.includes("claim_limit")); assert.ok([...r24.units.values()].every(c => c.length === 1));
   const ri = logic.cnKnowledgeLessonClean({ intro: Array.from({ length: 7 }, (_, i) => claim(0, i)), units: [] }, mkPrepared(1));
   assert.ok(ri.issues.includes("claim_limit")); assert.equal(ri.intro.length, 6);
 });
-await ok("size: a full lesson of 40 units x 1 claim + 6 intro claims of 500 characters (30-36k characters) is not dropped as response_size_limit; the limit itself still holds", async () => {
-  assert.ok(ctx("CN_KLESSON").outputChars >= 36000, "outputChars " + ctx("CN_KLESSON").outputChars);
+await ok("size: a full lesson of 40 units x 1 claim + 6 intro claims of 500 characters (30-40k characters) is not dropped as response_size_limit; the limit itself still holds", async () => {
+  assert.ok(ctx("CN_KLESSON").outputChars >= 40000, "outputChars " + ctx("CN_KLESSON").outputChars);
   const quotes = b => ["", " about", " about the"].map(t => ({ blockId: b, quote: "Source sentence number " + b.slice(1) + t }));
   const long = i => ({ text: ("Claim " + i + " ").padEnd(500, "x"), evidence: quotes("b0") });
   const prep = mkPrepared(40), raw = { intro: Array.from({ length: 6 }, (_, i) => long(i)), units: prep.units.map(u => ({ id: u.id, claims: [{ ...long(0), evidence: quotes(u.sourceBlockIds[0]) }] })) };
   const len = JSON.stringify(raw).length;
-  assert.ok(len > 30000 && len < 36000, String(len));
+  assert.ok(len > 30000 && len < 40000, String(len));
   assert.equal(logic.cnKnowledgeLessonClean(raw, prep).generationStatus, "ai", "not dropped as response_size_limit");
   assert.ok(logic.cnKnowledgeLessonClean({ ...raw, pad: "x".repeat(ctx("CN_KLESSON").outputChars) }, prep).issues.includes("response_size_limit"), "the limit itself still holds");
 });
 await ok("client request: the lesson input carries lessonDepth 2 (so that the function writes the deeper prompt)", async () => {
   assert.match(source.slice(source.indexOf("async function cnKnowledgeLessonPrepare("), source.indexOf("function cnKnowledgeLessonClean(")), /lessonDepth:2/);
+});
+
+/* ---------- a new client against an older function ---------- */
+await ok("older function: 400 invalid_input «lesson: …» on lessonDepth → one repeat without it, old limits (min(7,32/n), 4 intro), no second repeat, the flag holds for the session", async () => {
+  const call = ctx("cnKnowledgeLessonCall");
+  const mk = k => ({ ...mkPrepared(k), input: { kind: "knowledge-v1", title: "T", units: [], lessonDepth: 2 } });
+  const seen = []; let refuse = true;
+  const invoke = async input => { seen.push(clone(input)); if (refuse && input.lessonDepth === 2) throw { code: "invalid_input", message: "lesson: knowledge input has an invalid shape" }; return { intro: Array.from({ length: 4 }, (_, i) => claim(0, i)), units: mkPrepared(12).units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 2 }, (_, j) => claim(i % 3, j)) })) }; };
+  const p1 = mk(12), r1 = await call(p1, invoke);
+  assert.equal(seen.length, 2); assert.equal(seen[0].lessonDepth, 2); assert.ok(!("lessonDepth" in seen[1]));
+  assert.equal(r1.result.generationStatus, "ai", "4 intro and 2 claims per unit are within the old limits: " + JSON.stringify(r1.result.issues));
+  assert.equal(ctx("CN_DEPTH_OFF"), true);
+  const p2 = mk(12), r2 = await call(p2, invoke);
+  assert.equal(seen.length, 3, "the next lesson goes straight without lessonDepth"); assert.ok(!("lessonDepth" in seen[2]));
+  const tooMany = await call(mk(12), async () => ({ intro: Array.from({ length: 5 }, (_, i) => claim(0, i)), units: mkPrepared(12).units.map((u, i) => ({ id: u.id, claims: [claim(i % 3, 0)] })) }));
+  assert.ok(tooMany.result.issues.includes("claim_limit") && tooMany.result.intro.length === 4, "5 intro claims are cut to the old 4");
+  const sevenOne = await call(mk(2), async () => ({ intro: [claim(0, 0)], units: mkPrepared(2).units.map((u, i) => ({ id: u.id, claims: Array.from({ length: 7 }, (_, j) => claim(i, j)) })) }));
+  assert.equal(sevenOne.result.generationStatus, "ai", "7 claims per unit are fine for 2 units without lessonDepth");
+  vm.runInContext("CN_DEPTH_OFF=false", context);
+  // another error, or a 400 of another task, is not retried
+  for (const err of [{ code: "invalid_input", message: "plan: x" }, { code: "quota_exceeded", message: "lesson: x" }, { code: "unavailable", message: "lesson: x" }]) {
+    let calls = 0;
+    await assert.rejects(call(mk(2), async () => { calls++; throw err; }), e => e === err);
+    assert.equal(calls, 1);
+  }
+  assert.equal(ctx("CN_DEPTH_OFF"), false);
+  // the call that failed did not reach cnSpend: the caller spends only after cnKnowledgeLessonCall returns
+  assert.match(source.slice(source.indexOf("async function cnBldKnowledgeOne("), source.indexOf("async function cnBldLegacyOne(")), /const called=await cnKnowledgeLessonCall\(prepared,[^;]*;cnUsageAdd\(b,called.raw\);cnSpend\(d,b,2\)/);
 });
 
 /* ---------- a lesson reply cut short ---------- */
@@ -148,6 +198,9 @@ await ok("truncated lesson: the whole units and the closed intro are kept, the u
   assert.equal(partialOf({ code: "invalid_json", truncated: true, text: '{"intro":[{"text":"a","evi' }, prep), null, "nothing whole: the old fallback");
   const noUnits = partialOf({ code: "invalid_json", truncated: true, text: JSON.stringify({ intro: full.intro }).slice(0, -1) + ',"units":[{"id":"u0","cla' }, prep);
   assert.equal(noUnits.generationStatus, "partial"); assert.equal(noUnits.units.size, 0); assert.equal(noUnits.intro.length, 2);
+  const allWhole = { intro: full.intro, units: full.units }, wholeText = JSON.stringify(allWhole).slice(0, -1);   // the cut fell after the last unit
+  const rw = partialOf({ code: "invalid_json", truncated: true, text: wholeText }, prep);
+  assert.equal(rw.generationStatus, "ai", "everything whole and valid: not marked partial"); assert.equal(rw.units.size, 4); assert.ok(!rw.issues.includes("truncated_partial"));
   assert.match(source.slice(source.indexOf("async function cnBldKnowledgeOne("), source.indexOf("async function cnBldLegacyOne(")), /cnKnowledgeLessonPartial\(e,prepared\)/);
 });
 console.log(n + " depth checks passed" + (process.exitCode ? " WITH FAILURES" : ""));

@@ -5675,7 +5675,7 @@ async function cnKnowledgePlanInput(d,r){
       if(!refs.length||refs.some(s=>s.materialId!==m.id||!s.blockId))throw {code:'knowledge_incomplete'};
       const order={materialIndex:mi,pageIndex:+(u.order&&u.order.pageIndex)||0,block:+(u.order&&u.order.block)||0,offset:u.order&&Number.isFinite(+u.order.offset)?+u.order.offset:0};
       /* a heading of the document read as a «statement»: the content is its one quote, the quote is an emphasised block, at most 6 words → no lesson about a heading (T-047); terms stay */
-      const heading=u.type==='statement'&&u.extractionStatus==='extracted'&&typeof u.content==='string'&&refs.length===1&&refs[0].kind==='emphasis_fragment'&&Number.isFinite(refs[0].start)&&Number.isFinite(refs[0].end)&&refs[0].end-refs[0].start===u.content.length&&u.content.trim().split(/\s+/).length<=6;
+      const heading=u.type==='statement'&&u.extractionStatus==='extracted'&&typeof u.content==='string'&&refs.length===1&&refs[0].kind==='emphasis_fragment'&&Number.isFinite(refs[0].start)&&Number.isFinite(refs[0].end)&&refs[0].end-refs[0].start===u.content.length&&u.content.trim().split(/\s+/).length<=6&&!/[.;:!?]$/.test(u.content.trim())&&!/ [–—-] | = /.test(u.content);   // a sentence or a definition «X – Y» is not a heading
       const eligible=u.extractionStatus==='extracted'&&u.sourceLinkStatus==='checked'&&u.content!==null&&u.content!==undefined&&!heading;
       if(u.type==='visual'&&!eligible)unresolvedVisuals++;
       const label=String(typeof u.content==='string'?u.content:JSON.stringify(u.content??'')).replace(/\s+/g,' ').trim().slice(0,220);
@@ -6488,8 +6488,10 @@ function cnBldFallbackReason(code){
     invalid_response:T3('Ответ AI нельзя было проверить; показаны исходные пункты.','The AI response could not be validated; source items are shown.','TI vastust ei saanud kontrollida; näidatakse lähtesisu.'),
     ai_unavailable:T3('AI недоступен; показаны исходные пункты.','AI was unavailable; source items are shown.','TI polnud saadaval; näidatakse lähtesisu.')})[code]||'';
 }
-const CN_KLESSON={version:2,units:40,blocks:240,blockChars:6000,inputChars:36000,outputChars:36000,claimChars:500,intro:6,savedChars:600000};
-const cnKnowledgeClaimLimit=n=>Math.max(1,Math.min(4,Math.floor(64/Math.max(1,n))));   // the same formula as lessonPrompt of the function (with lessonDepth 2); intro: at most CN_KLESSON.intro
+const CN_KLESSON={version:2,units:40,blocks:240,blockChars:6000,inputChars:36000,outputChars:40000,claimChars:500,intro:6,savedChars:600000};
+/* the same formula as lessonPrompt of the function with lessonDepth 2; without it (an older function, see cnKnowledgeLessonCall) the old limits: min(7,floor(32/n)) per unit, 4 in the intro */
+const cnKnowledgeClaimLimit=(n,old)=>old?Math.max(1,Math.min(7,Math.floor(32/Math.max(1,n)))):Math.max(1,Math.min(4,Math.floor(40/Math.max(1,n))));
+let CN_DEPTH_OFF=false;   // set for the session when the function refused lessonDepth (400 invalid_input): the deeper lesson is not asked again
 function cnKnowledgeContentText(type,value){
   if(typeof value==='string')return value;
   if(type==='process'&&value&&Array.isArray(value.steps))return value.steps.map((x,i)=>(i+1)+'. '+x).join('\n');
@@ -6630,13 +6632,13 @@ function cnKnowledgeLessonClean(raw,prepared){
     return out;
   };
   const allBlockIds=new Set(sourceBlocks.map(x=>x.id));
-  intro.push(...claims(raw.intro,allBlockIds,CN_KLESSON.intro));
+  intro.push(...claims(raw.intro,allBlockIds,prepared.depthOff?4:CN_KLESSON.intro));
   if(!Array.isArray(raw.units)||raw.units.length>CN_KLESSON.units){issue('invalid_unit_output');}
   const seen=new Set();
   (Array.isArray(raw.units)?raw.units:[]).forEach(x=>{
     if(!x||typeof x.id!=='string'||!unitMap.has(x.id)){issue('unknown_unit_output');return;}
     if(seen.has(x.id)){issue('duplicate_unit_output');return;}seen.add(x.id);
-    const allowed=new Set(unitMap.get(x.id).sourceBlockIds),accepted=claims(x.claims,allowed,cnKnowledgeClaimLimit(units.length));byUnit.set(x.id,accepted);
+    const allowed=new Set(unitMap.get(x.id).sourceBlockIds),accepted=claims(x.claims,allowed,cnKnowledgeClaimLimit(units.length,prepared.depthOff));byUnit.set(x.id,accepted);
     if(!accepted.length)issue('unit_without_supported_claim');
   });
   if(seen.size!==units.length)issue('unit_output_missing');
@@ -6645,7 +6647,7 @@ function cnKnowledgeLessonClean(raw,prepared){
   return {generationStatus:complete?'ai':any?'partial':'fallback',intro:intro,units:byUnit,issues:issues};
 }
 /* A lesson reply cut short at the token limit (T-047, as T-034 does for the outline): read only the WHOLE objects of "intro" and "units" of the text, nothing is repaired or guessed;
-   they pass the same cnKnowledgeLessonClean. {intro,units,introClosed} or null when nothing whole. */
+   they pass the same cnKnowledgeLessonClean. Returns {intro:[whole objects],units:[whole objects]} (either may be empty), or null when the text is not a JSON object text at all. */
 function cnKnowledgeLessonSalvage(text){
   if(typeof text!=='string'||text.length>200000)return null;
   const out={intro:[],units:[]};let depth=0,str=false,esc=false,tok=-1,last='',key='',arr='',start=-1;
@@ -6674,11 +6676,22 @@ function cnKnowledgeLessonPartial(e,prepared){
   const s=cnKnowledgeLessonSalvage(e.text);if(!s||(!s.intro.length&&!s.units.length))return null;
   const r=cnKnowledgeLessonClean({intro:s.intro,units:s.units},prepared);
   if(r.generationStatus==='fallback')return null;
+  if(r.generationStatus==='ai')return r;   // everything arrived whole and valid: the cut fell after the last unit, nothing is missing
   r.generationStatus='partial';if(r.issues.indexOf('truncated_partial')<0)r.issues.push('truncated_partial');return r;
 }
 async function cnKnowledgeLessonCall(prepared,invoke){
   if(typeof invoke!=='function')throw {code:'ai_unavailable'};
-  const raw=await invoke(prepared.input);
+  const plain=()=>{const i={...prepared.input};delete i.lessonDepth;prepared.depthOff=true;return i;};
+  let raw;
+  if(CN_DEPTH_OFF||prepared.depthOff)raw=await invoke(plain());
+  else{
+    try{raw=await invoke(prepared.input);}
+    catch(e){
+      /* an older function does not know lessonDepth and refuses the request before any charge: once more without it, the old limits */
+      if(e&&e.code==='invalid_input'&&/^lesson:/.test(String(e.message||''))&&prepared.input&&prepared.input.lessonDepth===2){CN_DEPTH_OFF=true;raw=await invoke(plain());}
+      else throw e;
+    }
+  }
   return {raw:raw,result:cnKnowledgeLessonClean(raw,prepared)};
 }
 function cnKnowledgeLessonStatusHtml(p){

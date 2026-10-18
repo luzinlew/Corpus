@@ -664,8 +664,8 @@ async function main() {
   assert.match(source.slice(source.indexOf("function cleanLessonPlate("), source.indexOf("function cleanLessonCard(")), /cnKnowledgeLessonMetaClean\(sp,true\)/, "existing import path reloads v2 metadata and marks source files for review");
   assert.match(source, /const CONTENT_KEYS=\[[^\]]*'knowledgeId'/, "exported v2 cards retain their KnowledgeUnit linkage");
   assert.equal(lessonCalls, 0, "offline generation helper tests do not call a real or mocked remote API");
-  assert.match(source.slice(source.indexOf("const CN_KLESSON="), source.indexOf("function cnKnowledgeContentText(")), /outputChars:36000/);
-  assert.match(serverSource, /LS_MAX_TOKENS = 4000, LS_KNOWLEDGE_MAX_TOKENS = 6000/);
+  assert.match(source.slice(source.indexOf("const CN_KLESSON="), source.indexOf("function cnKnowledgeContentText(")), /outputChars:40000/);
+  assert.match(serverSource, /LS_MAX_TOKENS = 4000, LS_KNOWLEDGE_MAX_TOKENS = 8000/);
   assert.match(serverSource, /if \(input\?\.kind === "knowledge-v1"\) return/);
   assert.match(serverSource, /u\.content === null \|\| u\.content === undefined \|\| JSON\.stringify\(u\.content\)\.length > 3000/);
   assert.match(source, /truncated_response/);
@@ -727,7 +727,7 @@ async function main() {
   }
 
   console.log(`KNOWLEDGE PLAN MOCK: ${eligibleUnits.length} units, input ${JSON.stringify(knowledgePlan.inp).length} chars, response ${JSON.stringify(groupedRaw).length} chars; 1 existing plan call on success (server output cap: 8000 tokens)`);
-  console.log(`KNOWLEDGE LESSON MOCK: ${prepared.units.length} units, ${prepared.blocks.length} source blocks, input ${prepared.inputChars} chars, response ${JSON.stringify(mockLesson).length} chars; one mocked lesson call per built lesson (server output cap: 6000 tokens; no paid calls)`);
+  console.log(`KNOWLEDGE LESSON MOCK: ${prepared.units.length} units, ${prepared.blocks.length} source blocks, input ${prepared.inputChars} chars, response ${JSON.stringify(mockLesson).length} chars; one mocked lesson call per built lesson (server output cap: 8000 tokens; no paid calls)`);
   console.log("COURSE LOGIC TESTS PASSED (source diagnostics, citations/evidence, legacy terms compatibility, KnowledgeUnit discovery/planning/coverage, v2 lesson sourcing/validation/fallback/save-load, v1/v2 routing, one call per lesson)");
 }
 

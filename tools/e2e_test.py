@@ -1941,6 +1941,36 @@ async def main():
             check('own AI icon: no ic(\'spark\' left in the source; Claude buttons use ai, OCR/streak/hard do not',
                   "ic('spark'" not in src_t and "spark:'" not in src_t
                   and all(("data-act=\"edAI\">'+ic(S.sample&&S.imgOK?'ai'" in src_t, "id=\"hAI\">'+ic('ai'" in src_t, "id=\"cmpAI\">'+ic('ai'" in src_t, "data-act=\"edSugg\">'+ic('scan'" in src_t, "data-act=\"edOCR\" aria-label=\"Распознать текст в рамке\" title=\"Распознать текст в рамке\">'+ic('scan'" in src_t, "icon:'ai',label:t,raw:1" in src_t)))
+            # ---------- T-046 icon motion ----------
+            ICM = """(()=>{const d=document.createElement('div');d.id='icm';d.style.cssText='position:fixed;left:0;top:0;opacity:.01';
+              d.innerHTML=['ai','chat','flame','target','scan'].map(n=>ic(n,32)).join('')+'<span class="streak">'+ic('flame',14)+'5</span>';
+              document.body.appendChild(d);
+              const q=(n,c)=>d.querySelector((n==='streak'?'.streak ':'')+'svg[data-ic='+(n==='streak'?'flame':n)+'] '+c);
+              const parts=[['ai','.a-star'],['ai','.a-bub'],['chat','.a-l1'],['chat','.a-l2'],['chat','.a-bub'],['flame','.a-fl'],['target','.a-c1'],['target','.a-c2'],['target','.a-c3'],['scan','.a-bar'],['scan','.a-sc']];
+              const r={names:parts.map(([n,c])=>q(n,c)?getComputedStyle(q(n,c)).animationName:'MISSING'),
+                iter:parts.map(([n,c])=>q(n,c)?getComputedStyle(q(n,c)).animationIterationCount:'MISSING'),
+                streak:getComputedStyle(q('streak','.a-fl')).animationIterationCount,
+                flameOwn:getComputedStyle(q('flame','.a-fl')).animationIterationCount};
+              d.remove();return r;})()"""
+            icm = await pg.evaluate(ICM)
+            check('icon motion: inner parts of ai/chat/flame/target/scan animate in the normal mode', all(x!='none' and x!='MISSING' for x in icm['names']))
+            check('icon motion: only the streak flame loops forever, the other icons play a finite number of times', icm['streak']=='infinite' and all(x!='infinite' for x in icm['iter']) and icm['flameOwn']!='infinite')
+            await pg.emulate_media(reduced_motion='reduce')
+            icm = await pg.evaluate(ICM)
+            check('icon motion: prefers-reduced-motion switches every icon animation off', all(x=='none' for x in icm['names']))
+            await pg.emulate_media(reduced_motion='no-preference')
+            await pg.evaluate("document.documentElement.classList.add('calm')")
+            icm = await pg.evaluate(ICM)
+            await pg.evaluate("document.documentElement.classList.remove('calm')")
+            check('icon motion: html.calm switches every icon animation off', all(x=='none' for x in icm['names']))
+            check('icon motion: icons keep their parts and data-ic; at rest the parts are not transformed', await pg.evaluate("""(()=>{const d=document.createElement('div');d.style.cssText='position:fixed;left:0;top:0';
+              d.innerHTML=['ai','chat','flame','target','scan'].map(n=>ic(n,32)).join('');document.body.appendChild(d);
+              d.getAnimations({subtree:true}).forEach(a=>a.finish());
+              const need={ai:['.a-bub','.a-star'],chat:['.a-bub','.a-l1','.a-l2'],flame:['.a-fl'],target:['.a-c1','.a-c2','.a-c3'],scan:['.a-bar','.a-sc']};
+              let ok=true;for(const n in need){const sv=d.querySelector('svg[data-ic='+n+']');if(!sv){ok=false;continue;}
+                for(const c of need[n]){const e=sv.querySelector(c);if(!e){ok=false;continue;}const cs=getComputedStyle(e);if(cs.transform!=='none'&&cs.transform!=='matrix(1, 0, 0, 1, 0, 0)')ok=false;if(parseFloat(cs.opacity)!==1)ok=false;}}
+              for(const e of d.querySelectorAll('.a-sp1,.a-sp2'))if(parseFloat(getComputedStyle(e).opacity)!==0)ok=false;
+              d.remove();return ok;})()"""))
             await pg.evaluate("go({name:'home'})")
             # ---------- «Hard» virtual deck: tile, all modes, schedule-affecting answers, leaving after 3 correct in a row ----------
             await pg.evaluate("go({name:'library'})")

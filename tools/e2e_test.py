@@ -4652,6 +4652,34 @@ async def main():
               return {un:Array.from(out.un),fr:Array.from(out.fr),fu:fu,ff:ff};}""", {'un': c_vomer['id'], 'fr': les[1]['cards'][1]['id']})
             check('lesson pictures: the study never asks «find it on the picture» for the card without a frame (mixed and find modes), and still asks it for a framed card',
                   'find' not in modes46['un'] and modes46['fu'] == 'hideAll' and 'find' in modes46['fr'] and modes46['ff'] == 'find', json.dumps(modes46))
+            check('lesson pictures: no recognition of the drawn pages ran during the build (both lessons found enough captions in the text layer; a page without a choice is never read)',
+                  (await pp.evaluate("window.__cnOcrRuns|0")) == 0)
+            # the card without a frame is asked in a form that does not speak of a frame: its explanation is the question, its name the answer (hide, choice, type) in et, ru and en
+            ASK46 = {'et': {'hideAll': 'Meenuta struktuuri nimi', 'choice': 'Mis struktuur see on?', 'type': 'Kirjuta struktuuri nimi'},
+                     'ru': {'hideAll': 'Вспомните название структуры', 'choice': 'Какая это структура?', 'type': 'Напишите название структуры'},
+                     'en': {'hideAll': 'Recall the name of the structure', 'choice': 'Which structure is this?', 'type': 'Type the name of the structure'}}
+            uf46 = {}
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pp, lg_)
+                uf46[lg_] = await pp.evaluate("""async(id)=>{const out={},c=cardById(id);startStudy(c.deckId,true,[c]);await new Promise(r=>setTimeout(r,300));
+                  for(const m of ['hideAll','choice','type']){
+                    SS.mode=m;SS.fallback=false;setupCard();updStudy();
+                    const ask=document.querySelector('#panel').innerText,cm=SS.cm;
+                    if(cm==='choice')doPick(SS.opts.indexOf(c.term));else if(cm==='type'){document.querySelector('#typeIn').value=c.term;doCheck();}else doReveal();
+                    out[m]={cm:cm,ask:ask,phase:SS.phase,ans:document.querySelector('#panel').innerText};}
+                  __setSS(null);return out;}""", c_vomer['id'])
+            check('lesson pictures: the card without a frame is asked as «recall / which structure / type the name» with its explanation, never as «under the frame» (hide, choice, type; et, ru, en), and it can be answered',
+                  all(uf46[lg_][m_]['cm'] == m_ and ASK46[lg_][m_] in uf46[lg_][m_]['ask'] and 'The source states this' in uf46[lg_][m_]['ask'] and uf46[lg_][m_]['phase'] == 'answer' and 'Os vomer' in uf46[lg_][m_]['ans']
+                      and not re.search(r'рамк|raam|frame', uf46[lg_][m_]['ask'], re.I) for lg_ in uf46 for m_ in ASK46['et']), json.dumps(uf46, ensure_ascii=False)[:900])
+            await ui_lang(pp, 'et')
+            nz46 = await pp.evaluate("""async(a)=>{const W=()=>[...document.querySelectorAll('#masks .mk,#masks .cm')].map(e=>[parseFloat(e.style.width),parseFloat(e.style.height)]);const out={};
+              const cs=cardsOfPlate(a.pid);
+              startStudy(cs[0].deckId,true,cs);await new Promise(r=>setTimeout(r,300));SS.mode='hideAll';setupCard();updStudy();out.study=W();
+              startStudy(cs[0].deckId,false,cs);await new Promise(r=>setTimeout(r,300));out.intro=SS.intro?{ids:SS.intro.ids.slice(),w:W()}:null;
+              __setSS(null);openPractice(a.pid);await new Promise(r=>setTimeout(r,400));out.pr=W();return out;}""", {'pid': les[1]['id']})
+            ok_nz = lambda w: len(w) >= 3 and all(x_ > 0 and y_ > 0 for x_, y_ in w)
+            check('lesson pictures: study, introduction and practice draw no empty box for the card without a frame; the introduction goes through the three framed cards only',
+                  ok_nz(nz46['study']) and nz46['intro'] is not None and c_vomer['id'] not in nz46['intro']['ids'] and len(nz46['intro']['ids']) == 3 and ok_nz(nz46['intro']['w']) and ok_nz(nz46['pr']), json.dumps(nz46)[:600])
             exp46 = await pp.evaluate("""async(did)=>{const f=folderById(CDRAFTS.get(did).courseId),ids=decksInFolder(f.id).map(d=>d.id),r=await buildExport(ids,true,f.id);
               return {fc:r.out.plates.map(p=>p.frameCount).sort(),cards:r.out.cards.filter(c=>c.knowledgeId).map(c=>[c.term,c.x,c.y,c.w,c.h])};}""", did_p)
             check('lesson pictures: the export of the course keeps the frame counts (4 and 3) and the frames of the cards (the empty box of «Os vomer» too)',

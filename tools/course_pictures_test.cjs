@@ -83,9 +83,32 @@ async function t_photos() {
   r = await pick(deck(), terms, null, new Set());
   assert.equal(r, null, "the pages cannot be read: no choice, no error");
 }
+async function t_cache() {
+  const pick = fn("cnKnowledgePicPick"), cache = new Map(), terms = S("Os frontale", "Os parietale", "Os nasale");
+  let pagesReads = 0, docReads = 0;
+  const pages = { M1: [page(1, true, "Os frontale"), page(2, true, "Os frontale", "Os parietale", "Os nasale")], M2: [] };
+  context.cnPagesOf = async m => { pagesReads++; return clone(pages[m.id] || []); };
+  context.cnDocData = async () => { docReads++; return { labels: [{ t: "Os frontale", x: 1, y: 1, w: 2, h: 2 }] }; };
+  for (let lesson = 0; lesson < 6; lesson++) await pick(deck(), terms, null, new Set(), cache);
+  assert.deepEqual([pagesReads, docReads], [1, 1], "six lessons of one build read the pictures material once and the photo captions once");
+  await pick(deck(), terms, null, new Set());
+  assert.equal(pagesReads, 2, "without a cache every call reads (the old way stays correct)");
+}
+function t_used_ocr() {
+  const used = fn("cnKnowledgePicUsed"), ocr = fn("cnKnowledgePicOcr");
+  const d = { id: "D", _plan: { at: 7, parts: [{ lessons: [{ id: "a" }, { id: "b" }] }, { lessons: [{ id: "c" }] }] } };
+  const plates = [{ cb: "D|7|a", picRef: "g:M:1" }, { cb: "D|7|b", picRef: "g:M:2" }, { cb: "D|7|c", picRef: "g:M:3" }, { cb: "D|6|a", picRef: "g:M:9" }, { cb: "D|7|a" }];
+  assert.deepEqual([...used(d, "a", plates)], [], "the first lesson has no earlier lesson");
+  assert.deepEqual([...used(d, "b", plates)], ["g:M:1"], "only lessons earlier in the plan count; later lessons and an old plan do not");
+  assert.deepEqual([...used(d, "c", plates)].sort(), ["g:M:1", "g:M:2"], "the third lesson sees the first two");
+  assert.deepEqual([...used(d, "b", plates.slice().reverse())], ["g:M:1"], "the order of the plates (of building) does not matter");
+  assert.equal(ocr(null).ocr, false, "no choice: no recognition");
+  assert.equal(ocr({ matched: 0 }).ocr, false, "a page with no structure found: no recognition");
+  assert.deepEqual(JSON.parse(JSON.stringify(ocr({ matched: 2 }))), { ocr: true, max: 40 }, "a page chosen by its captions: recognition of at most 40 boxes");
+}
 (async () => {
   let failed = 0;
-  for (const [name, f] of [["P1 count of the structures a page names", t_count], ["P2 rank: most, heading, not used, lower page, threshold", t_rank], ["P3 choice among the pages of the picture materials", t_pick], ["P4 photos and unreadable materials", t_photos]]) {
+  for (const [name, f] of [["P1 count of the structures a page names", t_count], ["P2 rank: most, heading, not used, lower page, threshold", t_rank], ["P3 choice among the pages of the picture materials", t_pick], ["P4 photos and unreadable materials", t_photos], ["P5 the pages are read once for a build", t_cache], ["P6 used pages count earlier lessons only; recognition only on a chosen page", t_used_ocr]]) {
     try { await f(); console.log("PASS " + name); } catch (e) { failed++; console.log("FAIL " + name + "\n  " + String(e && (e.stack || e.message) || e).split("\n").slice(0, 10).join("\n  ")); }
   }
   if (failed) process.exitCode = 1; else console.log("COURSE PICTURES TESTS PASSED");

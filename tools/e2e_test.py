@@ -4306,6 +4306,14 @@ async def main():
             check('pdf frames: «Acromion scapulae» in a paragraph gets no frame, but the separate caption of the same name does (found on its own line); a caption of two pieces is joined; a name that is not on the page gets none; every candidate has ≤ 50 characters',
                   fr['a'] and 20 < fr['a']['x'] < 60 and fr['b'] and fr['c'] is True and fr['d'] is False and fr['n'] is True, json.dumps(fr))
             check('pdf frames: a line of 5 pieces is no candidate (paragraph), a short line is; when the page has a picture, the candidates inside it come first', fr['long'] == ['Spina scapulae'] and fr['firstImg'] is True, json.dumps(fr['long']))
+            fm = await pa.evaluate("""()=>{
+              const c=(t,x,y,w)=>({t:t,x:x,y:y,w:w||10,h:3});
+              const m=cnBldMatch([{id:'a',la:'Eesmine osa'},{id:'b',la:'Keskmine osa'},{id:'c',la:'Fossa cranii media'},{id:'d',la:'Pars posterior'},{id:'e',la:'Arteria carotis'}],
+                [c('Pars anterior',55,24,15),c('Pars media',55,29,13),c('Fossa cranii',10,10,12),c('media',23.5,10,6),c('Pars posterlor',55,34,15),c('A. carotis',5,50)],1.78);
+              const n=cnBldMatch([{id:'a',la:'Pars anterior'}],[c('Pars posterior',5,5)]);
+              return {ids:[...m.keys()].sort().join(''),n:n.size};}""")
+            check('pdf frames (T-058): an Estonian name over a Latin caption, a caption cut in two pieces, a slip of OCR in a long word and an abbreviation get frames; anterior is not posterior',
+                  fm['ids'] == 'abcde' and fm['n'] == 0, json.dumps(fm))
 
             # --- the course is an ordinary course: export → import into a clean account (order, P, notes, sources; no cb, no cards without a frame) ---
             exp = await pa.evaluate("async()=>{const f=S.folders[0];const r=await buildExport(S.decks.filter(d=>d.folderId===f.id).map(d=>d.id),false,f.id);return r.out;}")

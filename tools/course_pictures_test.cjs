@@ -8,7 +8,7 @@ const { context, between } = require("./course_logic_test.cjs");
 const run = code => vm.runInContext(code, context);
 run("const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));const r2=v=>Math.round(v*100)/100;");
 run(between("const cnStem=", "\n"));
-run(between("function cnBldMatch(", "\n/* ---- тексты"));
+run(between("const CN_MABB=", "\n/* ---- тексты"));
 const fn = name => run(name);
 const S = (...names) => names.map((la, i) => ({ id: "u" + i, la }));
 const lines = (...t) => t;
@@ -72,7 +72,7 @@ async function t_pick() {
 }
 async function t_photos() {
   const pick = fn("cnKnowledgePicPick"), terms = S("Os frontale", "Os parietale", "Os nasale");
-  const lab = (...t) => t.map((x, i) => ({ t: x, x: 10 + i, y: 10, w: 5, h: 2 }));
+  const lab = (...t) => t.map((x, i) => ({ t: x, x: 10 + 10 * i, y: 10, w: 5, h: 2 }));
   stub({ M1: [page(1, true, "Os frontale")], M2: [] }, { L0: lab("Os frontale", "Os parietale", "Os nasale") });
   let r = await pick(deck(), terms, null, new Set());
   assert.deepEqual([r.ref, r.matched], ["p:M3:0", 3], "a photo with its own labels wins over a page with one");
@@ -106,9 +106,66 @@ function t_used_ocr() {
   assert.equal(ocr({ matched: 0 }).ocr, false, "a page with no structure found: no recognition");
   assert.deepEqual(JSON.parse(JSON.stringify(ocr({ matched: 2 }))), { ocr: true, max: 40 }, "a page chosen by its captions: recognition of at most 40 boxes");
 }
+/* T-058: frames of the captions (cnBldMatch): joined pieces, abbreviations, OCR slips in long words, Estonian names of Latin captions; no frame on a chance word */
+function t_match() {
+  const match = (terms, cands, ar) => context.cnBldMatch(terms.map((la, i) => ({ id: "u" + i, la })), cands, ar);
+  const C = (t, x, y, w = 10, h = 3) => ({ t, x, y, w, h });
+  const hit = (terms, cands, i = 0) => match(terms, cands).get("u" + i);
+  // pieces of one caption
+  let m = hit(["Fossa cranii media"], [C("Fossa cranii", 10, 10, 12), C("media", 23.5, 10, 6)]);
+  assert.ok(m && m.x === 10 && m.w >= 19, "two pieces of one line are one caption; the frame covers both");
+  m = hit(["Fossa cranii posterior"], [C("Fossa cranii", 10, 10, 12), C("posterior", 10, 13.6, 9)]);
+  assert.ok(m && m.h >= 6, "two lines one under the other are one caption");
+  m = hit(["Fossa cranii media"], [C("Fossa", 10, 10, 6), C("cranii", 10, 13.4, 6), C("media", 10, 16.8, 6)]);
+  assert.ok(m, "three lines in a column");
+  assert.equal(hit(["Fossa cranii media"], [C("Fossa cranii", 10, 10, 12), C("media", 70, 60, 6)]), undefined, "pieces far apart are not joined");
+  assert.equal(hit(["Fossa cranii media"], [C("Fossa cranii", 10, 10, 12), C("media", 10, 30, 6)]), undefined, "lines with a gap are not joined");
+  // abbreviations, both ways
+  assert.ok(hit(["Arteria carotis"], [C("A. carotis", 5, 5)]), "A. = arteria");
+  assert.ok(hit(["A. carotis"], [C("Arteria carotis", 5, 5)]), "the abbreviation on the lesson side");
+  assert.ok(hit(["Arteria carotis"], [C("A carotis", 5, 5)]), "the dot lost by OCR");
+  assert.ok(hit(["Ligamentum cruciatum"], [C("Lig. cruciatum", 5, 5)]), "lig.");
+  assert.ok(hit(["Nervus facialis"], [C("N. facialis", 5, 5)]) && hit(["N. facialis"], [C("Nervus facialis", 5, 5)]), "n.");
+  assert.ok(hit(["Processus styloideus"], [C("Proc. styloideus", 5, 5)]), "proc.");
+  assert.ok(hit(["Fossa cranii media"], [C("F. cranii media", 5, 5)]) && hit(["F. cranii media"], [C("Fossa cranii media", 5, 5)]), "f.");
+  assert.ok(hit(["Musculi glutei"], [C("Mm. glutei", 5, 5)]), "mm.");
+  assert.equal(hit(["Arteria carotis"], [C("A. femoralis", 5, 5)]), undefined, "an abbreviation does not match another name");
+  assert.equal(hit(["Nervus facialis"], [C("N. ulnaris", 5, 5)]), undefined, "n. + another word");
+  // OCR slips in long words
+  assert.ok(hit(["Processus styloideus"], [C("Processus styloidcus", 5, 5)]), "one wrong letter in a long word");
+  assert.ok(hit(["Foramen magnum"], [C("Foramen magnurn", 5, 5)]), "rn read for m");
+  assert.ok(hit(["Mandibula"], [C("Mandihula", 5, 5)]), "one letter in a one-word name of nine letters");
+  // a chance word is not a caption
+  assert.equal(hit(["Ulna"], [C("Ulma", 5, 5)]), undefined, "a short word: exact only");
+  assert.equal(hit(["Costa"], [C("Cosla", 5, 5)]), undefined, "five letters, one slip (0.8): no");
+  assert.equal(hit(["Femur"], [C("Humerus", 5, 5)]), undefined, "another bone");
+  assert.equal(hit(["Vertebra C1"], [C("Vertebra C2", 5, 5)]), undefined, "a number is exact");
+  assert.equal(hit(["Os sphenoidale"], [C("Os ethmoidale", 5, 5)]), undefined, "two bones");
+  assert.equal(hit(["Fossa cranii media"], [C("Fossa cranii media et", 5, 5)]), undefined, "an extra word");
+  // anterior / posterior stay apart
+  m = match(["Pars anterior", "Pars posterior"], [C("Pars posterior", 5, 20)]);
+  assert.deepEqual([m.has("u0"), m.has("u1")], [false, true], "only the posterior is on the page");
+  assert.equal(hit(["Musculus tibialis anterior"], [C("Musculus tibialis posterior", 5, 5)]), undefined, "a long name differing in the one word that matters");
+  m = match(["Pars anterior", "Pars posterior"], [C("Pars posterlor", 5, 20), C("Pars anterior", 5, 10)]);
+  assert.deepEqual([m.get("u0").y, m.get("u1").y], [10, 20], "each name gets its own caption");
+  assert.equal(hit(["Fossa cranii interna"], [C("Fossa cranii externa", 5, 5)]), undefined, "interna / externa");
+  // one caption names one structure
+  m = match(["Pars media", "Pars media"], [C("Pars media", 5, 5)]);
+  assert.equal(m.size, 1, "one caption, one frame");
+  m = match(["Pars media"], [C("Pars media", 5, 5), C("Pars media", 5, 5)]);
+  assert.equal(m.size, 1);
+  // Estonian names of Latin captions (a lesson in Estonian over a Latin picture)
+  const et = match(["BASIS CRANII EXTERNA", "Eesmine osa", "Keskmine osa", "Tagumine osa"],
+    [C("Välimine koljupõhimik", 56, 6, 25), C("basis cranii externa", 56, 13, 24), C("Pars anterior", 55, 24, 15), C("(3 osa)", 71, 24, 6), C("Pars media", 55, 29, 13), C("Pars posterior", 55, 34, 15), C("Pars anterior (3 osa)", 55, 24, 22)]);
+  assert.equal(et.size, 4, "four of four: the three parts are named in Estonian, the captions in Latin");
+  assert.ok(et.get("u1").y === 24 && et.get("u3").y === 34, "each part on its own line");
+  assert.equal(hit(["Eesmine osa"], [C("Pars posterior", 5, 5)]), undefined, "eesmine is anterior, not posterior");
+  assert.equal(hit(["Eesmine kolju"], [C("Pars anterior", 5, 5)]), undefined, "a name that is not fully translated gets no frame");
+  assert.equal(hit(["Osa"], [C("Pars", 5, 5)]), undefined, "one translated word alone is no name");
+}
 (async () => {
   let failed = 0;
-  for (const [name, f] of [["P1 count of the structures a page names", t_count], ["P2 rank: most, heading, not used, lower page, threshold", t_rank], ["P3 choice among the pages of the picture materials", t_pick], ["P4 photos and unreadable materials", t_photos], ["P5 the pages are read once for a build", t_cache], ["P6 used pages count earlier lessons only; recognition only on a chosen page", t_used_ocr]]) {
+  for (const [name, f] of [["P1 count of the structures a page names", t_count], ["P2 rank: most, heading, not used, lower page, threshold", t_rank], ["P3 choice among the pages of the picture materials", t_pick], ["P4 photos and unreadable materials", t_photos], ["P5 the pages are read once for a build", t_cache], ["P6 used pages count earlier lessons only; recognition only on a chosen page", t_used_ocr], ["P7 frames: pieces, abbreviations, OCR slips, Estonian names; no frame on a chance word", t_match]]) {
     try { await f(); console.log("PASS " + name); } catch (e) { failed++; console.log("FAIL " + name + "\n  " + String(e && (e.stack || e.message) || e).split("\n").slice(0, 10).join("\n  ")); }
   }
   if (failed) process.exitCode = 1; else console.log("COURSE PICTURES TESTS PASSED");

@@ -6884,7 +6884,7 @@ async function cnBldRefreshRun(d,b){
       b.i=1;b.dt.labels=pic.labels.length;
       const oldA=p.assetId;p.assetId=up.id;p.w=pic.w;p.h=pic.h;persist('plates',p.id);
       if(oldA)afterWrites(()=>S.assets.delete(oldA).catch(e=>console.warn('asset delete',oldA,e)));
-      const cards=cardsOfPlate(p.id),fr=cnBldMatch(cards.map(c=>({id:c.id,la:c.term})),pic.labels);
+      const cards=cardsOfPlate(p.id),fr=cnBldMatch(cards.map(c=>({id:c.id,la:c.term})),pic.labels,pic.w/pic.h);
       let framed=0;
       cards.forEach(c=>{if(c.noframe&&fr.has(c.id)){const rc=fr.get(c.id);c.x=rc.x;c.y=rc.y;c.w=rc.w;c.h=rc.h;delete c.noframe;persist('terms',c.id);framed++;}});
       b.rf.framed+=framed;b.dt.frames=framed;
@@ -7026,7 +7026,7 @@ async function cnBldPic(d,b,ref,terms,opts){
     }
     try{const tc=await cnTO(pg.getTextContent());labels=cnPageCands(tc.items,vp,imgs);}catch(e){}
     /* the captions of an atlas are part of the picture, the text layer of the page does not have them: when the text gave a name to fewer than half of the structures, the drawn page is read like a photo */
-    if(terms&&terms.length&&!(opts&&opts.ocr===false)&&cnBldMatch(terms,labels).size*2<terms.length){
+    if(terms&&terms.length&&!(opts&&opts.ocr===false)&&cnBldMatch(terms,labels,cv.width/cv.height).size*2<terms.length){
       cv.naturalWidth=cv.width;cv.naturalHeight=cv.height;window.__cnOcrRuns=(window.__cnOcrRuns|0)+1;
       try{const r=await cnOcrLabels(cv,{stop:()=>b.cancel,step:()=>{},max:opts&&opts.max});labels=labels.concat(r.out);}catch(e){}
     }
@@ -7045,15 +7045,102 @@ function cnBlankIn(cx,imgs){
     return n>0&&mx-mn<12&&sum/n>235;
   });
 }
-/* структуры ↔ подписи: сначала целиком по cnNorm, потом по основам; каждая подпись — одной структуре */
-function cnBldMatch(terms,cands){
-  const out=new Map(),used=new Set(),nk=cands.map(c=>cnNorm(c.t)),sk=cands.map(c=>cnStem(c.t));
-  terms.forEach(t=>{
-    const k=cnNorm(t.la),st=cnStem(t.la);if(!k)return;let best=-1;
-    for(let i=0;i<cands.length;i++)if(!used.has(i)&&nk[i]===k){best=i;break;}
-    if(best<0&&st)for(let i=0;i<cands.length;i++)if(!used.has(i)&&sk[i]===st){best=i;break;}
-    if(best>=0){used.add(best);const c=cands[best],x=clamp(c.x,0,99.7),y=clamp(c.y,0,99.7);out.set(t.id,{x:r2(x),y:r2(y),w:r2(clamp(c.w,0.3,100-x)),h:r2(clamp(c.h,0.3,100-y))});}
+/* структуры ↔ подписи (T-058). Подпись — один или несколько кусков страницы; каждая подпись — одной структуре, каждая рамка — одной подписи (рамки, лежащие друг на друге, — одна).
+   Ступени от строгой к мягкой, каждая проходит по всем структурам до следующей: (0) целиком по cnNorm; (1) слово к слову по основам (6 букв) и сокращениям: «A. carotis» = «Arteria carotis»
+   в обе стороны, «F. cranii media» = «Fossa cranii media», точка, потерянная OCR, не мешает; (2) название по-эстонски над латинской подписью: «Eesmine osa» = «Pars anterior» (только если переведено
+   КАЖДОЕ слово из 2+; порядок слов не важен); (3) одна ошибка OCR в слове длиннее 4 букв, не ниже 0.85 по символам («styloidcus», «magnurn»): остальные слова совпадают точно, числа — только точно.
+   Если не нашлось, подпись, разбитую на 2–3 куска (одна строка или строки подряд столбиком), склеивают и прогоняют те же ступени: «Fossa cranii» + «media». */
+const CN_MABB={a:['arteria','arteriae'],aa:['arteriae','arteria'],v:['vena','venae'],vv:['venae','vena'],n:['nervus','nervi'],nn:['nervi','nervus'],m:['musculus','musculi'],mm:['musculi','musculus'],lig:['ligamentum','ligamenta'],ligg:['ligamenta','ligamentum'],proc:['processus'],for:['foramen','foramina'],f:['fossa','facies','foramen','fissura','fascia'],r:['ramus','rami'],gl:['glandula','glandulae'],art:['articulatio','arteria'],tub:['tuberculum','tubercula']};
+const CN_MET={eesmine:['anterior'],tagumine:['posterior'],keskmine:['media','medius','medium'],ulemine:['superior'],alumine:['inferior'],parem:['dexter','dextra','dextrum'],vasak:['sinister','sinistra','sinistrum'],sisemine:['internus','interna','internum'],valimine:['externus','externa','externum'],osa:['pars'],luu:['os']};
+function cnMTok(s){
+  const w=String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/æ/gi,'ae').replace(/œ/gi,'oe').toLowerCase().replace(/\./g,'. ').replace(/[^a-z0-9.]+/g,' ').trim().split(' ').filter(Boolean),out=[];
+  w.forEach((x,i)=>{
+    const dot=/\.$/.test(x),b=x.replace(/\./g,'');if(!b)return;
+    const ab=Object.hasOwn(CN_MABB,b)&&(dot||(i===0&&w.length>1&&b.length===1));
+    out.push({w:b,ab:ab});
   });
+  return out;
+}
+const cnMStem=w=>w.slice(0,6);
+function cnMEq(x,y){
+  if(x.w===y.w)return true;
+  if(x.ab&&y.ab)return false;
+  if(x.ab)return !/^\d/.test(y.w)&&CN_MABB[x.w].some(s=>cnMStem(s)===cnMStem(y.w));
+  if(y.ab)return !/^\d/.test(x.w)&&CN_MABB[y.w].some(s=>cnMStem(s)===cnMStem(x.w));
+  return cnMStem(x.w)===cnMStem(y.w)&&!/\d/.test(x.w+y.w);
+}
+function cnMLev(a,b){
+  const m=a.length,n=b.length;let p=[];for(let j=0;j<=n;j++)p.push(j);
+  for(let i=1;i<=m;i++){const q=[i];for(let j=1;j<=n;j++)q.push(Math.min(p[j]+1,q[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1)));p=q;}
+  return p[n];
+}
+const cnMFold=w=>w.replace(/rn/g,'m');
+const CN_MTIER=[
+  (t,c)=>!!t.k&&t.k===c.k,
+  (t,c)=>t.tk.length===c.tk.length&&t.tk.every((x,i)=>cnMEq(x,c.tk[i])),
+  (t,c)=>{
+    if(t.tk.length<2||t.tk.length!==c.tk.length||!t.tk.some(x=>Object.hasOwn(CN_MET,x.w)))return false;
+    const free=c.tk.map(()=>true);
+    return t.tk.every(x=>{
+      const alts=Object.hasOwn(CN_MET,x.w)?CN_MET[x.w]:null;
+      const j=c.tk.findIndex((y,k)=>free[k]&&(alts?alts.includes(y.w):cnMEq(x,y)));
+      if(j<0)return false;free[j]=false;return true;
+    });
+  },
+  (t,c)=>{
+    if(t.tk.length!==c.tk.length)return false;
+    let bad=0;
+    for(let i=0;i<t.tk.length;i++){
+      const x=t.tk[i],y=c.tk[i];if(cnMEq(x,y))continue;
+      if(x.ab||y.ab||x.w.length<5||y.w.length<5||/\d/.test(x.w+y.w)||++bad>1)return false;
+      const a=cnMFold(x.w),b=cnMFold(y.w);
+      if(1-cnMLev(a,b)/Math.max(a.length,b.length)<0.85)return false;
+    }
+    return bad===1;
+  }
+];
+const cnMOver=(a,b)=>{const ix=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x),iy=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);return ix>0&&iy>0&&ix*iy>0.3*Math.min(a.w*a.h,b.w*b.h);};
+/* куски подписи: следующий за a — на той же строке справа (зазор до 1.6 высоты строки) или строкой ниже (зазор до 0.8 высоты, колонки перекрываются); ar — ширина/высота картинки */
+function cnMChains(bases,ar){
+  const nx=(a,b)=>{
+    const h=Math.min(a.h,b.h);if(Math.max(a.h,b.h)>1.6*h)return false;
+    if(Math.abs((a.y+a.h/2)-(b.y+b.h/2))<=0.5*h){const g=(b.x-(a.x+a.w))*ar;return g>=-0.3*h&&g<=1.6*h;}
+    const gy=b.y-(a.y+a.h),ox=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
+    return gy>=-0.3*h&&gy<=0.8*h&&ox>=0.3*Math.min(a.w,b.w);
+  };
+  const out=[],add=ch=>{
+    const x0=Math.min(...ch.map(c=>c.x)),y0=Math.min(...ch.map(c=>c.y)),x1=Math.max(...ch.map(c=>c.x+c.w)),y1=Math.max(...ch.map(c=>c.y+c.h)),t=ch.map(c=>c.t).join(' ');
+    out.push({c:{t:t,x:x0,y:y0,w:x1-x0,h:y1-y0},k:cnNorm(t),tk:cnMTok(t)});
+  };
+  for(let i=0;i<bases.length&&out.length<4000;i++)for(let j=0;j<bases.length&&out.length<4000;j++){
+    if(i===j||!nx(bases[i],bases[j]))continue;
+    add([bases[i],bases[j]]);
+    for(let k=0;k<bases.length&&out.length<4000;k++)if(k!==i&&k!==j&&nx(bases[j],bases[k]))add([bases[i],bases[j],bases[k]]);
+  }
+  return out;
+}
+function cnBldMatch(terms,cands,ar){
+  ar=+ar>0?+ar:1.5;
+  const out=new Map(),taken=[],T=terms.map(t=>({id:t.id,k:cnNorm(t.la),tk:cnMTok(t.la)})).filter(t=>t.tk.length),C=cands.map(c=>({c:c,k:cnNorm(c.t),tk:cnMTok(c.t)})).filter(c=>c.tk.length);
+  const put=(t,e)=>{
+    const c=e.c,x=clamp(c.x,0,99.7),y=clamp(c.y,0,99.7),f={x:r2(x),y:r2(y),w:r2(clamp(c.w,0.3,100-x)),h:r2(clamp(c.h,0.3,100-y))};
+    out.set(t.id,f);taken.push({x:f.x,y:f.y,w:f.w,h:f.h});
+  };
+  const run=pool=>{
+    for(const tier of CN_MTIER){
+      for(const t of T){
+        if(out.has(t.id))continue;
+        const e=pool.find(e=>tier(t,e)&&!taken.some(b=>cnMOver(b,e.c)));
+        if(e)put(t,e);
+      }
+    }
+  };
+  run(C);
+  if(T.some(t=>!out.has(t.id)&&t.tk.length>=2)){
+    const bases=C.filter(e=>e.tk.length<=3&&!taken.some(b=>cnMOver(b,e.c))).slice(0,300).map(e=>e.c);
+    const chains=cnMChains(bases,ar);
+    if(chains.length)run(chains);
+  }
   return out;
 }
 /* ---- тексты: отрывки материалов и вопросы экзамена об этих структурах ---- */
@@ -7126,7 +7213,7 @@ function cnKnowledgeVisualRef(d,prepared){
    line of its text layer (or a label of a photo) equals the name (cnNorm, then the stems: the same rule as the frames, cnBldMatch). The page with the most structures wins (at least 2, or 1 and the page of the
    heading); a tie goes to the page of the heading, then to a page no earlier lesson of the course used, then to the earlier page. Nothing is sent anywhere. */
 function cnKnowledgePicCount(structs,texts){
-  const cands=(texts||[]).map(x=>String(x==null?'':x).replace(/\s+/g,' ').trim()).filter(x=>x&&x.length<=50).map(t=>({t:t,x:0,y:0,w:1,h:1}));
+  const cands=(texts||[]).map(x=>String(x==null?'':x).replace(/\s+/g,' ').trim()).filter(x=>x&&x.length<=50).map((t,i)=>({t:t,x:i*3,y:i*3,w:1,h:1}));   // boxes apart: no frame is on another, no pieces are joined
   return cands.length&&structs&&structs.length?cnBldMatch(structs,cands).size:0;
 }
 function cnKnowledgePicRank(cands,used){
@@ -7225,7 +7312,7 @@ async function cnBldKnowledgeOne(d,b,it){
   const p={id:newId('plates'),deckId:dk.id,createdAt:dk.createdAt+CN_BLD.lsStep*(it.li+1),title:l.title.slice(0,200),cb:key,lessonVersion:CN_KLESSON.version,knowledgeIds:l.knowledgeIds.slice(),generationStatus:ai.generationStatus,sourceStatus:prepared.sourceStatus,sourceCompleteness:'not_proven',sourceWarnings:sourceWarnings,visualStatus:visualStatus,intro:intro,knowledgeIntroEvidence:ai.intro,knowledgeUnits:units};
   {const iss=cnIssuesCap((ai.issues||[]).filter(x=>typeof x==='string'&&/^[a-z0-9_:.-]{1,60}$/i.test(x)));if(iss.length)p.issues=iss;}   // T-057: why the lesson is partial (codes only)
   const lg=cnLangOk(LANG);if(lg)p.lang=lg;
-  const labs=pic&&Array.isArray(pic.labels)?pic.labels:[],frames=pic&&up?cnBldMatch(structs,labs):new Map();b.dt.labels=labs.length;b.dt.frames=frames.size;
+  const labs=pic&&Array.isArray(pic.labels)?pic.labels:[],frames=pic&&up?cnBldMatch(structs,labs,pic.w/pic.h):new Map();b.dt.labels=labs.length;b.dt.frames=frames.size;
   if(pic&&up&&frames.size===0&&visualStatus==='source_object_shown')visualStatus='source_page_shown_unresolved';   // a photo whose captions gave no frame is not analysed either
   if(pic&&up){p.assetId=up.id;p.w=pic.w;p.h=pic.h;p.picRef=visual.ref;if(frames.size)p.frameCount=frames.size;if(lessonPage(pic.page)&&pic.page)p.page=pic.page;}
   const cards=[];let k=0;
@@ -7265,7 +7352,7 @@ async function cnBldLegacyOne(d,b,it){
   if(b.cancel)return null;
   /* 1 · рамки */
   b.i=1;b.dt.labels=pic.labels.length;
-  const frames=cnBldMatch(l.terms,pic.labels);b.dt.frames=frames.size;cnBPaint();
+  const frames=cnBldMatch(l.terms,pic.labels,pic.w/pic.h);b.dt.frames=frames.size;cnBPaint();
   /* 2 · отрывки и вопросы экзамена */
   b.i=2;cnBPaint();
   let tx;try{tx=await cnBldText(d,b,l);}catch(e){if(b.cancel)return null;return fail(cnBldErrCode(e));}

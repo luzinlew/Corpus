@@ -1721,12 +1721,12 @@ function go(v){
 function render(){
   STG.vp=null;STG.stage=null;
   const s=SCREENS[view.name]||SCREENS.home;
-  const isTab=TABS.some(t=>t.k===view.name);
+  const isTab=TABS.some(t=>t.k===view.name),isNav=isTab||!!TAB_PARENT[view.name];
   const anim=NAV;NAV=null;app.className=anim||'';
-  app.innerHTML=(isTab?tabBarHtml():'')+s.html();
+  app.innerHTML=(isNav?tabBarHtml():'')+s.html();
   applyStudyLayout();
-  if(isTab)slideTabPill();else LASTTAB=null;
-  if(isTab&&!window.__twIn){window.__twIn=1;if(!RM()){const h=document.documentElement;h.classList.add('tw-in');setTimeout(()=>h.classList.remove('tw-in'),700);}}
+  if(isNav)slideTabPill();else LASTTAB=null;
+  if(isNav&&!window.__twIn){window.__twIn=1;if(!RM()){const h=document.documentElement;h.classList.add('tw-in');setTimeout(()=>h.classList.remove('tw-in'),700);}}
   if(s.mount)s.mount();
   if(typeof CH!=='undefined'&&CH.open){if(view.name==='study'&&SS&&SS.cur||view.name==='practice')chatSync();else chatToggle(false);}
   if(anim&&!RM())countUp(app);
@@ -1740,7 +1740,7 @@ function countUp(root){
   });
 }
 function slideTabPill(){
-  const cur=TABS.findIndex(t=>t.k===view.name);const p=$('.tabpill');
+  const cur=TABS.findIndex(t=>t.k===(TAB_PARENT[view.name]||view.name));const p=$('.tabpill');
   if(p&&LASTTAB!=null&&LASTTAB!==cur){p.getBoundingClientRect();requestAnimationFrame(()=>{p.style.transform='translateX('+(cur*100)+'%)';p.style.setProperty('--ti',cur);});const b=document.querySelectorAll('.tabbar button')[cur];if(b)b.classList.add('bump');}
   LASTTAB=cur;
 }
@@ -1877,9 +1877,11 @@ const TABS=[
   {k:'globalStats',label:'Статистика',icon:'chart'},
   {k:'settings',label:'Ещё',icon:'more'}
 ];
+/* внутренние экраны с сайдбаром (только ≥900): родительская вкладка */
+const TAB_PARENT={folder:'library',deck:'library',hard:'library'};
 function tabBarHtml(){
-  const cur=TABS.findIndex(t=>t.k===view.name);const from=LASTTAB==null?cur:LASTTAB;
-  return '<div class="tabwrap"><div class="tabbrand"><span class="sv-logo" aria-hidden="true"></span>Corpus</div><nav class="tabbar" role="tablist" aria-label="Разделы"><span class="tabpill" aria-hidden="true" style="--ti:'+from+';transform:translateX('+(from*100)+'%)"></span>'+TABS.map(t=>'<button role="tab" aria-selected="'+(view.name===t.k)+'" class="'+(view.name===t.k?'on':'')+'" data-act="goTab" data-v="'+t.k+'">'+ic(t.icon,22)+'<span>'+t.label+'</span></button>').join('')+'</nav>'+
+  const pk=TAB_PARENT[view.name]||view.name,cur=TABS.findIndex(t=>t.k===pk);const from=LASTTAB==null?cur:LASTTAB;
+  return '<div class="tabwrap'+(TAB_PARENT[view.name]?' inner':'')+'"><div class="tabbrand"><span class="sv-logo" aria-hidden="true"></span>Corpus</div><nav class="tabbar" role="tablist" aria-label="Разделы"><span class="tabpill" aria-hidden="true" style="--ti:'+from+';transform:translateX('+(from*100)+'%)"></span>'+TABS.map(t=>'<button role="tab" aria-selected="'+(pk===t.k)+'" class="'+(pk===t.k?'on':'')+'" data-act="goTab" data-v="'+t.k+'">'+ic(t.icon,22)+'<span>'+t.label+'</span></button>').join('')+'</nav>'+
     '<div class="tabfoot"><button class="tabfoot-b" data-act="tour" aria-label="Помощь" title="Помощь">'+ic('help',22)+'<span>Помощь</span></button><button class="tabfoot-b" data-act="settings" aria-label="Настройки" title="Настройки">'+ic('gear',22)+'<span>Настройки</span></button></div></div>';
 }
 /* ===== beta «Свет» + Костик + кольцо оценок ===== */
@@ -10551,6 +10553,7 @@ html.vkb .panel{padding-bottom:12px}
 .cnbp.ok{background:var(--easy-soft);color:var(--ok-ink)}.cnbp.chk{background:var(--hard-soft);color:var(--learn-ink)}.cnbp.bad{background:var(--bad-soft);color:var(--bad-ink)}.cnbp.acc{background:var(--primary-soft);color:var(--accent-ink)}.cnbp.plain{background:var(--surface2);color:var(--ink2)}
 /* ===== T-035: адаптивная раскладка (этап 1: навигация и главная) ===== */
 .tabwrap{display:contents}
+@media (max-width:899px){.tabwrap.inner{display:none}}
 .tabbrand,.tabfoot{display:none}
 .tabfoot-b{border:none;background:none;font:inherit;color:var(--ink2)}
 .svhome .sesslim button{flex:1 1 auto;min-height:44px}

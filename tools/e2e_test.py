@@ -2033,6 +2033,54 @@ async def main():
                 await pg.evaluate("startStudy(window.__nudgeDeck)")
                 await pg.wait_for_selector('.full.study')
                 await asyncio.sleep(0.4)
+            # T-050: sidebar on folder/deck/hard screens (>=900 only); not on study
+            try:
+                await pg.evaluate("""(()=>{const base=deckById(window.__nudgeDeck);S.folders.push({id:'t50f',name:'T50',mode:'hideAll',createdAt:Date.now()});
+                  S.decks.push(Object.assign({},base,{id:'t50d',name:'T50 deck',folderId:'t50f',createdAt:Date.now()}));})()""")
+                SB = """(()=>{const w=document.querySelector('.tabwrap');if(!w)return null;const r=w.getBoundingClientRect(),cs=getComputedStyle(w),pg=document.querySelector('.page').getBoundingClientRect();
+                  const on=[...w.querySelectorAll('.tabbar button.on')].map(b=>b.dataset.v);
+                  return {pos:cs.position,disp:cs.display,l:r.left,w:r.width,n:w.querySelectorAll('.tabbar button').length,on:on,inner:w.classList.contains('inner'),pl:pg.left,first:document.getElementById('app').firstElementChild===w}})()"""
+                scr = (("folder", "go({name:'folder',folderId:'t50f'})"), ("deck", "go({name:'deck',deckId:'t50d'})"), ("hard", "go({name:'hard'})"))
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                for nm, js in scr:
+                    await pg.evaluate(js)
+                    await asyncio.sleep(0.8)
+                    g = await pg.evaluate(SB)
+                    check(f'sidebar on {nm} screen 1440x900: fixed, left 0, 232 wide, 6 buttons, only Decks active, page right of it',
+                          bool(g) and g['pos'] == 'fixed' and g['l'] == 0 and 230 <= g['w'] <= 234 and g['n'] == 6 and g['on'] == ['library'] and g['inner'] and g['pl'] >= 231 and g['first'], g)
+                await pg.evaluate("go({name:'folder',folderId:'t50f'})")
+                await asyncio.sleep(0.8)
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                await asyncio.sleep(0.8)
+                g = await pg.evaluate(SB)
+                check('sidebar on folder screen 1000x768: 84 wide, page right of it', bool(g) and 82 <= g['w'] <= 86 and g['pl'] >= 83, g)
+                for (vw, vh) in ((820, 1180), (390, 844)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(0.8)
+                    g = await pg.evaluate("(()=>{const w=document.querySelector('.tabwrap');const b=document.querySelector('.tabbar');return {disp:getComputedStyle(w).display,bar:b.offsetParent===null&&b.getBoundingClientRect().width===0}})()")
+                    check(f'folder screen {vw}x{vh}: the inner sidebar is hidden (no bottom bar)', g['disp'] == 'none' and g['bar'], g)
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                await asyncio.sleep(0.5)
+                await pg.evaluate("go({name:'library'});go({name:'folder',folderId:'t50f'})")
+                ti = await pg.evaluate("document.querySelector('.tabpill').style.getPropertyValue('--ti')")
+                check('sidebar pill does not move when entering a folder from Decks (--ti = 1)', ti == '1', ti)
+                await pg.click('.tabbar [data-v=library]')
+                await asyncio.sleep(0.5)
+                check('sidebar on folder screen: «Decks» leads to the deck list', await pg.evaluate("view.name==='library'&&!document.querySelector('.tabwrap.inner')"))
+                await pg.evaluate("go({name:'folder',folderId:'t50f'})")
+                await asyncio.sleep(0.5)
+                await pg.click('.tabbar [data-v=home]')
+                await asyncio.sleep(0.5)
+                check('sidebar on folder screen: «Home» leads home', await pg.evaluate("view.name==='home'"))
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                check('no sidebar on the study screen at 1440x900', await pg.evaluate("!document.querySelector('.tabwrap')"))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("S.decks=S.decks.filter(d=>d.id!=='t50d');S.folders=S.folders.filter(f=>f.id!=='t50f')")
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                await asyncio.sleep(0.4)
             # not on the answer side
             await pg.evaluate('doReveal()')
             await pg.wait_for_function("SS.phase==='answer'", timeout=5000)

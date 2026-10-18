@@ -2019,6 +2019,97 @@ async def main():
                 await pg.evaluate("startStudy(window.__nudgeDeck)")
                 await pg.wait_for_selector('.full.study')
                 await asyncio.sleep(0.4)
+            # T-049: folder and deck screens on desktop: sticky card left, decks grid right; one column on narrow screens
+            try:
+                await pg.evaluate("""(()=>{const base=deckById(window.__nudgeDeck);S.folders.push({id:'t49f',name:'T49',mode:'hideAll',createdAt:Date.now()});
+                  for(let i=0;i<4;i++)S.decks.push(Object.assign({},base,{id:'t49d'+i,name:'T49 deck '+i,folderId:'t49f',createdAt:Date.now()+i}));
+                  go({name:'folder',folderId:'t49f'});})()""")
+                await pg.wait_for_selector('.fcols .fdecks .deck')
+                GEO = """(()=>{const q=s=>{const e=document.querySelector(s);if(!e)return null;const r=e.getBoundingClientRect();return {l:r.left,t:r.top,r:r.right,b:r.bottom,w:r.width}};
+                  const ds=[...document.querySelectorAll('.fdecks>.deck')].map(e=>Math.round(e.getBoundingClientRect().left));
+                  return {page:q('.page'),left:q('.fleft'),right:q('.fright'),ov:q('.overview'),d0:q('.fdecks>.deck'),cols:new Set(ds).size,sec:q('.fright .sec-head')};})()"""
+                for (vw, vh) in ((1440, 900), (1024, 768)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(1.0)
+                    g = await pg.evaluate(GEO)
+                    ok = g['left']['r'] <= g['right']['l'] + 4 and 340 <= g['ov']['w'] <= 490
+                    if vw == 1440:
+                        ok = ok and 1200 <= g['page']['w'] <= 1281 and g['cols'] >= 2
+                    check(f'folder screen {vw}x{vh}: card left of the decks, card 340-490 wide' + (', page 1200-1281, decks in 2+ columns' if vw == 1440 else ''), ok, g)
+                for (vw, vh) in ((820, 1180), (390, 844)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(1.0)
+                    g = await pg.evaluate(GEO)
+                    check(f'folder screen {vw}x{vh}: one column, card above the decks', g['ov']['b'] <= g['d0']['t'] + 4 and g['left']['b'] <= g['right']['t'] + 4 and g['cols'] == 1, g)
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                await pg.evaluate("go({name:'deck',deckId:window.__nudgeDeck})")
+                await pg.wait_for_selector('.fcols .fleft .overview')
+                await asyncio.sleep(1.0)
+                g = await pg.evaluate(GEO)
+                if await pg.evaluate("!!document.querySelector('.fcols.solo')"):
+                    check('deck screen 1440x900 (no photos yet): the onboarding card is one centred block, not stretched', g['ov']['w'] <= 600, g)
+                    await pg.evaluate("S.plates.push({id:'t49p',deckId:window.__nudgeDeck,w:640,h:420,createdAt:Date.now()});go({name:'deck',deckId:window.__nudgeDeck})")
+                    await asyncio.sleep(1.0)
+                    g = await pg.evaluate(GEO)
+                check('deck screen 1440x900: card on the left, content on the right', g['left']['r'] <= g['right']['l'] + 4 and 340 <= g['ov']['w'] <= 490, g)
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await asyncio.sleep(1.0)
+                g = await pg.evaluate(GEO)
+                check('deck screen 390x844: card above the content', g['left']['b'] <= g['right']['t'] + 4, g)
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("S.plates=S.plates.filter(p=>p.id!=='t49p');S.decks=S.decks.filter(d=>!String(d.id).startsWith('t49d'));S.folders=S.folders.filter(f=>f.id!=='t49f')")
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                await asyncio.sleep(0.4)
+            # T-050: sidebar on folder/deck/hard screens (>=900 only); not on study
+            try:
+                await pg.evaluate("""(()=>{const base=deckById(window.__nudgeDeck);S.folders.push({id:'t50f',name:'T50',mode:'hideAll',createdAt:Date.now()});
+                  S.decks.push(Object.assign({},base,{id:'t50d',name:'T50 deck',folderId:'t50f',createdAt:Date.now()}));})()""")
+                SB = """(()=>{const w=document.querySelector('.tabwrap');if(!w)return null;const r=w.getBoundingClientRect(),cs=getComputedStyle(w),pg=document.querySelector('.page').getBoundingClientRect();
+                  const on=[...w.querySelectorAll('.tabbar button.on')].map(b=>b.dataset.v);
+                  return {pos:cs.position,disp:cs.display,l:r.left,w:r.width,n:w.querySelectorAll('.tabbar button').length,on:on,inner:w.classList.contains('inner'),pl:pg.left,first:document.getElementById('app').firstElementChild===w}})()"""
+                scr = (("folder", "go({name:'folder',folderId:'t50f'})"), ("deck", "go({name:'deck',deckId:'t50d'})"), ("hard", "go({name:'hard'})"))
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                for nm, js in scr:
+                    await pg.evaluate(js)
+                    await asyncio.sleep(0.8)
+                    g = await pg.evaluate(SB)
+                    check(f'sidebar on {nm} screen 1440x900: fixed, left 0, 232 wide, 6 buttons, only Decks active, page right of it',
+                          bool(g) and g['pos'] == 'fixed' and g['l'] == 0 and 230 <= g['w'] <= 234 and g['n'] == 6 and g['on'] == ['library'] and g['inner'] and g['pl'] >= 231 and g['first'], g)
+                await pg.evaluate("go({name:'folder',folderId:'t50f'})")
+                await asyncio.sleep(0.8)
+                await pg.set_viewport_size({'width': 1000, 'height': 768})
+                await asyncio.sleep(0.8)
+                g = await pg.evaluate(SB)
+                check('sidebar on folder screen 1000x768: 84 wide, page right of it', bool(g) and 82 <= g['w'] <= 86 and g['pl'] >= 83, g)
+                for (vw, vh) in ((820, 1180), (390, 844)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(0.8)
+                    g = await pg.evaluate("(()=>{const w=document.querySelector('.tabwrap');const b=document.querySelector('.tabbar');return {disp:getComputedStyle(w).display,bar:b.offsetParent===null&&b.getBoundingClientRect().width===0}})()")
+                    check(f'folder screen {vw}x{vh}: the inner sidebar is hidden (no bottom bar)', g['disp'] == 'none' and g['bar'], g)
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                await asyncio.sleep(0.5)
+                await pg.evaluate("go({name:'library'});go({name:'folder',folderId:'t50f'})")
+                ti = await pg.evaluate("document.querySelector('.tabpill').style.getPropertyValue('--ti')")
+                check('sidebar pill does not move when entering a folder from Decks (--ti = 1)', ti == '1', ti)
+                await pg.click('.tabbar [data-v=library]')
+                await asyncio.sleep(0.5)
+                check('sidebar on folder screen: «Decks» leads to the deck list', await pg.evaluate("view.name==='library'&&!document.querySelector('.tabwrap.inner')"))
+                await pg.evaluate("go({name:'folder',folderId:'t50f'})")
+                await asyncio.sleep(0.5)
+                await pg.click('.tabbar [data-v=home]')
+                await asyncio.sleep(0.5)
+                check('sidebar on folder screen: «Home» leads home', await pg.evaluate("view.name==='home'"))
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                check('no sidebar on the study screen at 1440x900', await pg.evaluate("!document.querySelector('.tabwrap')"))
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("S.decks=S.decks.filter(d=>d.id!=='t50d');S.folders=S.folders.filter(f=>f.id!=='t50f')")
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                await asyncio.sleep(0.4)
             # not on the answer side
             await pg.evaluate('doReveal()')
             await pg.wait_for_function("SS.phase==='answer'", timeout=5000)
@@ -4319,7 +4410,7 @@ async def main():
                 {id:'l2',title:'Angulus inferior',pic:'g:'+mid+':1',off:false,terms:[T('t4','Margo medialis',2),T('t5','Angulus inferior',3),T('t6','Spina scapulae',1)]}]}]});
               go({name:'courseNew',did:did,step:3});}""", [pdf_b64, did_f, mid_f])
             await pf.wait_for_selector('[data-cn=build]:not([disabled])', timeout=30000)
-            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=rej;i.src=u+'?'+Date.now();});
+            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=async()=>{const q=u+'?'+Date.now();let f={};try{const r=await fetch(q);f={status:r.status,ok:r.ok,type:r.headers.get('content-type'),len:(await r.blob()).size};}catch(e){f={fetchErr:String(e)};}rej(new Error('PLATE-IMG '+JSON.stringify({url:u,plateId:p&&p.id,assetId:p&&p.assetId,sw:!!(navigator.serviceWorker&&navigator.serviceWorker.controller),complete:i.complete,nw:i.naturalWidth,f:f})));};i.src=u+'?'+Date.now();});
               const cv=document.createElement('canvas');cv.width=im.naturalWidth;cv.height=im.naturalHeight;const cx=cv.getContext('2d');cx.drawImage(im,0,0);const w=cv.width,h=cv.height,d=cx.getImageData(Math.floor(w*.4),Math.floor(h*.4),Math.floor(w*.2),Math.floor(h*.2)).data;
               let s=0;for(let i=0;i<d.length;i+=4)s+=d[i]+d[i+1]+d[i+2];return s/(d.length/4*3);}""", pid)
             pid_t = lambda t_: pf.evaluate("t=>(S.plates.find(p=>p.title===t)||{}).id", t_)
@@ -4343,7 +4434,8 @@ async def main():
             # 3) the page is drawn; the captions are in the picture (no text layer) → found by the text recognition on the drawn page
             await pf.evaluate("window.__CN_BLANK=0")
             await pf.click('[data-cn=resume]')
-            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            # the click starts the build asynchronously: until it does, _bld.state is still the 'done' of the build above; the lesson «Spina scapulae» (not built yet) is what tells the new build has finished
+            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'&&S.plates.some(p=>p.title==='Spina scapulae')", timeout=180000)
             await pf.wait_for_timeout(500)
             p1 = await pid_t('Spina scapulae')
             b1 = await bright(p1)

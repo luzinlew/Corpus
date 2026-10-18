@@ -1177,6 +1177,7 @@ I18N_DICT.push(["Читаю текст в рамке…", "Reading the text in t
 I18N_DICT.push(["Исправлено по словарю, прочитано:", "Corrected by the dictionary, OCR read:", "Sõnastiku järgi parandatud, tuvastati:"],["Вернуть", "Restore", "Taasta"],["Неуверенно прочитанные слова исправляются по словарю латыни. Выключить можно в «Ещё» → «Разметка фото».", "Words read with low confidence are corrected using the Latin dictionary. You can turn this off in More → Photo labeling.", "Ebakindlalt loetud sõnad parandatakse ladina sõnastiku järgi. Välja saab selle lülitada: Veel → Fotode märgistamine."],["Словарь латыни выключен. Включить снова — «Ещё» → «Разметка фото».", "The Latin dictionary is off. Turn it back on in More → Photo labeling.", "Ladina sõnastik on välja lülitatud. Uuesti sisse: Veel → Fotode märgistamine."],["Возвращено как прочитано. Словарь можно выключить в «Ещё» → «Разметка фото».", "Restored as read. The dictionary can be turned off in More → Photo labeling.", "Taastatud nii, nagu loeti. Sõnastiku saab välja lülitada: Veel → Fotode märgistamine."],["Сверять со словарём латыни", "Check against the Latin dictionary", "Kontrolli ladina sõnastiku järgi"],["Слова, прочитанные неуверенно, исправляются по словарю анатомической латыни (около 7 800 словоформ, включая старые написания атласов). Уверенно прочитанное не меняется", "Words read with low confidence are corrected using a dictionary of anatomical Latin (about 7,800 word forms, including older atlas spellings). Confidently read words are left as they are.", "Ebakindlalt loetud sõnad parandatakse anatoomilise ladina sõnastiku järgi (umbes 7800 sõnavormi, sh atlaste vanemad kirjaviisid). Kindlalt loetud sõnu ei muudeta."],["Название, которое вы вписали сами, автоматически не заменяется — новое прочтение появится над полем с кнопкой «Заменить». Если словарь исправил слово неудачно, там же будет кнопка «Вернуть».", "A name you typed yourself is never replaced automatically — the new reading appears above the field with a «Replace» button. If the dictionary corrected a word badly, a «Restore» button appears there too.", "Ise kirjutatud nimetust automaatselt ei asendata — uus lugemine ilmub välja kohale koos nupuga «Asenda». Kui sõnastik parandas sõna valesti, on seal ka nupp «Taasta»."],["Словарь: собственный список анатомической латыни и латинские синонимы онтологии UBERON (CC BY 3.0).", "Dictionary: our own list of anatomical Latin plus Latin synonyms from the UBERON ontology (CC BY 3.0).", "Sõnastik: oma anatoomilise ladina loend ja UBERON-i ontoloogia ladinakeelsed sünonüümid (CC BY 3.0)."]);
 I18N_DICT.push(["Отвязать", "Unlink", "Eralda"],["Рамка отвязана от других фото — теперь это отдельная карточка", "The frame is unlinked from the other photos — it is a separate card now", "Raam on teistest fotodest eraldatud — nüüd on see eraldi kaart"]);
 /* ---------- i18n: Russian source, English / Estonian translations applied to rendered text ---------- */
+I18N_DICT.push(["Поделиться","Share","Jaga"],["QR-код, ссылка или файл","QR code, link or file","QR-kood, link või fail"]);
 I18N_DICT.push(["Поделиться по QR-коду","Share by QR code","Jaga QR-koodiga"],["Код или ссылка — колода появится у другого человека","A code or a link: the deck appears in the other person’s Corpus","Kood või link — pakk ilmub teise inimese Corpusesse"],["Код или ссылка — все колоды папки появятся у другого человека","A code or a link: all decks of the folder appear in the other person’s Corpus","Kood või link — kõik kausta pakid ilmuvad teise inimese Corpusesse"],
   ["Готовлю код…","Preparing the code…","Valmistan koodi ette…"],["Не удалось подготовить колоду.","Couldn’t prepare the deck.","Pakki ei õnnestunud ette valmistada."],["Обмен по коду ещё не настроен на сайте.","Sharing by code isn’t set up on this site yet.","Koodiga jagamine pole saidil veel seadistatud."],["Колода слишком большая для передачи по коду — поделитесь файлом.","The deck is too big to pass by code — share it as a file.","Pakk on koodiga edastamiseks liiga suur — jaga failina."],["Не удалось создать код. Проверьте соединение.","Couldn’t create the code. Check your connection.","Koodi ei õnnestunud luua. Kontrolli ühendust."],
   ["Папка целиком:","Whole folder:","Kogu kaust:"],["Без прогресса.","Progress isn’t included.","Ilma edenemiseta."],["Без файла:","Missing file:","Failita:"],["QR-код","QR code","QR-kood"],
@@ -2294,6 +2295,11 @@ function statsHtml(ids){
     '<div class="sbox"><h3>Прогноз повторений на 2 недели</h3><div class="fc">'+fc.map((v,i)=>'<div><em>'+(v||'')+'</em><span class="bw"><i style="height:'+(v/mx*100)+'%"></i></span><small>'+(i===0?'сег':new Date(addDays(now,i)).getDate())+'</small></div>').join('')+'</div></div>'+
     '<div class="sbox"><h3>Активность</h3>'+heatmapHtml(ids,17)+'</div>'+hardHtml(ids);
 }
+function resumePlateHtml(did,ps){
+  const ll=META.lastPlate,i=ll&&typeof ll.plateId==='string'&&ll.deckId===did?ps.findIndex(p=>p.id===ll.plateId):-1;
+  if(i<0||ps.length<2)return '';
+  return '<button class="btn line big block stack" data-act="resumePlate"><span data-noi18n>'+ic('play',18)+T3('Продолжить с места остановки','Continue where you stopped','Jätka poolelijäänud kohast')+'</span><small data-noi18n>'+T3('Фото '+(i+1)+' из '+ps.length,'Photo '+(i+1)+' of '+ps.length,'Foto '+(i+1)+'/'+ps.length)+'</small></button>';
+}
 SCREENS.deck={
   html(){
     const d=deckById(view.deckId);if(!d){view={name:'library'};return SCREENS.library.html();}
@@ -2306,7 +2312,7 @@ SCREENS.deck={
       const mode=d.mode||'hideAll';const can=c.new+c.learn+c.review>0;
       ov='<section class="overview"><div class="counts">'+cnt(c.new,'новых','c-new')+cnt(c.learn,'изучаются','c-learn')+cnt(c.review,'на повтор','c-due')+'</div>'+
         modeGridHtml(mode,'mode')+
-        deckExamLine(d)+(can?'<button class="btn primary big block" data-act="study">'+ic('play')+'Учить</button>':'<div class="alldone"><b>На сегодня всё</b><span>'+esc(nextReviewText(d.id))+'</span></div>')+(can?sessLimitHtml():'')+
+        resumePlateHtml(d.id,ps)+deckExamLine(d)+(can?'<button class="btn primary big block" data-act="study">'+ic('play')+'Учить</button>':'<div class="alldone"><b>На сегодня всё</b><span>'+esc(nextReviewText(d.id))+'</span></div>')+(can?sessLimitHtml():'')+
         (ps.some(hasLesson)?'<button class="btn line block" data-act="lesson" style="margin-top:8px">'+ic('play',18)+'Урок</button>':'')+
         (c.total?'<button class="btn quiet block stack" data-act="cram">Свободная тренировка<small>не влияет на расписание</small></button>':'')+
         (c.total?'<div class="intro-again"><button class="btn quiet sm" data-act="introAgain">'+ic('eye',16)+'Ознакомиться с метками</button></div>':'')+'</section>';
@@ -2634,18 +2640,26 @@ async function deleteFolder(fid){
     S.folders=S.folders.filter(x=>x.id!==fid);removeDoc('folders',fid);folderSwipeSet(FSW.row,false);return true;
   }finally{FSW.deleting.delete(fid);}
 }
+/* one «Поделиться» entry everywhere: QR/link (website only) or a file */
+async function shareMenu(kind,id){
+  const isF=kind==='folder',o=isF?folderById(id):deckById(id);if(!o)return;
+  const file=()=>isF?exportFolder(id):exportDeck(id);
+  if(!sharesApi()){file();return;}
+  const v=await actionSheet(o.name,[
+    {v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:isF?'Код или ссылка — все колоды папки появятся у другого человека':'Код или ссылка — колода появится у другого человека'},
+    {v:'file',icon:'layers',label:'Поделиться файлом',sub:isF?'Все колоды папки: фото, рамки и названия, без прогресса':'Фото, рамки и названия, без прогресса'}]);
+  if(v==='qr')shareByCode(kind,id);else if(v==='file')file();
+}
 async function folderMenu(fid){
   const f=folderById(fid);if(!f)return;
   const v=await actionSheet(f.name,[
     {v:'rename',icon:'pencil',label:'Переименовать'},
     {v:'exam',icon:'cal',label:'Контрольная и план',sub:examForFolder(f)?examMenuSub(examForFolder(f)):'Дата для всех колод папки — новые карточки распределятся по дням'},
-    ...(sharesApi()?[{v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:'Код или ссылка — все колоды папки появятся у другого человека'}]:[]),
-    {v:'share',icon:'layers',label:'Поделиться папкой',sub:'Все колоды папки: фото, рамки и названия, без прогресса'},
+    {v:'share',icon:'qr',label:'Поделиться',sub:sharesApi()?'QR-код, ссылка или файл':'Все колоды папки: фото, рамки и названия, без прогресса'},
     f.off?{v:'off',icon:'play',label:'Включить папку',sub:'Колоды снова попадут в «Сегодня» и напоминания'}:{v:'off',icon:'close',label:'Выключить папку',sub:'Колоды и прогресс останутся, но не попадут в «Сегодня» и напоминания'},
     {v:'del',icon:'trash',label:'Удалить папку',danger:true}]);
   if(v==='off'){if(f.off)delete f.off;else f.off=true;persist('folders',f.id);toast(f.off?'Папка выключена':'Папка включена');render();pushSyncSoon();return;}
-  if(v==='qr'){shareByCode('folder',fid);return;}
-  if(v==='share'){exportFolder(fid);return;}
+  if(v==='share'){shareMenu('folder',fid);return;}
   if(v==='exam'){editExam('folder',fid);return;}
   if(v==='rename'){const n=await promptDialog({title:'Название папки',value:f.name});if(n){f.name=n;persist('folders',f.id);render();}}
   else if(v==='del'){if(await deleteFolder(fid)){toast('Папка удалена');go({name:'library'});}}
@@ -2666,15 +2680,13 @@ async function deckMenu(did){
   const v=await actionSheet(d.name,[
     {v:'rename',icon:'pencil',label:'Переименовать'},
     {v:'folder',icon:'folder',label:'Переместить в папку',sub:d.folderId?(folderById(d.folderId)?folderById(d.folderId).name:''):'Сейчас без папки'},
-    ...(sharesApi()?[{v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:'Код или ссылка — колода появится у другого человека'}]:[]),
-    {v:'share',icon:'layers',label:'Поделиться файлом',sub:'Фото, рамки и названия, без прогресса'},
+    {v:'share',icon:'qr',label:'Поделиться',sub:sharesApi()?'QR-код, ссылка или файл':'Фото, рамки и названия, без прогресса'},
     ...(cardsOfDeck(did).length?[{v:'cmp',icon:'list',label:'Сверить с конспектом',sub:'Лишние карточки можно удалить вместе с рамками'}]:[]),
     ...(isTextDeck(d)?[]:(()=>{const u=cardsOfDeck(did).filter(c=>!isText(c)&&!c.term&&!isArrow(c)).length;return u?[{v:'ocrAll',icon:'scan',label:'Прочитать названия рамок',sub:pl(u,'рамка','рамки','рамок')+' без названия — распознать подписи на фото'}]:[];})()),
     {v:'exam',icon:'cal',label:'Контрольная и план',sub:examMenuSub(examForDeck(d))},
     {v:'limit',icon:'layers',label:'Новых карточек в день',sub:planQuota(d)!=null?('Сейчас по плану контрольной: '+planQuota(d)):'Сейчас: '+(d.newPerDay==null?20:d.newPerDay)},
     {v:'del',icon:'trash',label:'Удалить колоду',danger:true}]);
-  if(v==='qr'){shareByCode('deck',did);return;}
-  if(v==='share'){exportDeck(did);return;}
+  if(v==='share'){shareMenu('deck',did);return;}
   if(v==='ocrAll'){readNamesDecks([did]);return;}
   if(v==='cmp'){cmpNotes(did);return;}
   if(v==='exam'){editExam('deck',did);return;}
@@ -3236,6 +3248,7 @@ function openEditor(pid,sel,back){
   const cs=cardsOfPlate(pid),dk=deckById(plateById(pid).deckId);
   const tool=cs.length?(cs.every(isArrow)?'arrow':'select'):(dk&&dk.lastTool==='arrow'?'arrow':'draw');
   ED={plateId:pid,tool:tool,sel:sel||null,undo:[],back:back||null,t:null};
+  const ll=META.lastPlate;if(!(ll&&ll.plateId===pid&&ll.deckId===plateById(pid).deckId)){META.lastPlate={deckId:plateById(pid).deckId,plateId:pid};persistMeta();}   // where «Продолжить с места остановки» on the deck leads
   go({name:'editor'});
 }
 function edCountText(){return plateCountText(cardsOfPlate(ED.plateId),'рамок пока нет');}
@@ -9906,6 +9919,7 @@ const A={
   cram:()=>cramMenu(view.deckId),
   addPhoto:()=>addPhotoMenu(),
   openPlate:el=>openEditor(el.dataset.id,null),
+  resumePlate:()=>{const ll=META.lastPlate;if(ll&&ll.deckId===view.deckId&&plateById(ll.plateId))openEditor(ll.plateId,null);},
   plateMenu:el=>plateMenu(el.dataset.id),
   openCard:el=>{const c=cardById(el.dataset.id);if(c)openEditor(c.plateId,c.id,{name:'deck',deckId:view.deckId,tab:'cards',q:view.q});},
   zoomIn:()=>{const z=setZoom(zoomStep(1),view.name==='courseLesson'&&CL?CL.focus:null);if(SS&&view.name==='study'){SS.zoom=z;focusTarget();}},

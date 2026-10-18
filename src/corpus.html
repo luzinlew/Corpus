@@ -2267,8 +2267,8 @@ SCREENS.deck={
         body+='<input class="search" id="q" type="search" placeholder="Поиск по названию" value="'+esc(view.q||'')+'" autocomplete="off"><div id="clist">'+cardListHtml(d.id,view.q)+'</div>'+cmpBtnHtml(d.id);
       }else body+=statsHtml([d.id]);
     }
-    return '<div class="page"><header class="pbar"><button class="ibtn" data-act="deckBack" aria-label="Назад">'+ic('back')+'</button><h1>'+esc(d.name)+'</h1>'+gearBtn()+'<button class="ibtn" data-act="deckMenu" aria-label="Настройки колоды">'+ic('more')+'</button></header>'+
-      ov+body+'<input type="file" id="file" accept="image/*" multiple hidden><input type="file" id="cam" accept="image/*" capture="environment" hidden></div>';
+    return '<div class="page folderpage"><header class="pbar"><button class="ibtn" data-act="deckBack" aria-label="Назад">'+ic('back')+'</button><h1>'+esc(d.name)+'</h1>'+gearBtn()+'<button class="ibtn" data-act="deckMenu" aria-label="Настройки колоды">'+ic('more')+'</button></header>'+
+      '<div class="fcols'+(body?'':' solo')+'"><div class="fleft">'+ov+'</div><div class="fright">'+body+'</div></div><input type="file" id="file" accept="image/*" multiple hidden><input type="file" id="cam" accept="image/*" capture="environment" hidden></div>';
   },
   mount(){
     mountImgFallbacks();
@@ -2300,7 +2300,7 @@ function textDeckHtml(d){
       '<input class="search" id="q" type="search" placeholder="Поиск по термину или описанию" value="'+esc(view.q||'')+'" autocomplete="off"><div id="clist">'+noteListHtml(d.id,view.q)+'</div>'+cmpBtnHtml(d.id);
     else body+=statsHtml([d.id]);
   }
-  return '<div class="page"><header class="pbar"><button class="ibtn" data-act="deckBack" aria-label="Назад">'+ic('back')+'</button><h1>'+esc(d.name)+'</h1>'+gearBtn()+'<button class="ibtn" data-act="deckMenu" aria-label="Настройки колоды">'+ic('more')+'</button></header>'+ov+body+'</div>';
+  return '<div class="page folderpage"><header class="pbar"><button class="ibtn" data-act="deckBack" aria-label="Назад">'+ic('back')+'</button><h1>'+esc(d.name)+'</h1>'+gearBtn()+'<button class="ibtn" data-act="deckMenu" aria-label="Настройки колоды">'+ic('more')+'</button></header><div class="fcols'+(body?'':' solo')+'"><div class="fleft">'+ov+'</div><div class="fright">'+body+'</div></div></div>';
 }
 
 /* ---------- text cards: paste a table, edit a card, link a photo ---------- */
@@ -2434,15 +2434,15 @@ SCREENS.folder={
     const ds=decksInFolder(f.id);const c=folderCounts(f.id);const ids=ds.map(d=>d.id);
     const can=c.new+c.learn+c.review>0;const mode=f.mode||'hideAll';
     const rows=ds.map(d=>deckRowHtml(d)).join('');
-    return '<div class="page"><header class="pbar"><button class="ibtn" data-act="library" aria-label="Назад">'+ic('back')+'</button><h1>'+esc(f.name)+'</h1>'+gearBtn()+'<button class="ibtn" data-act="folderMenu" aria-label="Настройки папки">'+ic('more')+'</button></header>'+
+    return '<div class="page folderpage"><header class="pbar"><button class="ibtn" data-act="library" aria-label="Назад">'+ic('back')+'</button><h1>'+esc(f.name)+'</h1>'+gearBtn()+'<button class="ibtn" data-act="folderMenu" aria-label="Настройки папки">'+ic('more')+'</button></header>'+
       (f.off?'<button class="banner" data-act="folderOn" style="display:block;width:100%;text-align:left;border:none">Папка выключена: её колоды не попадают в «Сегодня» и напоминания. <b>Включить</b></button>':'')+
-      (ds.length?'<section class="overview"><div class="counts">'+cnt(c.new,'новых','c-new')+cnt(c.learn,'изучаются','c-learn')+cnt(c.review,'на повтор','c-due')+'</div>'+
+      '<div class="fcols'+(ds.length?'':' solo')+'">'+(ds.length?'<div class="fleft"><section class="overview"><div class="counts">'+cnt(c.new,'новых','c-new')+cnt(c.learn,'изучаются','c-learn')+cnt(c.review,'на повтор','c-due')+'</div>'+
         modeGridHtml(mode,'folderMode')+
         folderExamLine(f)+(can?'<button class="btn primary big block" data-act="studyFolder">'+ic('play')+'Учить всю папку</button>':'<div class="alldone"><b>На сегодня всё</b><span>Карточек к повтору во всей папке нет.</span></div>')+(can?sessLimitHtml():'')+
-        (c.total?'<button class="btn quiet block stack" data-act="cramFolder">Свободная тренировка<small>не влияет на расписание</small></button>':'')+'</section>':
-        '<div class="empty"><p>В этой папке пока нет колод.</p></div>')+
-      hardRowHtml(f.id)+'<div class="sec-head"><div class="h2">Колоды в папке</div></div>'+rows+
-      '<button class="btn line block" data-act="newDeckInFolder" style="margin-top:6px">'+ic('plus',18)+'Новая колода в папке</button>'+
+        (c.total?'<button class="btn quiet block stack" data-act="cramFolder">Свободная тренировка<small>не влияет на расписание</small></button>':'')+'</section></div>':'')+
+      '<div class="fright">'+(ds.length?'':'<div class="empty"><p>В этой папке пока нет колод.</p></div>')+
+      hardRowHtml(f.id)+'<div class="sec-head"><div class="h2">Колоды в папке</div></div><div class="fdecks">'+rows+
+      '<button class="btn line block" data-act="newDeckInFolder" style="margin-top:6px">'+ic('plus',18)+'Новая колода в папке</button></div></div></div>'+
       '</div>';
   },
   mount(){mountImgFallbacks();}
@@ -10650,20 +10650,37 @@ html.vkb .panel{padding-bottom:12px}
   html:not(.calm) .ccard{transition:transform .2s ease,box-shadow .2s ease}
   html:not(.calm) .ccard:hover{transform:translateY(-2px)}
 }
+@media (min-width:900px){
+  .folderpage{max-width:1280px;padding-top:26px;padding-left:28px;padding-right:28px}
+  .folderpage .pbar{padding:0 0 22px}
+  .folderpage .pbar h1{font-size:32px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
+  .fcols{display:grid;grid-template-columns:minmax(340px,480px) minmax(0,1fr);gap:24px;align-items:start}
+  .fcols.solo{grid-template-columns:minmax(0,1fr)}
+  .fcols.solo>.fleft{max-width:560px;width:100%;margin:0 auto}
+  .fleft>.overview{background:var(--glass);border-color:var(--glass-line);border-radius:26px;padding:22px;box-shadow:var(--glass-shadow);position:sticky;top:24px;margin-bottom:0}
+  .fright>.deck.hardrow{margin-bottom:16px;border-radius:20px}
+  .fdecks{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .fdecks>.deck{margin-bottom:0;min-width:0;border-radius:20px;background:var(--glass);border-color:var(--glass-line)}
+  .fdecks>.btn.block{grid-column:1/-1;margin-top:0!important}
+  .fright .tiles{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+}
+@media (min-width:1100px){
+  .folderpage{padding-top:30px;padding-left:40px;padding-right:40px}
+}
 @keyframes gridIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
 @media (min-width:900px){
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>*{animation:gridIn .42s cubic-bezier(.2,.9,.25,1) backwards}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(1){animation-delay:0.035s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(2){animation-delay:0.07s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(3){animation-delay:0.105s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(4){animation-delay:0.14s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(5){animation-delay:0.175s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(6){animation-delay:0.21s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(7){animation-delay:0.245s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(8){animation-delay:0.28s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(9){animation-delay:0.315s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(10){animation-delay:0.35s}
-html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats)>:nth-child(n+11){animation-delay:.35s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>*{animation:gridIn .42s cubic-bezier(.2,.9,.25,1) backwards}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(1){animation-delay:0.035s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(2){animation-delay:0.07s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(3){animation-delay:0.105s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(4){animation-delay:0.14s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(5){animation-delay:0.175s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(6){animation-delay:0.21s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(7){animation-delay:0.245s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(8){animation-delay:0.28s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(9){animation-delay:0.315s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(10){animation-delay:0.35s}
+html:not(.calm) #app[class^="enter"] :is(.dgrid,.ccards,.exgrid,.gstats,.fdecks)>:nth-child(n+11){animation-delay:.35s}
 html:not(.calm) #app[class^="enter"] .gstats>.hhead{animation:none}
 }
 /* ===== вкладки ≥900: календарь, статистика, «Ещё» ===== */

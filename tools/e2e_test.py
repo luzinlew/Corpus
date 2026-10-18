@@ -1990,6 +1990,49 @@ async def main():
                 await pg.evaluate("startStudy(window.__nudgeDeck)")
                 await pg.wait_for_selector('.full.study')
                 await asyncio.sleep(0.4)
+            # T-049: folder and deck screens on desktop: sticky card left, decks grid right; one column on narrow screens
+            try:
+                await pg.evaluate("""(()=>{const base=deckById(window.__nudgeDeck);S.folders.push({id:'t49f',name:'T49',mode:'hideAll',createdAt:Date.now()});
+                  for(let i=0;i<4;i++)S.decks.push(Object.assign({},base,{id:'t49d'+i,name:'T49 deck '+i,folderId:'t49f',createdAt:Date.now()+i}));
+                  go({name:'folder',folderId:'t49f'});})()""")
+                await pg.wait_for_selector('.fcols .fdecks .deck')
+                GEO = """(()=>{const q=s=>{const e=document.querySelector(s);if(!e)return null;const r=e.getBoundingClientRect();return {l:r.left,t:r.top,r:r.right,b:r.bottom,w:r.width}};
+                  const ds=[...document.querySelectorAll('.fdecks>.deck')].map(e=>Math.round(e.getBoundingClientRect().left));
+                  return {page:q('.page'),left:q('.fleft'),right:q('.fright'),ov:q('.overview'),d0:q('.fdecks>.deck'),cols:new Set(ds).size,sec:q('.fright .sec-head')};})()"""
+                for (vw, vh) in ((1440, 900), (1024, 768)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(1.0)
+                    g = await pg.evaluate(GEO)
+                    ok = g['left']['r'] <= g['right']['l'] + 4 and 340 <= g['ov']['w'] <= 490
+                    if vw == 1440:
+                        ok = ok and 1200 <= g['page']['w'] <= 1281 and g['cols'] >= 2
+                    check(f'folder screen {vw}x{vh}: card left of the decks, card 340-490 wide' + (', page 1200-1281, decks in 2+ columns' if vw == 1440 else ''), ok, g)
+                for (vw, vh) in ((820, 1180), (390, 844)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(1.0)
+                    g = await pg.evaluate(GEO)
+                    check(f'folder screen {vw}x{vh}: one column, card above the decks', g['ov']['b'] <= g['d0']['t'] + 4 and g['left']['b'] <= g['right']['t'] + 4 and g['cols'] == 1, g)
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                await pg.evaluate("go({name:'deck',deckId:window.__nudgeDeck})")
+                await pg.wait_for_selector('.fcols .fleft .overview')
+                await asyncio.sleep(1.0)
+                g = await pg.evaluate(GEO)
+                if await pg.evaluate("!!document.querySelector('.fcols.solo')"):
+                    check('deck screen 1440x900 (no photos yet): the onboarding card is one centred block, not stretched', g['ov']['w'] <= 600, g)
+                    await pg.evaluate("S.plates.push({id:'t49p',deckId:window.__nudgeDeck,w:640,h:420,createdAt:Date.now()});go({name:'deck',deckId:window.__nudgeDeck})")
+                    await asyncio.sleep(1.0)
+                    g = await pg.evaluate(GEO)
+                check('deck screen 1440x900: card on the left, content on the right', g['left']['r'] <= g['right']['l'] + 4 and 340 <= g['ov']['w'] <= 490, g)
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await asyncio.sleep(1.0)
+                g = await pg.evaluate(GEO)
+                check('deck screen 390x844: card above the content', g['left']['b'] <= g['right']['t'] + 4, g)
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("S.plates=S.plates.filter(p=>p.id!=='t49p');S.decks=S.decks.filter(d=>!String(d.id).startsWith('t49d'));S.folders=S.folders.filter(f=>f.id!=='t49f')")
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                await asyncio.sleep(0.4)
             # not on the answer side
             await pg.evaluate('doReveal()')
             await pg.wait_for_function("SS.phase==='answer'", timeout=5000)

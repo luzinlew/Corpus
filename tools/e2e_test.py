@@ -289,20 +289,28 @@ def anki_file(path):
     db_path.unlink()
 
 
-def pdf_file(path, pages):
-    """A real PDF with a text layer, by hand: pages = [[(bold, size, x, y, text), ...], ...], fonts Helvetica and Helvetica-Bold."""
+def pdf_file(path, pages, images=()):
+    """A real PDF with a text layer, by hand: pages = [[(bold, size, x, y, text), ...], ...], fonts Helvetica and Helvetica-Bold.
+    images = indexes of the pages that also carry a raster picture over the whole page (a grey gradient, not blank), drawn under the text."""
     n = len(pages)
     objs = {1: b'<< /Type /Catalog /Pages 2 0 R >>',
             2: ('<< /Type /Pages /Kids [%s] /Count %d >>' % (' '.join('%d 0 R' % (5 + 2 * i) for i in range(n)), n)).encode(),
             3: b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
             4: b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'}
+    img_no = {}
     for i, items in enumerate(pages):
         ops = []
+        if i in images:
+            img_no[i] = 5 + 2 * n + len(img_no)
+            px = bytes(150 + (x * 5 + y * 3) % 80 for y in range(16) for x in range(16))
+            objs[img_no[i]] = b'<< /Type /XObject /Subtype /Image /Width 16 /Height 16 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length %d >>\nstream\n' % len(px) + px + b'\nendstream'
+            ops.append(b'q 595 0 0 842 0 0 cm /Im1 Do Q')
         for bold, size, x, y, text in items:
             t = text.encode('cp1252').replace(b'\\', b'\\\\').replace(b'(', b'\\(').replace(b')', b'\\)')
             ops.append(b'BT /F%d %d Tf %d %d Td (' % (2 if bold else 1, size, x, y) + t + b') Tj ET')
         stream = b'\n'.join(ops)
-        objs[5 + 2 * i] = ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents %d 0 R >>' % (6 + 2 * i)).encode()
+        xo = (' /XObject << /Im1 %d 0 R >>' % img_no[i]) if i in img_no else ''
+        objs[5 + 2 * i] = ('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>%s >> /Contents %d 0 R >>' % (xo, 6 + 2 * i)).encode()
         objs[6 + 2 * i] = b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream'
     out, offs = bytearray(b'%PDF-1.4\n'), {}
     for k in sorted(objs):
@@ -4569,6 +4577,88 @@ async def main():
             check('knowledge build: no script errors or failed requests in the browser', not errs_k, '; '.join(errs_k)[:500])
             # <<< T032A
             await ctx_k.close()
+
+            # >>> T046
+            # ---------- T-046: the pictures and frames of lessons v2: the page of the «Pictures» material that names the most structures of the lesson, frames from its captions ----------
+            P46 = tmp / 'pic46'; P46.mkdir(exist_ok=True)
+            L1 = ['Os frontale', 'Os parietale', 'Os occipitale', 'Os temporale']      # lesson 1: all four have a caption on page 2
+            L2 = ['Os vomer', 'Os sphenoidale', 'Os ethmoidale', 'Os lacrimale']       # lesson 2: «Os vomer» has no caption anywhere; the others are on page 4
+            POS = {'Os frontale': (80, 700), 'Os parietale': (300, 600), 'Os occipitale': (120, 450), 'Os temporale': (350, 300), 'Os sphenoidale': (60, 650), 'Os ethmoidale': (320, 500), 'Os lacrimale': (200, 250)}
+            lab = lambda names: [(False, 12, POS[n_][0], POS[n_][1], n_) for n_ in names]
+            pdf_file(P46 / 'Skeleton notes.pdf', [[(True, 14, 50, 800 - 40 * i, n_) for i, n_ in enumerate(L1 + L2)]])
+            pdf_file(P46 / 'Practicum slides.pdf', [lab(L1[:2]), lab(L1), [], lab(L2[1:])], images=(0, 1, 2, 3))   # page 1: two captions, page 2: four, page 3: a picture without text, page 4: three
+            urllib.request.urlopen(API + '/__fn?v2lessons=2')   # 8 units, 4 in a lesson, in the source order
+            urllib.request.urlopen(API + '/__course?free=200&limit=')
+            ctx_p, pp, errs_p = await open_ctx(legacy=False)
+            await pp.goto(SITE + '?create=1&i=' + INVITE)
+            await pp.wait_for_selector('.cw-auth .cw-tabs .on')
+            await pp.fill('input[name=email]', 'pictures@test.ee')
+            await pp.fill('input[name=password]', 'kolju2026')
+            await pp.click('.cw-go')
+            await app_ready(pp)
+            await ui_lang(pp, 'et')
+            await pp.evaluate("go({name:'courses'})")
+            await pp.wait_for_selector('.cnnew')
+            await pp.click('.cnnew')
+            await pp.wait_for_selector('.cnw')
+            did_p = await pp.evaluate('view.did')
+            await pp.fill('#cnName', 'Skeleton')
+            await pp.press('#cnName', 'Tab')
+            await pp.set_input_files('#cnFile', [str(P46 / 'Skeleton notes.pdf'), str(P46 / 'Practicum slides.pdf')])
+            await pp.wait_for_function("(()=>{const d=CDRAFTS.get(view.did);return d&&d.mats.length>=2&&d.mats.every(m=>m.status==='ready')&&!document.querySelector('.cnpb')&&!document.querySelector('#cnList').innerText.includes('salvestan')})()", timeout=60000)
+            await pp.click('.cnf:has(.cnfn:text("Practicum slides.pdf")) [data-r=pics]')
+            await pp.wait_for_function("CDRAFTS.get(view.did).mats.some(m=>m.name==='Practicum slides.pdf'&&m.role==='pics')")
+            mats_p = await pp.evaluate("Object.fromEntries(CDRAFTS.get(view.did).mats.map(m=>[m.name,{id:m.id,role:m.role,pages:m.pages,status:m.status}]))")
+            pics_id = mats_p['Practicum slides.pdf']['id']
+            check('lesson pictures: the course has the notes (base, 1 page) and the slides (pictures, 4 pages, all ready)', mats_p['Skeleton notes.pdf']['role'] == 'base' and mats_p['Practicum slides.pdf']['role'] == 'pics' and mats_p['Practicum slides.pdf']['pages'] == 4
+                  and mats_p['Practicum slides.pdf']['status'] == 'ready', json.dumps(mats_p))
+            await pp.click('.cnmain')
+            await pp.wait_for_selector('.cnph', timeout=120000)
+            await pp.evaluate("go({name:'courseNew',did:view.did,step:3})")
+            await pp.wait_for_selector('.cnbtns [data-cn=build] b')
+            await pp.click('.cnbtns [data-cn=build]')
+            await pp.wait_for_function("CDRAFTS.get(view.did)._bld&&CDRAFTS.get(view.did)._bld.state==='done'", timeout=120000)
+            await pp.wait_for_timeout(300)
+            les = await pp.evaluate("""()=>S.plates.filter(p=>p.cb&&p.cb.startsWith(view.did+'|')&&p.lessonVersion===2).sort((a,b)=>a.createdAt-b.createdAt).map(p=>({id:p.id,title:p.title,picRef:p.picRef||'',page:p.page||0,asset:p.assetId||'',vs:p.visualStatus,w:p.w,h:p.h,
+              cards:cardsOfPlate(p.id).sort((a,b)=>a.createdAt-b.createdAt).map(c=>({id:c.id,term:c.term,kind:c.kind,x:c.x,y:c.y,w:c.w,h:c.h,noframe:!!c.noframe,excl:cardExcluded(c),unf:window.cardUnframed?cardUnframed(c):false}))}))""")
+            check('lesson pictures: two lessons of four units each (term cards in the source order)', len(les) == 2 and [[c['term'] for c in l_['cards']] for l_ in les] == [L1, L2] and all(c['kind'] == 'term' for l_ in les for c in l_['cards']), json.dumps(les)[:600])
+            check('lesson pictures: lesson 1 (four captions on page 2, two on page 1) gets page 2 of the slides; lesson 2 (three captions on page 4) gets page 4 — a different page; each has its own picture',
+                  [l_['picRef'] for l_ in les] == ['g:' + pics_id + ':2', 'g:' + pics_id + ':4'] and [l_['page'] for l_ in les] == [2, 4] and all(l_['asset'] and l_['w'] > 0 and l_['vs'] == 'source_page_shown_unresolved' for l_ in les) and les[0]['asset'] != les[1]['asset'],
+                  json.dumps([[l_['picRef'], l_['page'], l_['asset'], l_['vs']] for l_ in les]))
+            def box46(name):
+                x, y = POS[name]
+                return (max(0, x / 595 * 100 - 0.4), max(0, (842 - (y + 0.85 * 12)) / 842 * 100 - 0.4))
+            def on_caption(c):
+                ex, ey = box46(c['term'])
+                return 0 <= c['x'] and 0 <= c['y'] and c['x'] + c['w'] <= 100.01 and c['y'] + c['h'] <= 100.01 and abs(c['x'] - ex) <= 0.8 and abs(c['y'] - ey) <= 0.8 and 3 < c['w'] < 25 and 1.5 < c['h'] < 4
+            check('lesson pictures: the four cards of lesson 1 have frames inside 0–100 that sit on their captions of page 2 (corner within 0.8 %, a caption-sized box)',
+                  all(on_caption(c) and not c['unf'] and not c['noframe'] and not c['excl'] for c in les[0]['cards']), json.dumps(les[0]['cards']))
+            c_vomer = les[1]['cards'][0]
+            check('lesson pictures: lesson 2: the three captioned cards have frames on page 4; «Os vomer» has no frame (empty box), is not marked noframe and is not excluded from learning',
+                  all(on_caption(c) for c in les[1]['cards'][1:]) and c_vomer['term'] == 'Os vomer' and [c_vomer[k] for k in ('x', 'y', 'w', 'h')] == [0, 0, 0, 0] and c_vomer['unf'] and not c_vomer['noframe'] and not c_vomer['excl'], json.dumps(les[1]['cards']))
+            st46 = {}
+            for lg_ in ('et', 'ru', 'en'):
+                await ui_lang(pp, lg_)
+                st46[lg_] = await pp.evaluate("(ids)=>ids.map(id=>{const d=document.createElement('div');d.innerHTML=cnKnowledgeLessonStatusHtml(plateById(id));return d.innerText.replace(/\\s+/g,' ')})", [l_['id'] for l_ in les])
+            WANT46 = {'et': ('Raamid pandi sildite järgi: %d / 4 struktuurist; pildi sisu ei kontrollitud.', 'Algdokumendi täielikkust ei kinnitata.'),
+                      'ru': ('Рамки поставлены по подписям: %d из 4 структур; содержание картинки не проверено.', 'Полнота исходного документа не подтверждена.'),
+                      'en': ('Frames were placed by captions: %d of 4 structures; the image content was not checked.', 'Completeness of the source document is not established.')}
+            check('lesson pictures: the status of the lesson says «frames by captions: 4 of 4» / «3 of 4» in et, ru and en, keeps the «content not checked» and «completeness not established» lines, and no longer says the whole page is unanalysed',
+                  all(WANT46[lg_][0] % n_ in st46[lg_][i_] and WANT46[lg_][1] in st46[lg_][i_] for lg_ in WANT46 for i_, n_ in ((0, 4), (1, 3))) and not any('Pilti ei analüüsitud' in x or 'Image not analysed' in x or 'Картинка не разобрана' in x for v_ in st46.values() for x in v_), json.dumps(st46, ensure_ascii=False)[:900])
+            await ui_lang(pp, 'et')
+            modes46 = await pp.evaluate("""(a)=>{const out={un:new Set(),fr:new Set()};CH.pin=null;
+              for(let i=0;i<80;i++){for(const [k,id] of [['un',a.un],['fr',a.fr]]){__setSS({mode:'mixed',cur:id,lastId:null});setupCard();out[k].add(SS.cm);}}
+              __setSS({mode:'find',cur:a.un,lastId:null});setupCard();const fu=SS.cm;__setSS({mode:'find',cur:a.fr,lastId:null});setupCard();const ff=SS.cm;__setSS(null);
+              return {un:Array.from(out.un),fr:Array.from(out.fr),fu:fu,ff:ff};}""", {'un': c_vomer['id'], 'fr': les[1]['cards'][1]['id']})
+            check('lesson pictures: the study never asks «find it on the picture» for the card without a frame (mixed and find modes), and still asks it for a framed card',
+                  'find' not in modes46['un'] and modes46['fu'] == 'hideAll' and 'find' in modes46['fr'] and modes46['ff'] == 'find', json.dumps(modes46))
+            exp46 = await pp.evaluate("""async(did)=>{const f=folderById(CDRAFTS.get(did).courseId),ids=decksInFolder(f.id).map(d=>d.id),r=await buildExport(ids,true,f.id);
+              return {fc:r.out.plates.map(p=>p.frameCount).sort(),cards:r.out.cards.filter(c=>c.knowledgeId).map(c=>[c.term,c.x,c.y,c.w,c.h])};}""", did_p)
+            check('lesson pictures: the export of the course keeps the frame counts (4 and 3) and the frames of the cards (the empty box of «Os vomer» too)',
+                  exp46['fc'] == [3, 4] and len(exp46['cards']) == 8 and [c_ for c_ in exp46['cards'] if c_[0] == 'Os vomer'] == [['Os vomer', 0, 0, 0, 0]] and all(c_[3] > 0 for c_ in exp46['cards'] if c_[0] in L1), json.dumps(exp46)[:500])
+            check('lesson pictures: no script errors or failed requests in the browser', not errs_p, '; '.join(errs_p)[:500])
+            await ctx_p.close()
+            # <<< T046
 
             # >>> T032R
             # ---------- T-032, limited release: what the reader can do to a built v2 course (retry of a lesson, role of a material, delete of a material, edits of the plan) ----------

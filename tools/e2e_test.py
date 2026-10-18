@@ -874,8 +874,10 @@ async def main():
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             async with pg.expect_download() as dl:
-                await pg.click('#layer [data-s="share"]')
+                await pg.click('#layer [data-s="file"]')
             path = await (await dl.value).path()
             exp = json.loads(pathlib.Path(path).read_text())
             check('folder exported as a file with its photo', exp['kind'] == 'folder' and exp['plates'][0]['image'].startswith('data:image/jpeg') and len(exp['cards']) == 2,
@@ -902,8 +904,10 @@ async def main():
             fid2 = await pg.evaluate("S.folders.find(f=>f.name==='Järjekord').id")
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid2}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             async with pg.expect_download() as dl:
-                await pg.click('#layer [data-s="share"]')
+                await pg.click('#layer [data-s="file"]')
             exp2 = json.loads(pathlib.Path(await (await dl.value).path()).read_text())
             check('a re-shared folder lists decks and photos in that order',
                   [d['name'] for d in exp2['decks']] == want['decks'] and [p['w'] for p in exp2['plates'] if p['deckId'] == exp2['decks'][0]['id']] == want['photos'],
@@ -1430,6 +1434,8 @@ async def main():
             # share the folder by code / QR
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             await pg.click('#layer [data-s="qr"]')
             await pg.wait_for_selector('#shareCode', timeout=15000)
             code = await pg.get_attribute('#shareCode', 'data-code') or ''
@@ -1445,10 +1451,30 @@ async def main():
                   and all('reps' not in c for c in sh[0]['data']['cards']), json.dumps(sh)[:200])
             await pg.click('#layer [data-s="ok"]')
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             await pg.click('#layer [data-s="qr"]')
             await pg.wait_for_selector('#shareCode', timeout=15000)
             check('sharing again keeps the same code (the snapshot is refreshed)', (await pg.get_attribute('#shareCode', 'data-code')) == code and len(state()['shares']) == 1)
             await pg.click('#layer [data-s="ok"]')
+
+            # «Continue where you stopped»: the deck remembers the last opened photo
+            did2 = await pg.evaluate("(()=>{const d=S.decks.find(x=>platesOf(x.id).length>1);return d?d.id:null;})()")
+            check('deck with two photos exists for the resume check', did2 is not None)
+            if did2:
+                keep = await pg.evaluate("META.lastPlate||null")
+                await pg.evaluate(f"delete META.lastPlate;go({{name:'deck',deckId:'{did2}'}})")
+                await pg.wait_for_selector('[data-act=study], .alldone')
+                no = await pg.evaluate("!!document.querySelector('[data-act=resumePlate]')")
+                p1 = await pg.evaluate(f"platesOf('{did2}')[1].id")
+                await pg.evaluate(f"openEditor('{p1}',null)")
+                await pg.evaluate(f"go({{name:'deck',deckId:'{did2}'}})")
+                await pg.wait_for_selector('[data-act=resumePlate]')
+                await pg.click('[data-act=resumePlate]')
+                await pg.wait_for_function(f"view.name==='editor' && ED.plateId==='{p1}'", timeout=5000)
+                check('deck: «continue where you stopped» appears only after a photo was opened and leads back to it', no is False)
+                await pg.evaluate("(k=>{if(k)META.lastPlate=k;else delete META.lastPlate;})(" + json.dumps(keep) + ")")
+            await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
 
             # Anki: a .apkg with image-occlusion and Basic notes
             urllib.request.urlopen(API + '/__log')                 # clear the request log
@@ -4384,7 +4410,7 @@ async def main():
                 {id:'l2',title:'Angulus inferior',pic:'g:'+mid+':1',off:false,terms:[T('t4','Margo medialis',2),T('t5','Angulus inferior',3),T('t6','Spina scapulae',1)]}]}]});
               go({name:'courseNew',did:did,step:3});}""", [pdf_b64, did_f, mid_f])
             await pf.wait_for_selector('[data-cn=build]:not([disabled])', timeout=30000)
-            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=rej;i.src=u+'?'+Date.now();});
+            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=async()=>{const q=u+'?'+Date.now();let f={};try{const r=await fetch(q);f={status:r.status,ok:r.ok,type:r.headers.get('content-type'),len:(await r.blob()).size};}catch(e){f={fetchErr:String(e)};}rej(new Error('PLATE-IMG '+JSON.stringify({url:u,plateId:p&&p.id,assetId:p&&p.assetId,sw:!!(navigator.serviceWorker&&navigator.serviceWorker.controller),complete:i.complete,nw:i.naturalWidth,f:f})));};i.src=u+'?'+Date.now();});
               const cv=document.createElement('canvas');cv.width=im.naturalWidth;cv.height=im.naturalHeight;const cx=cv.getContext('2d');cx.drawImage(im,0,0);const w=cv.width,h=cv.height,d=cx.getImageData(Math.floor(w*.4),Math.floor(h*.4),Math.floor(w*.2),Math.floor(h*.2)).data;
               let s=0;for(let i=0;i<d.length;i+=4)s+=d[i]+d[i+1]+d[i+2];return s/(d.length/4*3);}""", pid)
             pid_t = lambda t_: pf.evaluate("t=>(S.plates.find(p=>p.title===t)||{}).id", t_)
@@ -4408,7 +4434,8 @@ async def main():
             # 3) the page is drawn; the captions are in the picture (no text layer) → found by the text recognition on the drawn page
             await pf.evaluate("window.__CN_BLANK=0")
             await pf.click('[data-cn=resume]')
-            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            # the click starts the build asynchronously: until it does, _bld.state is still the 'done' of the build above; the lesson «Spina scapulae» (not built yet) is what tells the new build has finished
+            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'&&S.plates.some(p=>p.title==='Spina scapulae')", timeout=180000)
             await pf.wait_for_timeout(500)
             p1 = await pid_t('Spina scapulae')
             b1 = await bright(p1)

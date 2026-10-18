@@ -819,7 +819,7 @@
         go.textContent = busy ? 'Подождите…' : (mode === 'in' ? 'Войти' : 'Создать аккаунт');
         go.disabled = busy;
         f.password.setAttribute('autocomplete', mode === 'in' ? 'current-password' : 'new-password');
-        invWrap.style.display = mode === 'up' && (showInvite || !storedInvite()) ? '' : 'none';
+        invWrap.style.display = mode === 'up' && showInvite ? '' : 'none';
         forgot.style.display = mode === 'in' ? '' : 'none';
         forgot.disabled = busy;
         note.textContent = mode === 'in' ? '' : 'Аккаунт хранит ваши колоды и прогресс — они будут доступны с любого устройства.';

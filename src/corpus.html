@@ -2829,6 +2829,7 @@ function setupCard(){
   try{
     SS.phase='ask';SS.typed='';SS.picked=null;SS.result=null;SS.peek=new Set();SS.fallback=false;SS.opts=null;SS.suggest=0;
     const c=cardById(SS.cur);if(!c)return;
+    if(c.plateId&&plateById(c.plateId)&&!SS.cram&&!(META.lastPlate&&META.lastPlate.plateId===c.plateId)){META.lastPlate={deckId:c.deckId,plateId:c.plateId};persistMeta();}   // «Продолжить с места остановки» also follows the studied photo
     let m=SS.mode;
     if(isText(c)){
       if(m==='hideOne'||m==='find')m='hideAll';

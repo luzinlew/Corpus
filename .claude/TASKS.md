@@ -59,6 +59,8 @@
 | T-048 | P1 | Единая система боковых панелей: чат, настройки учёбы и меню (actionSheet) справа одной ширины на ≥900, нижние листы одинаковые на <900; нижний край диалогов не квадратный | ready, ждёт «деплой T-048» (уйдёт вместе с T-047, если тот ещё не выложен) | claude/T-048-unified-panels |
 
 | T-044 | P1 | i18n: «Трудные» переводятся (плитка, заголовок, шапка занятия), «необязательно…» и «фото N» в ссылке на фото; порядок языков Eesti, English, Русский везде | deployed (откат c3e50ab) | claude/T-043-i18n-lang-order |
+| T-050 | P1 | Картинки уроков v2: страница по теме урока, без повторов между уроками, рамки по подписям (OCR только выбранной страницы) | ready, ждёт «деплой» (вместе с T-051) | claude/T-046-lesson-pictures |
+| T-051 | P1 | Глубина уроков v2: фильтр заголовков heading_only, лимит max(1,min(4,floor(40/n))), вступление до 6, приём оборванного урока, функция: lessonDepth 2 и 8000 токенов | ready, ждёт «деплой» (функция → сайт) | claude/T-047-lesson-depth |
 
 ## Журнал
 
@@ -537,3 +539,13 @@
 - деплой T-045 2026-10-17 по слову Льва: SQL выполнен Львом («Все сделано»), влит origin/main c3e50ab (T-043 чат), e2e на слитом коде 838 PASS ALL PASSED, rating_test 218, reward_test 39; откат сайта: gh-pages = c3e50abffea0c1f6ee652e1d6ffefbb8e1b66821; откат SQL: reward_rollback.sql → rating_anon_rollback.sql → git show 8859174:supabase/rating.sql
 - деплой T-045 2026-10-17 по слову Льва: SQL выполнен Львом («Все сделано»), влит origin/main (чат, i18n «Трудные»), e2e на слитом коде 842 PASS ALL PASSED, rating_test 218, reward_test 39; откат сайта: gh-pages = c3e50abffea0c1f6ee652e1d6ffefbb8e1b66821; откат SQL: reward_rollback.sql → rating_anon_rollback.sql → git show 8859174:supabase/rating.sql
 - деплой T-046 (чат), T-047 (шестерёнка), T-048 (панели) одним пушем из ветки claude/T-045-unified-panels: «деплой 45» Льва 2026-10-17. Перед выкладкой main ушёл вперёд (чужие T-043 награда, T-044 перевод «Трудных», T-045 награда anon) — влит, конфликт только в журнале; номера моих задач сменены на T-046/T-047/T-048 (в main те же номера заняты). e2e на слитом коде: 854 PASS, exit=0, ALL PASSED; в e2e сужен селектор проверки порядка языков до `#app [data-act=setLang]`: панель настроек #qs остаётся в DOM после проверок панелей и содержит те же кнопки (смысл проверки сохранён)
+
+### T-050 Картинки уроков v2  (в ветке claude/T-046-lesson-pictures; номер T-046 занят)
+- cnKnowledgePicRank/Pick/Used, кэш b.picPages, cnBldPic с рамками через cnBldMatch; OCR только выбранной страницы при ≥1 совпадении, ≤40 боксов; без рамки — вопрос «Какая это структура?»
+- ревью (qa-review) → раунд 2: 5515fd9; влит main 4c06020; офлайн + e2e ×2 866 PASS, ALL PASSED
+
+### T-051 Глубина уроков v2  (в ветке claude/T-047-lesson-depth; номер T-047 занят)
+- 264fd82: heading_only, лимит утверждений, вступление до 6, cnKnowledgeLessonSalvage/Partial, функция lessonDepth:2
+- ревью: security — проблем нет; qa-review — 3 «желательно» → ac97a1d: факты с пунктуацией/«X – Y» не заголовки; лимит 40/n, LS_KNOWLEDGE_MAX_TOKENS 8000, outputChars 40000; новый клиент + старая функция — один повтор без lessonDepth (CN_DEPTH_OFF) со старыми лимитами
+- влиты T-050 и main (39fa3f4); все офлайн (9 + pdf_visual) PASSED, e2e ×2: 884 PASS, ALL PASSED
+- выкладка: push main (функция через deploy-functions.yml, ждать зелёный) → gh-pages; откат функции безопасен благодаря повтору без lessonDepth

@@ -208,7 +208,7 @@ const esrc = (start, len, extra) => [{ materialId: material.id, blockId: "b" + s
 const units2 = [
   unit("k2_up", "statement", "BASIS CRANII EXTERNA", esrc(0, 20, { emBlock: true }), 0),            // heading as text_fragment, marked by its block
   unit("k2_up_old", "statement", "BASIS CRANII INTERNA", esrc(30, 20), 1),                           // a registry before emBlock: whole line in capitals
-  unit("k2_th", "term", "Eesmine osa", esrc(60, 11, { emBlock: true }), 2),                          // a term-heading, nothing defines it
+  unit("k2_th", "term", "Sissejuhatus", esrc(60, 12, { emBlock: true }), 2),                          // a term-heading, nothing defines it
   unit("k2_th_old", "term", "FOSSA CRANII MEDIA", esrc(80, 18), 3),
   unit("k2_tw", "term", "Foramen magnum", esrc(100, 14, { emBlock: true }), 4),                       // a real term: a statement speaks about it
   unit("k2_tw_def", "statement", "Foramen magnum – suur ava.", esrc(120, 26), 5),
@@ -219,6 +219,7 @@ const units2 = [
   unit("k2_part", "term", "Keskmine", esrc(240, 8, { emBlock: true }), 10),                           // the term is less than... its quote is whole but another unit names it
   unit("k2_part_def", "statement", "Keskmine osa jääb kõrva taha.", esrc(250, 30), 11),
   unit("k2_fossa", "term", "Fossa cranii anterior", esrc(340, 21, { emBlock: true }), 13),           // an emphasised anatomical label with no definition: knowledge, stays
+  unit("k2_eesm", "term", "Eesmine osa", esrc(400, 11, { emBlock: true }), 15),                        // a part (pars anterior) with no definition: knowledge, stays
   unit("k2_os", "term", "Os frontale", esrc(370, 11, { emBlock: true }), 14),
   unit("k2_fact", "statement", "Foramen magnum – suur ava.", esrc(300, 26, { emBlock: true }), 12),   // a short fact in an emphasised block: stays
 ];
@@ -228,7 +229,7 @@ await ok("T-057: headings as text_fragment (flagged block, capitals) and definit
 });
 await ok("T-057: a term with a definition, an abbreviation, a non-emphasised short statement and a short fact stay", async () => {
   plan = await planOf(units2);
-  for (const id of ["k2_tw", "k2_tw_def", "k2_td", "k2_td_def", "k2_abbr", "k2_notem", "k2_part", "k2_part_def", "k2_fact", "k2_fossa", "k2_os"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays"); assert.ok(!exOf(id), id); }
+  for (const id of ["k2_tw", "k2_tw_def", "k2_td", "k2_td_def", "k2_abbr", "k2_notem", "k2_part", "k2_part_def", "k2_fact", "k2_fossa", "k2_eesm", "k2_os"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays"); assert.ok(!exOf(id), id); }
 });
 await ok("T-057: a material of emphasised terms only (a list of structures, no statement at all) keeps every term", async () => {
   const list = ["Os frontale", "Os parietale", "Os occipitale"].map((c, i) => unit("k3_" + i, "term", c, esrc(i * 20, c.length, { emBlock: true }), i));

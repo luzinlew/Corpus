@@ -5739,8 +5739,8 @@ async function cnStepExam(d,r){
    the content is that quote, at most 6 words, no closing punctuation and no «X – Y» / «X = Y». Registries made before emBlock have no flag: only a whole line in CAPITALS of 2+ words counts then.
    A term is a heading only when no definition/statement of the material speaks about it AND it is a whole line in CAPITALS (2+ words) or a generic heading phrase (CN_HEAD_STOP); other emphasised terms are knowledge (a material with no statement at all is a list of terms: none is a heading); a statement needs no such check. */
 const cnHeadShape=t=>{t=String(t||'').trim();return !!t&&t.split(/\s+/).length<=6&&!/[.;:!?]$/.test(t)&&!/ [–—-] | = /.test(t);};
-/* generic heading words/phrases (et/ru/en/lat), lower case: a term equal to one of them, with no definition, is a heading. Anatomical labels («Fossa cranii anterior») are NOT here: they are knowledge. */
-const CN_HEAD_STOP=new Set(['eesmine osa','keskmine osa','tagumine osa','sissejuhatus','kokkuvõte','ülevaade','sisukord','külgvaade','eestvaade','pealtvaade','tagantvaade','altvaade','введение','заключение','обзор','содержание','передняя часть','средняя часть','задняя часть','вид сбоку','вид спереди','вид сверху','introduction','summary','overview','contents','anterior part','middle part','posterior part','lateral view','pars anterior','pars media','pars posterior']);
+/* generic heading words/phrases (et/ru/en/lat), lower case: a term equal to one of them, with no definition, is a heading. Anatomical labels and parts («Fossa cranii anterior», «Eesmine osa» = pars anterior, «Pars media») are NOT here: they are knowledge and get frames on the picture. */
+const CN_HEAD_STOP=new Set(['sissejuhatus','kokkuvõte','ülevaade','sisukord','külgvaade','eestvaade','pealtvaade','tagantvaade','altvaade','введение','заключение','обзор','содержание','вид сбоку','вид спереди','вид сверху','introduction','summary','overview','contents','lateral view']);
 const cnHeadUpper=t=>{t=String(t||'').trim();return t.split(/\s+/).length>=2&&/\p{Lu}/u.test(t)&&!/\p{Ll}/u.test(t);};
 function cnHeadingIds(units){
   const norm=x=>String(x).replace(/\s+/g,' ').trim().toLowerCase(),out=new Set();
@@ -7059,11 +7059,11 @@ function cnBlankIn(cx,imgs){
     return n>0&&mx-mn<12&&sum/n>235;
   });
 }
-/* структуры ↔ подписи (T-058). Подпись — один или несколько кусков страницы; каждая подпись — одной структуре, каждая рамка — одной подписи (рамки, лежащие друг на друге, — одна).
-   Ступени от строгой к мягкой, каждая проходит по всем структурам до следующей: (0) целиком по cnNorm; (1) слово к слову по основам (6 букв) и сокращениям: «A. carotis» = «Arteria carotis»
-   в обе стороны, «F. cranii media» = «Fossa cranii media», точка, потерянная OCR, не мешает; (2) название по-эстонски над латинской подписью: «Eesmine osa» = «Pars anterior» (только если переведено
-   КАЖДОЕ слово из 2+; порядок слов не важен); (3) одна ошибка OCR в слове длиннее 4 букв, не ниже 0.85 по символам («styloidcus», «magnurn»): остальные слова совпадают точно, числа — только точно.
-   Если не нашлось, подпись, разбитую на 2–3 куска (одна строка или строки подряд столбиком), склеивают и прогоняют те же ступени: «Fossa cranii» + «media». */
+/* структуры ↔ подписи (T-058). Подпись — один или несколько кусков страницы; каждая подпись — одной структуре, каждая рамка — одной подписи (рамки, лежащие друг на друге, — одна). Ложная рамка хуже пропущенной.
+   Строгая фаза (сначала длинные названия): целиком по cnNorm (подпись из одного куска, затем подпись, склеенная из 2–3 соседних кусков: одна строка или строки подряд столбиком), потом слово к слову по основам (6 букв).
+   Мягкая фаза, ступени по очереди: (а) сокращения в обе стороны («A. carotis» = «Arteria carotis», «F. cranii media», потерянная OCR точка); (б) название по-эстонски над латинской подписью
+   («Eesmine osa» = «Pars anterior»: переведено КАЖДОЕ слово из 2+, порядок не важен); (в) одна опечатка OCR в слове от 5 букв, первые 3 буквы точные, сходство ≥0.9 (от 10 букв ≥0.85); остальные слова и числа точно.
+   На мягких ступенях рамки нет, если термину подходят ≥2 разные подписи, или подпись подходит ≥2 разным терминам урока («F. articularis» при «Facies articularis» и «Fossa articularis»). */
 const CN_MABB={a:['arteria','arteriae'],aa:['arteriae','arteria'],v:['vena','venae'],vv:['venae','vena'],n:['nervus','nervi'],nn:['nervi','nervus'],m:['musculus','musculi'],mm:['musculi','musculus'],lig:['ligamentum','ligamenta'],ligg:['ligamenta','ligamentum'],proc:['processus'],for:['foramen','foramina'],f:['fossa','facies','foramen','fissura','fascia'],r:['ramus','rami'],gl:['glandula','glandulae'],art:['articulatio','arteria'],tub:['tuberculum','tubercula']};
 const CN_MET={eesmine:['anterior'],tagumine:['posterior'],keskmine:['media','medius','medium'],ulemine:['superior'],alumine:['inferior'],parem:['dexter','dextra','dextrum'],vasak:['sinister','sinistra','sinistrum'],sisemine:['internus','interna','internum'],valimine:['externus','externa','externum'],osa:['pars'],luu:['os']};
 function cnMTok(s){
@@ -7091,7 +7091,7 @@ function cnMLev(a,b){
 const cnMFold=w=>w.replace(/rn/g,'m');
 const CN_MTIER=[
   (t,c)=>!!t.k&&t.k===c.k,
-  (t,c)=>t.tk.length===c.tk.length&&t.tk.every((x,i)=>cnMEq(x,c.tk[i])),
+  (t,c)=>t.tk.length===c.tk.length&&(t.tk.some(x=>x.ab)||c.tk.some(x=>x.ab))&&t.tk.every((x,i)=>cnMEq(x,c.tk[i])),
   (t,c)=>{
     if(t.tk.length<2||t.tk.length!==c.tk.length||!t.tk.some(x=>Object.hasOwn(CN_MET,x.w)))return false;
     const free=c.tk.map(()=>true);
@@ -7108,7 +7108,7 @@ const CN_MTIER=[
       const x=t.tk[i],y=c.tk[i];if(cnMEq(x,y))continue;
       if(x.ab||y.ab||x.w.length<5||y.w.length<5||/\d/.test(x.w+y.w)||++bad>1)return false;
       const a=cnMFold(x.w),b=cnMFold(y.w);
-      if(1-cnMLev(a,b)/Math.max(a.length,b.length)<0.85)return false;
+      if(a.slice(0,3)!==b.slice(0,3)||1-cnMLev(a,b)/Math.max(a.length,b.length)<(Math.max(a.length,b.length)>=10?0.85:0.9))return false;
     }
     return bad===1;
   }
@@ -7133,27 +7133,37 @@ function cnMChains(bases,ar){
   }
   return out;
 }
+const cnMStem1=(t,c)=>t.tk.length===c.tk.length&&!t.tk.some(x=>x.ab)&&!c.tk.some(x=>x.ab)&&t.tk.every((x,i)=>cnMEq(x,c.tk[i]));
 function cnBldMatch(terms,cands,ar){
   ar=+ar>0?+ar:1.5;
-  const out=new Map(),taken=[],T=terms.map(t=>({id:t.id,k:cnNorm(t.la),tk:cnMTok(t.la)})).filter(t=>t.tk.length),C=cands.map(c=>({c:c,k:cnNorm(c.t),tk:cnMTok(c.t)})).filter(c=>c.tk.length);
+  const out=new Map(),taken=[],C=cands.map(c=>({c:c,k:cnNorm(c.t),tk:cnMTok(c.t)})).filter(c=>c.tk.length);
+  const T=terms.map(t=>({id:t.id,k:cnNorm(t.la),tk:cnMTok(t.la)})).filter(t=>t.tk.length).map((t,i)=>({t:t,i:i})).sort((a,b)=>b.t.tk.length-a.t.tk.length||a.i-b.i).map(x=>x.t);   // longer names first
+  const free=e=>!taken.some(b=>cnMOver(b,e.c));
+  let chains=null;const getChains=()=>chains||(chains=cnMChains(C.filter(e=>e.tk.length<=3).slice(0,300).map(e=>e.c),ar));
   const put=(t,e)=>{
     const c=e.c,x=clamp(c.x,0,99.7),y=clamp(c.y,0,99.7),f={x:r2(x),y:r2(y),w:r2(clamp(c.w,0.3,100-x)),h:r2(clamp(c.h,0.3,100-y))};
     out.set(t.id,f);taken.push({x:f.x,y:f.y,w:f.w,h:f.h});
   };
-  const run=pool=>{
-    for(const tier of CN_MTIER){
-      for(const t of T){
-        if(out.has(t.id))continue;
-        const e=pool.find(e=>tier(t,e)&&!taken.some(b=>cnMOver(b,e.c)));
-        if(e)put(t,e);
-      }
+  /* strict: the whole name; a caption of one piece, else of joined pieces */
+  for(const t of T){
+    if(!t.k)continue;
+    let e=C.find(e=>e.k===t.k&&free(e));
+    if(!e&&t.tk.length>=2)e=getChains().find(e=>e.k===t.k&&free(e));
+    if(e)put(t,e);
+  }
+  for(const t of T){if(out.has(t.id))continue;const e=C.find(e=>cnMStem1(t,e)&&free(e));if(e)put(t,e);}
+  /* soft: abbreviations, Estonian names, a slip of OCR; an ambiguous caption or name gets no frame */
+  const amb=new Set();
+  for(const tier of [CN_MTIER[1],CN_MTIER[2],CN_MTIER[3]]){
+    if(T.every(t=>out.has(t.id)||amb.has(t.id)))break;
+    const pool=T.some(t=>!out.has(t.id)&&t.tk.length>=2)?C.concat(getChains()):C,contested=new Set();
+    pool.forEach(e=>{let n=0;for(const t of T){if(tier(t,e)&&++n>=2){contested.add(e);break;}}});
+    for(const t of T){
+      if(out.has(t.id)||amb.has(t.id))continue;
+      const hits=pool.filter(e=>!contested.has(e)&&free(e)&&tier(t,e)),reps=[];
+      hits.forEach(e=>{if(!reps.some(r=>cnMOver(r.c,e.c)||cnMOver(e.c,r.c)))reps.push(e);});
+      if(reps.length===1)put(t,reps[0]);else if(reps.length>1)amb.add(t.id);
     }
-  };
-  run(C);
-  if(T.some(t=>!out.has(t.id)&&t.tk.length>=2)){
-    const bases=C.filter(e=>e.tk.length<=3&&!taken.some(b=>cnMOver(b,e.c))).slice(0,300).map(e=>e.c);
-    const chains=cnMChains(bases,ar);
-    if(chains.length)run(chains);
   }
   return out;
 }

@@ -134,7 +134,10 @@ function t_match() {
   // OCR slips in long words
   assert.ok(hit(["Processus styloideus"], [C("Processus styloidcus", 5, 5)]), "one wrong letter in a long word");
   assert.ok(hit(["Foramen magnum"], [C("Foramen magnurn", 5, 5)]), "rn read for m");
-  assert.ok(hit(["Mandibula"], [C("Mandihula", 5, 5)]), "one letter in a one-word name of nine letters");
+  assert.ok(hit(["Sternocleidomastoideus"], [C("Sterncleidomastoideus", 5, 5)]), "one letter lost in a very long word (0.95)");
+  assert.equal(hit(["Mandibula"], [C("Mandihula", 5, 5)]), undefined, "nine letters, one slip (0.89): below 0.9");
+  assert.equal(hit(["Musculus abductor"], [C("Musculus adductor", 5, 5)]), undefined, "abductor / adductor: a slip in the first letters, 0.875");
+  assert.equal(hit(["Pars dexter"], [C("Pars sinister", 5, 5)]) || hit(["Pars superior"], [C("Pars inferior", 5, 5)]) || hit(["Musculus major"], [C("Musculus minor", 5, 5)]), undefined, "opposites: no frame");
   // a chance word is not a caption
   assert.equal(hit(["Ulna"], [C("Ulma", 5, 5)]), undefined, "a short word: exact only");
   assert.equal(hit(["Costa"], [C("Cosla", 5, 5)]), undefined, "five letters, one slip (0.8): no");
@@ -149,6 +152,22 @@ function t_match() {
   m = match(["Pars anterior", "Pars posterior"], [C("Pars posterlor", 5, 20), C("Pars anterior", 5, 10)]);
   assert.deepEqual([m.get("u0").y, m.get("u1").y], [10, 20], "each name gets its own caption");
   assert.equal(hit(["Fossa cranii interna"], [C("Fossa cranii externa", 5, 5)]), undefined, "interna / externa");
+  // ambiguity: no frame
+  m = match(["Eesmine osa"], [C("Pars anterior", 5, 5), C("Pars anterior", 50, 50)]);
+  assert.equal(m.size, 0, "two captions fit an Estonian name: no frame");
+  m = match(["Pars anterior"], [C("Pars anterior", 5, 5), C("Pars anterior", 50, 50)]);
+  assert.equal(m.size, 1, "an exact name with two captions: the first, as before");
+  m = match(["Fossa cranii media"], [C("F. cranii media", 5, 5), C("Fossa cranii media", 50, 50)]);
+  assert.equal(m.get("u0").x, 50, "the exact caption comes before the abbreviation");
+  m = match(["Facies articularis", "Fossa articularis"], [C("F. articularis", 5, 5)]);
+  assert.equal(m.size, 0, "one abbreviation fits two names of the lesson: no frame for either");
+  m = match(["Facies articularis", "Fossa articularis"], [C("F. articularis", 5, 5), C("Fossa articularis", 50, 50)]);
+  assert.equal(m.has("u0"), false, "the abbreviation fits both names: not given to any");
+  assert.equal(m.get("u1").x, 50, "the exact name still has its caption");
+  // strict before soft, longer names first
+  m = match(["Fossa cranii", "Fossa cranii media"], [C("Fossa cranii", 10, 10, 12), C("media", 23.5, 10, 6)]);
+  assert.ok(m.has("u1") && m.get("u1").w >= 19, "the joined exact name takes the pieces");
+  assert.equal(m.has("u0"), false, "the shorter name does not take a piece of it");
   // one caption names one structure
   m = match(["Pars media", "Pars media"], [C("Pars media", 5, 5)]);
   assert.equal(m.size, 1, "one caption, one frame");

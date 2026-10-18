@@ -5674,14 +5674,16 @@ async function cnKnowledgePlanInput(d,r){
       const refs=(u.sources||[]).map(s=>({materialId:s.materialId,materialName:row.name,page:s.page||null,blockId:s.blockId,start:s.start??null,end:s.end??null,kind:s.kind||'',sourceOrder:s.sourceOrder||null}));
       if(!refs.length||refs.some(s=>s.materialId!==m.id||!s.blockId))throw {code:'knowledge_incomplete'};
       const order={materialIndex:mi,pageIndex:+(u.order&&u.order.pageIndex)||0,block:+(u.order&&u.order.block)||0,offset:u.order&&Number.isFinite(+u.order.offset)?+u.order.offset:0};
-      const eligible=u.extractionStatus==='extracted'&&u.sourceLinkStatus==='checked'&&u.content!==null&&u.content!==undefined;
+      /* a heading of the document read as a «statement»: the content is its one quote, the quote is an emphasised block, at most 6 words → no lesson about a heading (T-047); terms stay */
+      const heading=u.type==='statement'&&u.extractionStatus==='extracted'&&typeof u.content==='string'&&refs.length===1&&refs[0].kind==='emphasis_fragment'&&Number.isFinite(refs[0].start)&&Number.isFinite(refs[0].end)&&refs[0].end-refs[0].start===u.content.length&&u.content.trim().split(/\s+/).length<=6;
+      const eligible=u.extractionStatus==='extracted'&&u.sourceLinkStatus==='checked'&&u.content!==null&&u.content!==undefined&&!heading;
       if(u.type==='visual'&&!eligible)unresolvedVisuals++;
       const label=String(typeof u.content==='string'?u.content:JSON.stringify(u.content??'')).replace(/\s+/g,' ').trim().slice(0,220);
-      all.push({id:u.id,type:u.type,content:u.content,sources:refs,order:order,extractionStatus:u.extractionStatus,sourceLinkStatus:u.sourceLinkStatus,verificationStatus:u.verificationStatus,eligible:eligible,label:label});
+      all.push({id:u.id,type:u.type,content:u.content,sources:refs,order:order,extractionStatus:u.extractionStatus,sourceLinkStatus:u.sourceLinkStatus,verificationStatus:u.verificationStatus,eligible:eligible,label:label,heading:heading});
     }
   }
   all.sort((a,b)=>a.order.materialIndex-b.order.materialIndex||a.order.pageIndex-b.order.pageIndex||a.order.offset-b.order.offset||a.order.block-b.order.block||a.id.localeCompare(b.id));
-  const eligible=all.filter(u=>u.eligible),excluded=all.filter(u=>!u.eligible).map(u=>({id:u.id,type:u.type,reason:u.extractionStatus==='unresolved'?'unresolved':'source_link_unchecked',sources:u.sources,extractionStatus:u.extractionStatus,sourceLinkStatus:u.sourceLinkStatus}));
+  const eligible=all.filter(u=>u.eligible),excluded=all.filter(u=>!u.eligible).map(u=>({id:u.id,type:u.type,reason:u.extractionStatus==='unresolved'?'unresolved':u.heading?'heading_only':'source_link_unchecked',sources:u.sources,extractionStatus:u.extractionStatus,sourceLinkStatus:u.sourceLinkStatus}));
   if(eligible.length>CN_KNOWLEDGE_PLAN_MAX_UNITS)throw {code:'knowledge_too_large'};
   if(excluded.length>CN_KNOWLEDGE_PLAN_MAX_EXCLUDED)throw {code:'knowledge_too_large'};
   if(!eligible.length)throw {code:'knowledge_empty'};
@@ -5692,7 +5694,7 @@ async function cnKnowledgePlanInput(d,r){
   /* the request of one unit at a time (knowledge-v1) is kept for every registry that fits CN_PL.planJson (the limit of the function is 80000); a larger one is sent as groups of units */
   const grouped=JSON.stringify(inp).length>CN_PL.planJson;
   const labelMax=grouped?CN_GROUPS.labelChars:220;
-  const index=all.map(({id,type,label,sources,order,extractionStatus,sourceLinkStatus,verificationStatus,eligible})=>({id:id,type:type,label:label.slice(0,labelMax),sources:sources,order:order,extractionStatus:extractionStatus,sourceLinkStatus:sourceLinkStatus,verificationStatus:verificationStatus,eligible:eligible}));
+  const index=all.map(({id,type,label,sources,order,extractionStatus,sourceLinkStatus,verificationStatus,eligible,heading})=>({id:id,type:type,label:label.slice(0,labelMax),sources:sources,order:order,extractionStatus:extractionStatus,sourceLinkStatus:sourceLinkStatus,verificationStatus:verificationStatus,eligible:eligible,...(heading?{reason:'heading_only'}:{})}));
   r.dt.terms={knowledge:true,n:eligible.length,unresolved:sourceAssessment.unresolvedVisuals,review:reviewMaterials,incomplete:registryIncomplete};
   if(grouped){
     if(all.length>CN_GROUPS.indexMax)throw {code:'knowledge_too_large'};
@@ -6119,6 +6121,7 @@ function cnKnowledgePlanDoc(o){
       refs.push({materialId:s.materialId,materialName:s.materialName,page:s.page===null?null:+s.page,blockId:s.blockId,start:s.start===null?null:+s.start,end:s.end===null?null:+s.end,kind:str(s.kind,40),sourceOrder:s.sourceOrder&&typeof s.sourceOrder==='object'?{pageIndex:Math.max(0,+s.sourceOrder.pageIndex||0),block:Math.max(0,+s.sourceOrder.block||0)}:null});
     }
     const entry={id:x.id,type:x.type,label:str(x.label,220),sources:refs,order:x.order&&typeof x.order==='object'?{materialIndex:Math.max(0,+x.order.materialIndex||0),pageIndex:Math.max(0,+x.order.pageIndex||0),block:Math.max(0,+x.order.block||0),offset:Math.max(0,+x.order.offset||0)}:{materialIndex:0,pageIndex:0,block:0,offset:0},extractionStatus:x.extractionStatus,sourceLinkStatus:x.sourceLinkStatus,verificationStatus:'unverified',eligible:x.eligible,coverageStatus:x.coverageStatus,lessonId:x.lessonId};
+    if(x.reason==='heading_only'&&!x.eligible)entry.reason='heading_only';
     index.push(entry);byId.set(entry.id,entry);
   }
   const eligible=new Set(index.filter(x=>x.eligible).map(x=>x.id)),seen=new Set(),lessonFor=new Map(),parts=[];let count=0;
@@ -6485,8 +6488,8 @@ function cnBldFallbackReason(code){
     invalid_response:T3('Ответ AI нельзя было проверить; показаны исходные пункты.','The AI response could not be validated; source items are shown.','TI vastust ei saanud kontrollida; näidatakse lähtesisu.'),
     ai_unavailable:T3('AI недоступен; показаны исходные пункты.','AI was unavailable; source items are shown.','TI polnud saadaval; näidatakse lähtesisu.')})[code]||'';
 }
-const CN_KLESSON={version:2,units:40,blocks:240,blockChars:6000,inputChars:36000,outputChars:30000,claimChars:500,savedChars:600000};
-const cnKnowledgeClaimLimit=n=>Math.max(1,Math.min(7,Math.floor(32/Math.max(1,n))));
+const CN_KLESSON={version:2,units:40,blocks:240,blockChars:6000,inputChars:36000,outputChars:36000,claimChars:500,intro:6,savedChars:600000};
+const cnKnowledgeClaimLimit=n=>Math.max(1,Math.min(4,Math.floor(64/Math.max(1,n))));   // the same formula as lessonPrompt of the function (with lessonDepth 2); intro: at most CN_KLESSON.intro
 function cnKnowledgeContentText(type,value){
   if(typeof value==='string')return value;
   if(type==='process'&&value&&Array.isArray(value.steps))return value.steps.map((x,i)=>(i+1)+'. '+x).join('\n');
@@ -6591,7 +6594,7 @@ async function cnKnowledgeLessonPrepare(d,b,it){
   const sourceBlocks=Array.from(blocks.values()).sort((a,b)=>a.order.materialIndex-b.order.materialIndex||a.order.pageIndex-b.order.pageIndex||a.order.offset-b.order.offset||a.order.block-b.order.block||a.id.localeCompare(b.id));
   if(sourceBlocks.length>CN_KLESSON.blocks||sourceBlocks.some(x=>x.text.length>CN_KLESSON.blockChars))throw {code:'lesson_limit'};
   const assessment=plan.sourceAssessment||{},sourceStatus=(assessment.status==='review_required'||assessment.registryStatus==='incomplete'||units.some(u=>u.sources.some(s=>{const row=loaded.get(s.materialId);return !row||row.state.status!=='processed'||row.pages.some(p=>+p.n===s.page&&cnKnowledgePageStatus([p])==='review_required');})))?'review_required':'no_warning_detected';
-  const input={kind:'knowledge-v1',title:String(l.title||'').slice(0,300),units:units.map(u=>({id:u.id,type:u.type,content:u.content,sourceBlockIds:u.sourceBlockIds,order:u.order,verificationStatus:'unverified'})),sourceBlocks:sourceBlocks,sourceStatus:{status:sourceStatus,completeness:'not_proven'}};
+  const input={kind:'knowledge-v1',title:String(l.title||'').slice(0,300),units:units.map(u=>({id:u.id,type:u.type,content:u.content,sourceBlockIds:u.sourceBlockIds,order:u.order,verificationStatus:'unverified'})),sourceBlocks:sourceBlocks,sourceStatus:{status:sourceStatus,completeness:'not_proven'},lessonDepth:2};
   const inputChars=JSON.stringify(input).length;if(inputChars>CN_KLESSON.inputChars)throw {code:'lesson_limit'};
   const warnings=cnKnowledgeLessonWarnings(d,it,units,sourceStatus);
   if(!warnings.some(w=>w.code==='visual_unresolved')){
@@ -6627,7 +6630,7 @@ function cnKnowledgeLessonClean(raw,prepared){
     return out;
   };
   const allBlockIds=new Set(sourceBlocks.map(x=>x.id));
-  intro.push(...claims(raw.intro,allBlockIds,4));
+  intro.push(...claims(raw.intro,allBlockIds,CN_KLESSON.intro));
   if(!Array.isArray(raw.units)||raw.units.length>CN_KLESSON.units){issue('invalid_unit_output');}
   const seen=new Set();
   (Array.isArray(raw.units)?raw.units:[]).forEach(x=>{
@@ -6640,6 +6643,38 @@ function cnKnowledgeLessonClean(raw,prepared){
   const complete=intro.length>0&&units.every(u=>byUnit.has(u.id)&&byUnit.get(u.id).length>0)&&issues.length===0;
   const any= intro.length>0||Array.from(byUnit.values()).some(x=>x.length>0);
   return {generationStatus:complete?'ai':any?'partial':'fallback',intro:intro,units:byUnit,issues:issues};
+}
+/* A lesson reply cut short at the token limit (T-047, as T-034 does for the outline): read only the WHOLE objects of "intro" and "units" of the text, nothing is repaired or guessed;
+   they pass the same cnKnowledgeLessonClean. {intro,units,introClosed} or null when nothing whole. */
+function cnKnowledgeLessonSalvage(text){
+  if(typeof text!=='string'||text.length>200000)return null;
+  const out={intro:[],units:[]};let depth=0,str=false,esc=false,tok=-1,last='',key='',arr='',start=-1;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(str){if(esc)esc=false;else if(c==='\\')esc=true;else if(c==='"'){str=false;if(depth===1&&!arr)last=text.slice(tok,i);}continue;}
+    if(c==='"'){str=true;tok=i+1;continue;}
+    if(c==='{'||c==='['){
+      if(arr&&depth===2){if(c!=='{')return out;start=i;}
+      else if(c==='['&&depth===1&&!arr&&(key==='intro'||key==='units'))arr=key;
+      depth++;continue;
+    }
+    if(c==='}'||c===']'){
+      depth--;
+      if(arr&&depth===2&&start>=0){try{out[arr].push(JSON.parse(text.slice(start,i+1)));}catch(e){return out;}start=-1;}
+      else if(arr&&depth===1){arr='';key='';last='';}
+      if(depth<0)return null;
+      continue;
+    }
+    if(depth===1&&!arr){if(c===':')key=last;else if(c===','){key='';last='';}}
+  }
+  return out;
+}
+function cnKnowledgeLessonPartial(e,prepared){
+  if(!e||e.code!=='invalid_json'||e.truncated!==true)return null;   // only an explicitly cut-short reply is read
+  const s=cnKnowledgeLessonSalvage(e.text);if(!s||(!s.intro.length&&!s.units.length))return null;
+  const r=cnKnowledgeLessonClean({intro:s.intro,units:s.units},prepared);
+  if(r.generationStatus==='fallback')return null;
+  r.generationStatus='partial';if(r.issues.indexOf('truncated_partial')<0)r.issues.push('truncated_partial');return r;
 }
 async function cnKnowledgeLessonCall(prepared,invoke){
   if(typeof invoke!=='function')throw {code:'ai_unavailable'};
@@ -7014,7 +7049,7 @@ async function cnBldKnowledgeOne(d,b,it){
     catch(e){
       cnUsageAdd(b,e);const c=e&&e.code;if(c==='cancelled'||b.cancel)return null;
       if(c==='quota_exceeded'){b.err='quota';return {stop:'quota'};}
-      if(c==='invalid_json'||c==='empty_completion'){cnSpend(d,b,2);reason=e&&e.truncated?'truncated_response':'invalid_response';ai=cnKnowledgeLessonClean({},prepared);}
+      if(c==='invalid_json'||c==='empty_completion'){cnSpend(d,b,2);reason=e&&e.truncated?'truncated_response':'invalid_response';ai=cnKnowledgeLessonPartial(e,prepared)||cnKnowledgeLessonClean({},prepared);}
       else{if(e&&e.courseAI&&e.courseAI.charged||c==='rate_limited'||c==='timeout')cnSpend(d,b,2);b.err=c||'ai';return {stop:'ai'};}
     }
   }else{ai=cnKnowledgeLessonClean({},prepared);reason='ai_unavailable';}

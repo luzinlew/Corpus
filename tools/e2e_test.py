@@ -4501,6 +4501,27 @@ async def main():
             check('lesson: 40 terms, a text of 20000 characters and 30 questions are accepted (%d characters as JSON, at most 40000)' % ln, status == 200 and ln <= 40000, json.dumps([status, j.get('code'), ln]))
             status, j = fn_call(tokp, 'POST', {'task': 'lesson', 'lang': 'ru', 'input': {'title': 'x', 'terms': [{'id': 't1', 'la': 'Os'}]}})
             check('lesson: text and exam are optional; purpose may be left out; without text the prompt asks only for a one-sentence intro («No passages were given»)', status == 200 and 'No passages were given' in lastai()['said'] and 'Write ONLY what the text passages state' not in lastai()['said'], json.dumps([status, j.get('code')]))
+            # --- T-047: the lesson of knowledge-v1 — 6000 tokens, the deeper prompt with lessonDepth 2, the older client's input keeps the old numbers ---
+            def kv1(n_units, depth):
+                blocks_ = [{'id': f'b{i}', 'materialId': 'm1', 'sourceName': 'S', 'page': 1, 'order': {'materialIndex': 0, 'pageIndex': 1, 'block': i, 'offset': i}, 'text': f'Source line {i} about the skull.'} for i in range(n_units)]
+                units_ = [{'id': f'u{i}', 'type': 'term', 'content': f'Term {i}', 'sourceBlockIds': [f'b{i}'], 'order': {'materialIndex': 0, 'pageIndex': 1, 'block': i, 'offset': i}, 'verificationStatus': 'unverified'} for i in range(n_units)]
+                inp_ = {'kind': 'knowledge-v1', 'title': 'Skull', 'units': units_, 'sourceBlocks': blocks_, 'sourceStatus': {'status': 'no_warning_detected', 'completeness': 'not_proven'}}
+                if depth: inp_['lessonDepth'] = 2
+                return {'task': 'lesson', 'lang': 'et', 'input': inp_}
+            status, j = fn_call(tokp, 'POST', kv1(12, True))
+            lk = lastai()
+            ans_k = json.loads(j['text']) if status == 200 else {'units': [], 'intro': []}
+            check('lesson knowledge-v1 (T-047): 6000 output tokens (the legacy lesson 4000), lessonDepth 2 → the prompt says at most 6 intro claims and 4 claims per unit (12 units), the answer holds 4 claims per unit',
+                  status == 200 and lk['max_tokens'] == 6000 and 'at most 6 intro claims and at most 4 claims per unit' in lk['said'] and len(ans_k['units']) == 12 and all(len(u_['claims']) == 4 for u_ in ans_k['units']) and len(ans_k['intro']) == 2, json.dumps([status, lk.get('max_tokens'), len(ans_k['units'])]))
+            status, j = fn_call(tokp, 'POST', kv1(24, True))
+            check('…24 units → 2 claims per unit in the prompt and the answer', status == 200 and 'at most 2 claims per unit' in lastai()['said'] and all(len(u_['claims']) == 2 for u_ in json.loads(j['text'])['units']), json.dumps([status])[:300])
+            status, j = fn_call(tokp, 'POST', kv1(36, True))
+            check('…36 units → 1 claim per unit', status == 200 and 'at most 1 claims per unit' in lastai()['said'] and all(len(u_['claims']) == 1 for u_ in json.loads(j['text'])['units']), json.dumps([status])[:300])
+            status, j = fn_call(tokp, 'POST', kv1(12, False))
+            check('an older client (no lessonDepth) with 12 units: the old numbers (4 intro, 2 claims per unit) and the same input is not refused', status == 200 and 'at most 4 short intro claims and at most 2 claims per unit' in lastai()['said'] and all(len(u_['claims']) == 1 for u_ in json.loads(j['text'])['units']), json.dumps([status, j.get('code')]))
+            bad_k = kv1(2, True); bad_k['input']['lessonDepth'] = 3
+            status, j = fn_call(tokp, 'POST', bad_k)
+            check('lessonDepth other than 2 → 400 invalid_input', status == 400 and j.get('code') == 'invalid_input', json.dumps([status, j]))
             urllib.request.urlopen(API + '/__fn?hang=lesson')
             status, j = fn_call(tokp, 'POST', good_l)
             check('lesson: the model does not answer in time → 504 {code: timeout}', status == 504 and j.get('code') == 'timeout', json.dumps([status, j]))
@@ -4657,6 +4678,10 @@ async def main():
             cards_k = await pk.evaluate("S.cards.filter(c=>c.knowledgeId).map(c=>c.knowledgeId)")
             check('knowledge build: one card per registry unit: 14 cards, each knowledge id once; the plates carry knowledgeIds (v2); cplan stays v2 and its lessons keep only the empty compatibility list terms: []',
                   sorted(cards_k) == sorted(unit_ids) and all(p_.get('knowledgeIds') and p_['lessonVersion'] for p_ in pl_k2.values()) and mine_k(st, 'cplan')[0]['data']['planVersion'] == 2 and all(set(l) == {'id', 'title', 'pic', 'off', 'knowledgeIds', 'rationale', 'reorderedFromSource', 'terms'} and l['terms'] == [] for pt in mine_k(st, 'cplan')[0]['data']['parts'] for l in pt['lessons']), json.dumps(sorted(cards_k))[:300])
+            notes_k = await pk.evaluate("S.cards.filter(c=>c.knowledgeId).map(c=>c.note)")
+            check('knowledge build (T-047): a lesson of 2 units asks for the deeper answer (lessonDepth 2): every unit of every lesson holds 4 claims, every lesson 2 intro claims with quotes, status ai (no claim_limit); the note of every card carries all 4 claims',
+                  all(c['input'].get('lessonDepth') == 2 for c in lessons_k()) and all(p_['generationStatus'] == 'ai' and len(p_['knowledgeIntroEvidence']) == 2 and all(len(u_['claims']) == 4 and all(cl['evidence'] for cl in u_['claims']) for u_ in p_['knowledgeUnits']) for p_ in pl_k2.values())
+                  and len(notes_k) == 14 and all('Point 4.' in nt_ and 'Point 2.' in nt_ for nt_ in notes_k), json.dumps([len(notes_k), notes_k[:1]], ensure_ascii=False)[:300])
             check('knowledge build: no script errors or failed requests in the browser', not errs_k, '; '.join(errs_k)[:500])
             # <<< T032A
             await ctx_k.close()

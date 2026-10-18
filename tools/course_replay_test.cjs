@@ -71,17 +71,17 @@ async function discoveryAndContextTests() {
 
   const contextBlock = prepared.blocks.find(b => b.text.includes("Stored energy can be transferred"));
   const response = { intro: [{ text: "Energy is conserved.", evidence: [{ blockId: primary.id, quote: "Energy is a conserved quantity." }] }],
-    units: [{ id: found.id, claims: Array.from({ length: 7 }, () => ({ text: "x".repeat(500), evidence: [{ blockId: contextBlock.id, quote: "Stored energy can be transferred." }] })) }] };
+    units: [{ id: found.id, claims: Array.from({ length: 4 }, () => ({ text: "x".repeat(500), evidence: [{ blockId: contextBlock.id, quote: "Stored energy can be transferred." }] })) }] };
   const result = logic.cnKnowledgeLessonClean(response, prepared);
   assert.equal(result.generationStatus, "ai", "supported same-page context claims are accepted");
   assert.ok(logic.cnKnowledgeClaimText(result.units.get(found.id)).length <= 4000, "valid explanation cannot be cut by card persistence");
   const plate = { lessonVersion: 2, knowledgeIds: [found.id], generationStatus: "ai", knowledgeUnits: [{ ...prepared.units[0], extractionStatus: "extracted", sourceLinkStatus: "checked", generationStatus: "ai", claims: result.units.get(found.id) }], knowledgeIntroEvidence: result.intro };
   const reloaded = logic.cnKnowledgeLessonMetaClean(clone(plate));
   assert.ok(reloaded, "longer explanation and context evidence survive serialization");
-  assert.equal(reloaded.knowledgeUnits[0].claims.length, 7);
+  assert.equal(reloaded.knowledgeUnits[0].claims.length, 4);
   const bad = clone(response); bad.units[0].claims[0].evidence[0].quote = "not present";
   assert.equal(logic.cnKnowledgeLessonClean(bad, prepared).generationStatus, "partial");
-  assert.equal(knowledgeHelpers.cnKnowledgeClaimLimit(1), 7);
+  assert.equal(knowledgeHelpers.cnKnowledgeClaimLimit(1), 4);
   assert.equal(knowledgeHelpers.cnKnowledgeClaimLimit(40), 1);
   console.log("DISCOVERY/CONTEXT/VISUAL TESTS PASSED: empty registry, unique/ambiguous pointers, unlinked blocks, contextual citations, claim budget, caption candidate/tie/unresolved, lesson reload");
 }

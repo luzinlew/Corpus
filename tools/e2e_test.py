@@ -2070,6 +2070,71 @@ async def main():
                 await pg.evaluate("startStudy(window.__nudgeDeck)")
                 await pg.wait_for_selector('.full.study')
                 await asyncio.sleep(0.4)
+            # T-053: >=900 folder/deck screens: the window does not scroll, the two columns scroll on their own
+            try:
+                await pg.evaluate("""(()=>{const base=deckById(window.__nudgeDeck);S.folders.push({id:'t53f',name:'T53',mode:'hideAll',createdAt:Date.now()});
+                  for(let i=0;i<30;i++)S.decks.push(Object.assign({},base,{id:'t53d'+i,name:'T53 deck '+i,folderId:'t53f',createdAt:Date.now()+i}));
+                  for(let i=0;i<12;i++)S.plates.push({id:'t53p'+i,deckId:'t53d0',w:640,h:420,createdAt:Date.now()+i});})()""")
+                G53 = """(()=>{const t=s=>{const e=document.querySelector(s);return e?Math.round(e.getBoundingClientRect().top*10)/10:null},r=document.querySelector('.fright'),l=document.querySelector('.fleft'),se=document.scrollingElement;
+                  return {win:se.scrollHeight-innerHeight,ov:t('.fleft>.overview'),pbar:t('.pbar'),d0:t('.fright .deck, .fright .tiles>*'),fr:[r.scrollHeight,r.clientHeight,r.scrollTop,getComputedStyle(r).overflowY],fl:[l.scrollHeight,l.clientHeight,l.scrollTop]}})()"""
+                for scr53, js53 in (('folder', "go({name:'folder',folderId:'t53f'})"), ('deck', "go({name:'deck',deckId:'t53d0',tab:'photos'})")):
+                    for (vw, vh) in ((1440, 900), (1024, 768)):
+                        await pg.set_viewport_size({'width': vw, 'height': vh})
+                        await pg.evaluate(js53)
+                        await pg.wait_for_selector('.fcols .fright')
+                        await asyncio.sleep(1.0)
+                        g0 = await pg.evaluate(G53)
+                        await pg.evaluate("document.querySelector('.fright').scrollTop=400")
+                        await asyncio.sleep(0.2)
+                        g1 = await pg.evaluate(G53)
+                        check(f'{scr53} {vw}x{vh}: window does not scroll, right column scrolls alone, card and header stay put',
+                              g0['win'] <= 1 and g0['fr'][0] > g0['fr'][1] and g1['fr'][2] > 100 and abs(g1['ov'] - g0['ov']) <= 1 and abs(g1['pbar'] - g0['pbar']) <= 1 and g1['d0'] < g0['d0'] - 50 and g1['win'] <= 1, [g0, g1])
+                        if vw == 1024:
+                            await pg.evaluate("document.querySelector('.fright').scrollTop=0")
+                            await pg.evaluate("document.querySelector('.fleft').scrollTop=200")
+                            await asyncio.sleep(0.2)
+                            g2 = await pg.evaluate(G53)
+                            check(f'{scr53} 1024x768: the left column scrolls on its own (if taller than its area), the right one does not move',
+                                  abs(g2['d0'] - g0['d0']) <= 1 and (g2['fl'][0] <= g2['fl'][1] or g2['fl'][2] > 0), [g0, g2])
+                await pg.set_viewport_size({'width': 1440, 'height': 900})
+                for scr53, js53 in (('folder', "go({name:'folder',folderId:'t53f'})"), ('deck', "go({name:'deck',deckId:'t53d0',tab:'photos'})")):
+                    await pg.evaluate(js53)
+                    await asyncio.sleep(0.8)
+                    await pg.evaluate("document.querySelector('.fright').scrollTop=200")
+                    if scr53 == 'folder':
+                        await pg.evaluate("document.querySelectorAll('[data-act=folderMode]')[1].click()")
+                    else:
+                        await pg.evaluate("document.querySelectorAll('.fleft [data-act=mode]')[1].click()")
+                    await asyncio.sleep(0.6)
+                    await pg.evaluate('render()')
+                    await asyncio.sleep(0.4)
+                    st = await pg.evaluate("[document.querySelector('.fright').scrollTop,view.name]")
+                    check(f'{scr53}: changing the mode on the left and a re-render keep the right column scroll', abs(st[0] - 200) <= 2 and st[1] == scr53, st)
+                await pg.evaluate("go({name:'deck',deckId:'t53d0',tab:'photos'})")
+                await asyncio.sleep(0.6)
+                await pg.evaluate("document.querySelector('.fright').scrollTop=300")
+                await pg.evaluate("view.tab='cards';render()")
+                await asyncio.sleep(0.4)
+                check('deck: switching the tab starts the right column at the top', await pg.evaluate("document.querySelector('.fright').scrollTop")==0)
+                await pg.evaluate("go({name:'folder',folderId:'t53f'})")
+                await asyncio.sleep(0.6)
+                await pg.evaluate("document.querySelector('.fright').scrollTop=300")
+                await pg.evaluate("go({name:'library'})")
+                await asyncio.sleep(0.5)
+                await pg.evaluate("go({name:'folder',folderId:'t53f'})")
+                await asyncio.sleep(0.6)
+                check('folder: back from the list, the right column starts at the top', await pg.evaluate("document.querySelector('.fright').scrollTop")==0)
+                for (vw, vh) in ((820, 1180), (390, 844)):
+                    await pg.set_viewport_size({'width': vw, 'height': vh})
+                    await asyncio.sleep(0.8)
+                    g = await pg.evaluate(G53)
+                    check(f'folder {vw}x{vh}: the window scrolls, columns have no scroll of their own', g['win'] > 0 and g['fr'][3] == 'visible', g)
+            finally:
+                await pg.set_viewport_size({'width': 390, 'height': 844})
+                await pg.evaluate("S.plates=S.plates.filter(p=>!String(p.id).startsWith('t53p'));S.decks=S.decks.filter(d=>!String(d.id).startsWith('t53d'));S.folders=S.folders.filter(f=>f.id!=='t53f')")
+                await pg.evaluate("startStudy(window.__nudgeDeck)")
+                await pg.wait_for_selector('.full.study')
+                await asyncio.sleep(0.4)
             # T-050: sidebar on folder/deck/hard screens (>=900 only); not on study
             try:
                 await pg.evaluate("""(()=>{const base=deckById(window.__nudgeDeck);S.folders.push({id:'t50f',name:'T50',mode:'hideAll',createdAt:Date.now()});

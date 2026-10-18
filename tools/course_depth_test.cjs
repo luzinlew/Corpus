@@ -34,7 +34,7 @@ async function planOf(units) {
 const units = [
   unit("ku1_head", "statement", "KOLJU TERVIKUNA", src("emphasis_fragment", 0, 15), 0),
   unit("ku1_long", "statement", LONG, src("emphasis_fragment", 20, 20 + LONG.length), 1),
-  unit("ku1_term", "term", "BASIS CRANII INTERNA", src("emphasis_fragment", 300, 320), 2),
+  unit("ku1_term", "term", "Basis cranii interna", src("text_fragment", 300, 320), 2),    // a plain term: stays (T-057: an emphasised definition-less one is a heading)
   unit("ku1_plain", "statement", "Koljupõhi", src("text_fragment", 400, 409), 3),            // short, but not a heading block
   unit("ku1_part", "statement", "Koljupõhi osa", src("emphasis_fragment", 500, 560), 4),     // the quote is only a part of a longer block
   unit("ku1_def", "statement", "Foramen magnum – suur ava.", src("emphasis_fragment", 600, 626), 5),
@@ -202,6 +202,62 @@ await ok("truncated lesson: the whole units and the closed intro are kept, the u
   const rw = partialOf({ code: "invalid_json", truncated: true, text: wholeText }, prep);
   assert.equal(rw.generationStatus, "ai", "everything whole and valid: not marked partial"); assert.equal(rw.units.size, 4); assert.ok(!rw.issues.includes("truncated_partial"));
   assert.match(source.slice(source.indexOf("async function cnBldKnowledgeOne("), source.indexOf("async function cnBldLegacyOne(")), /cnKnowledgeLessonPartial\(e,prepared\)/);
+});
+/* ---------- T-057: headings arriving as text_fragment / as terms ---------- */
+const esrc = (start, len, extra) => [{ materialId: material.id, blockId: "b" + start, page: 1, start, end: start + len, kind: "text_fragment", sourceOrder: { pageIndex: 1, block: start }, ...(extra || {}) }];
+const units2 = [
+  unit("k2_up", "statement", "BASIS CRANII EXTERNA", esrc(0, 20, { emBlock: true }), 0),            // heading as text_fragment, marked by its block
+  unit("k2_up_old", "statement", "BASIS CRANII INTERNA", esrc(30, 20), 1),                           // a registry before emBlock: whole line in capitals
+  unit("k2_th", "term", "Eesmine osa", esrc(60, 11, { emBlock: true }), 2),                          // a term-heading, nothing defines it
+  unit("k2_th_old", "term", "FOSSA CRANII MEDIA", esrc(80, 18), 3),
+  unit("k2_tw", "term", "Foramen magnum", esrc(100, 14, { emBlock: true }), 4),                       // a real term: a statement speaks about it
+  unit("k2_tw_def", "statement", "Foramen magnum – suur ava.", esrc(120, 26), 5),
+  unit("k2_td", "term", "Atlas", esrc(150, 5, { emBlock: true }), 6),                                 // a real term with a definition unit
+  unit("k2_td_def", "definition", "Atlas on esimene kaelalüli, mis kannab koljut.", esrc(160, 45), 7),
+  unit("k2_abbr", "term", "ATP", esrc(210, 3), 8),                                                    // one capital word without a flag: not a heading
+  unit("k2_notem", "statement", "Keskmine osa", esrc(220, 12), 9),                                    // short, but its block is not emphasised
+  unit("k2_part", "term", "Keskmine", esrc(240, 8, { emBlock: true }), 10),                           // the term is less than... its quote is whole but another unit names it
+  unit("k2_part_def", "statement", "Keskmine osa jääb kõrva taha.", esrc(250, 30), 11),
+  unit("k2_fact", "statement", "Foramen magnum – suur ava.", esrc(300, 26, { emBlock: true }), 12),   // a short fact in an emphasised block: stays
+];
+await ok("T-057: headings as text_fragment (flagged block, capitals) and definition-less terms are excluded with heading_only", async () => {
+  plan = await planOf(units2);
+  for (const id of ["k2_up", "k2_up_old", "k2_th", "k2_th_old"]) { assert.ok(!plan.units.some(u => u.id === id), id + " is no lesson unit"); assert.equal(exOf(id) && exOf(id).reason, "heading_only", id); assert.equal(ixOf(id).eligible, false); }
+});
+await ok("T-057: a term with a definition, an abbreviation, a non-emphasised short statement and a short fact stay", async () => {
+  plan = await planOf(units2);
+  for (const id of ["k2_tw", "k2_tw_def", "k2_td", "k2_td_def", "k2_abbr", "k2_notem", "k2_part", "k2_part_def", "k2_fact"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays"); assert.ok(!exOf(id), id); }
+});
+await ok("T-057: a material of emphasised terms only (a list of structures, no statement at all) keeps every term", async () => {
+  const list = ["Os frontale", "Os parietale", "Os occipitale"].map((c, i) => unit("k3_" + i, "term", c, esrc(i * 20, c.length, { emBlock: true }), i));
+  const p3 = await planOf(list);
+  assert.equal(p3.units.length, 3); assert.equal(p3.inp.excluded.length, 0);
+});
+await ok("T-057: cnKnowledgeClean marks a quote that is the whole emphasised block (emBlock) and nothing else", async () => {
+  const m = { id: "mat-c" }, blocks = logic.cnKnowledgeBlocks(m, [{ n: 1, text: "BASIS CRANII EXTERNA\nForamen magnum on suur ava koljupõhjas.", em: ["BASIS CRANII EXTERNA", "Foramen magnum"] }]);
+  const head = blocks.find(b => b.text === "BASIS CRANII EXTERNA"), em2 = blocks.find(b => b.text === "Foramen magnum"), rest = blocks.find(b => !b.emphasis);
+  const k = logic.cnKnowledgeClean({ knowledge: [
+    { type: "statement", content: "BASIS CRANII EXTERNA", sources: [{ block_id: head.id, quote: "BASIS CRANII EXTERNA" }] },
+    { type: "term", content: "Foramen", sources: [{ block_id: em2.id, quote: "Foramen" }] },
+    { type: "statement", content: "suur ava", sources: [{ block_id: rest.id, quote: "suur ava" }] }] }, blocks, m);
+  assert.equal(k.units.length, 3);
+  assert.equal(k.units.find(u => u.content === "BASIS CRANII EXTERNA").sources[0].emBlock, true);
+  assert.equal(k.units.find(u => u.content === "Foramen").sources[0].emBlock, undefined, "a part of a block");
+  assert.equal(k.units.find(u => u.content === "suur ava").sources[0].emBlock, undefined);
+});
+await ok("T-057: lesson.issues keeps the codes of a partial lesson (compact, codes only) and an old lesson reads as before", async () => {
+  const seg = source.slice(source.indexOf("async function cnBldKnowledgeOne("), source.indexOf("async function cnBldLegacyOne("));
+  assert.match(seg, /p\.issues=iss/, "the saved lesson takes the issue codes");
+  assert.match(seg, /cnIssuesCap\(/);
+  const prep = mkPrepared(2), raw = { intro: [claim(0, 0)], units: [{ id: prep.units[0].id, claims: Array.from({ length: 9 }, (_, j) => claim(0, j)) }] };
+  const r = logic.cnKnowledgeLessonClean(raw, prep);
+  assert.equal(r.generationStatus, "partial"); assert.ok(r.issues.includes("claim_limit") && r.issues.includes("unit_output_missing"), JSON.stringify(r.issues));
+  const meta = logic.cnKnowledgeLessonMetaClean;
+  const base = { lessonVersion: 2, knowledgeIds: ["u0"], generationStatus: "partial", sourceStatus: "no_warning_detected", sourceSnapshotStatus: "not_applicable", sourceBlocks: [], knowledgeUnits: [{ id: "u0", type: "term", content: "Atlas", sources: [{ materialId: "m", blockId: "b0", page: 1, start: 0, end: 5 }], extractionStatus: "extracted", sourceLinkStatus: "checked", verificationStatus: "unverified", generationStatus: "fallback", claims: [] }] };
+  const o = meta({ ...base, issues: ["claim_limit", "truncated_partial", "x".repeat(200), 5, "bad code!"] }, null);
+  assert.deepEqual(o && o.issues, ["claim_limit", "truncated_partial"], "only short code strings");
+  const old = meta({ ...base }, null);
+  assert.ok(old && !("issues" in old), "an old lesson has no issues field");
 });
 console.log(n + " depth checks passed" + (process.exitCode ? " WITH FAILURES" : ""));
 if (!process.exitCode) console.log("COURSE DEPTH TESTS PASSED");

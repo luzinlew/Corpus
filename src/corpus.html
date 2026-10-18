@@ -5376,7 +5376,7 @@ function cnKnowledgeClean(raw,blocks,m,options){
       }
       const at=block.text.indexOf(quote);if(block.text.indexOf(quote,at+1)>=0){fail('ambiguous_source_quote');continue;}
       if(refs.some(r=>r.blockId===block.id&&r.start===block.start+at&&r.end===block.start+at+quote.length))continue;
-      refs.push({materialId:m.id,blockId:block.id,page:block.page,start:block.start+at,end:block.start+at+quote.length,sourceOrder:{pageIndex:block.pageIndex,block:block.order},kind:block.kind==='emphasis_text'?'emphasis_fragment':'text_fragment'});quotes.push(quote);
+      refs.push({materialId:m.id,blockId:block.id,page:block.page,start:block.start+at,end:block.start+at+quote.length,sourceOrder:{pageIndex:block.pageIndex,block:block.order},kind:block.kind==='emphasis_text'?'emphasis_fragment':'text_fragment',...(block.emphasis&&quote===block.text.trim()?{emBlock:true}:{})});quotes.push(quote);
     }
     if(!refs.length)bad=true;
     if(type==='visual'){
@@ -5721,6 +5721,19 @@ async function cnStepExam(d,r){
   r.dt.exam={n:qs.length};cnRPaint();return qs;
 }
 /* Build a compact, source-ordered plan request from saved KnowledgeUnits. The sidecars stay the source of truth; the request carries only the unit content and provenance needed for grouping. */
+/* T-057: a heading of the document read as a unit. Heading = the unit's every source is the WHOLE of one emphasised block (emBlock, set when the unit was extracted) or an emphasis_fragment,
+   the content is that quote, at most 6 words, no closing punctuation and no «X – Y» / «X = Y». Registries made before emBlock have no flag: only a whole line in CAPITALS of 2+ words counts then.
+   A term is a heading only when no definition/statement of the material speaks about it (a material with no statement at all is a list of terms: none is a heading); a statement needs no such check. */
+const cnHeadShape=t=>{t=String(t||'').trim();return !!t&&t.split(/\s+/).length<=6&&!/[.;:!?]$/.test(t)&&!/ [–—-] | = /.test(t);};
+const cnHeadUpper=t=>{t=String(t||'').trim();return t.split(/\s+/).length>=2&&/\p{Lu}/u.test(t)&&!/\p{Ll}/u.test(t);};
+function cnHeadingIds(units){
+  const norm=x=>String(x).replace(/\s+/g,' ').trim().toLowerCase(),out=new Set();
+  const whole=u=>u.extractionStatus==='extracted'&&typeof u.content==='string'&&Array.isArray(u.sources)&&u.sources.length>0&&cnHeadShape(u.content)&&u.sources.every(s=>Number.isFinite(s.start)&&Number.isFinite(s.end)&&s.end-s.start===u.content.length&&(s.kind==='emphasis_fragment'||s.emBlock===true||(s.emBlock===undefined&&cnHeadUpper(u.content))));
+  units.forEach(u=>{if(u.type==='statement'&&whole(u))out.add(u.id);});
+  const defs=units.filter(u=>(u.type==='statement'||u.type==='definition')&&!out.has(u.id)&&u.extractionStatus==='extracted'&&typeof u.content==='string').map(u=>norm(u.content));
+  if(defs.length)units.forEach(u=>{if(u.type==='term'&&whole(u)){const t=norm(u.content);if(!defs.some(c=>c!==t&&c.includes(t)))out.add(u.id);}});
+  return out;
+}
 async function cnKnowledgePlanInput(d,r){
   const materials=d.mats.filter(m=>m.role!=='exam'),hasRegistry=materials.some(m=>(Array.isArray(m.kdocs)&&m.kdocs.length)||m.kstatus);
   if(!hasRegistry)return null;
@@ -5736,6 +5749,7 @@ async function cnKnowledgePlanInput(d,r){
     const row={id:m.id,name:cnNameOf(m.name).slice(0,120),role:m.role,pages:Math.floor(+m.pages||0),registryStatus:state.status,outlineStatus:docs.some(x=>x.outlineStatus==='incomplete')?'incomplete':docs.length?'processed':'unavailable',sourceProcessingStatus:sourceReview?'review_required':docs.length?'no_warning_detected':'unavailable',issues:docIssues};
     materialRows.push(row);
     if(!docs.length&&m.role==='pics'&&m.kind==='img')unprocessedVisuals+=Math.max(0,+m.photos||0);
+    const headIds=cnHeadingIds(state.units.filter(u=>u&&typeof u.id==='string'));
     for(const u of state.units){
       if(!u||typeof u.id!=='string'||!CN_KNOWLEDGE_TYPES.includes(u.type)||seen.has(u.id))throw {code:'knowledge_incomplete'};
       if(u.extractionStatus==='extracted'&&!cnKnowledgeContent(u.type,u.content))throw {code:'knowledge_incomplete'};
@@ -5744,7 +5758,7 @@ async function cnKnowledgePlanInput(d,r){
       if(!refs.length||refs.some(s=>s.materialId!==m.id||!s.blockId))throw {code:'knowledge_incomplete'};
       const order={materialIndex:mi,pageIndex:+(u.order&&u.order.pageIndex)||0,block:+(u.order&&u.order.block)||0,offset:u.order&&Number.isFinite(+u.order.offset)?+u.order.offset:0};
       /* a heading of the document read as a «statement»: the content is its one quote, the quote is an emphasised block, at most 6 words → no lesson about a heading (T-047); terms stay */
-      const heading=u.type==='statement'&&u.extractionStatus==='extracted'&&typeof u.content==='string'&&refs.length===1&&refs[0].kind==='emphasis_fragment'&&Number.isFinite(refs[0].start)&&Number.isFinite(refs[0].end)&&refs[0].end-refs[0].start===u.content.length&&u.content.trim().split(/\s+/).length<=6&&!/[.;:!?]$/.test(u.content.trim())&&!/ [–—-] | = /.test(u.content);   // a sentence or a definition «X – Y» is not a heading
+      const heading=headIds.has(u.id);   // a heading is not a lesson (T-047, T-057)
       const eligible=u.extractionStatus==='extracted'&&u.sourceLinkStatus==='checked'&&u.content!==null&&u.content!==undefined&&!heading;
       if(u.type==='visual'&&!eligible)unresolvedVisuals++;
       const label=String(typeof u.content==='string'?u.content:JSON.stringify(u.content??'')).replace(/\s+/g,' ').trim().slice(0,220);
@@ -7207,6 +7221,7 @@ async function cnBldKnowledgeOne(d,b,it){
   const units=prepared.units.map(u=>{const claims=ai.units.get(u.id)||[];return {id:u.id,type:u.type,content:u.content,sources:u.sources,extractionStatus:'extracted',sourceLinkStatus:'checked',verificationStatus:'unverified',generationStatus:claims.length?'ai':'fallback',claims:claims};});
   const sourceWarnings=prepared.warnings.slice();if(visualStatus==='source_object_unavailable')sourceWarnings.push({code:'visual_unavailable'});
   const p={id:newId('plates'),deckId:dk.id,createdAt:dk.createdAt+CN_BLD.lsStep*(it.li+1),title:l.title.slice(0,200),cb:key,lessonVersion:CN_KLESSON.version,knowledgeIds:l.knowledgeIds.slice(),generationStatus:ai.generationStatus,sourceStatus:prepared.sourceStatus,sourceCompleteness:'not_proven',sourceWarnings:sourceWarnings,visualStatus:visualStatus,intro:intro,knowledgeIntroEvidence:ai.intro,knowledgeUnits:units};
+  {const iss=cnIssuesCap((ai.issues||[]).filter(x=>typeof x==='string'&&/^[a-z0-9_:.-]{1,60}$/i.test(x)));if(iss.length)p.issues=iss;}   // T-057: why the lesson is partial (codes only)
   const lg=cnLangOk(LANG);if(lg)p.lang=lg;
   const labs=pic&&Array.isArray(pic.labels)?pic.labels:[],frames=pic&&up?cnBldMatch(structs,labs):new Map();b.dt.labels=labs.length;b.dt.frames=frames.size;
   if(pic&&up&&frames.size===0&&visualStatus==='source_object_shown')visualStatus='source_page_shown_unresolved';   // a photo whose captions gave no frame is not analysed either
@@ -7944,6 +7959,7 @@ function cnKnowledgeLessonMetaClean(o,imported){
   if(imported)warnings.push({code:snapshots.sourceSnapshotStatus==='complete'||snapshots.sourceSnapshotStatus==='not_applicable'?'source_files_not_included':'source_refs_not_included'});
   const visualStatus=['not_used','source_object_shown','source_page_shown_unresolved','source_object_unavailable'].includes(o.visualStatus)?o.visualStatus:'not_used';
   const result={lessonVersion:2,knowledgeIds:knowledgeIds,generationStatus:['ai','partial','fallback'].includes(o.generationStatus)?o.generationStatus:'fallback',sourceStatus:status,sourceCompleteness:'not_proven',sourceWarnings:warnings,visualStatus,sourceSnapshotStatus:snapshots.sourceSnapshotStatus,sourceBlocks:snapshots.sourceBlocks,knowledgeIntroEvidence:citations(o.knowledgeIntroEvidence),knowledgeUnits:units};
+  if(Array.isArray(o.issues)){const iss=o.issues.filter(x=>typeof x==='string'&&/^[a-z0-9_:.-]{1,60}$/i.test(x)).slice(0,40);if(iss.length)result.issues=iss;}   // T-057
   if(Number.isSafeInteger(o.frameCount)&&o.frameCount>0&&o.frameCount<=units.filter(u=>u.type==='term'||u.type==='definition').length)result.frameCount=o.frameCount;   // T-046: frames put by captions
   if(JSON.stringify(result).length>CN_KLESSON.savedChars)return null;
   return result;

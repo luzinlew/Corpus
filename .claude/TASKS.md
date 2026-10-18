@@ -599,3 +599,4 @@
 - ревью: security — проблем нет; qa-review — 3 «желательно» → ac97a1d: факты с пунктуацией/«X – Y» не заголовки; лимит 40/n, LS_KNOWLEDGE_MAX_TOKENS 8000, outputChars 40000; новый клиент + старая функция — один повтор без lessonDepth (CN_DEPTH_OFF) со старыми лимитами
 - влиты T-055 и main (39fa3f4); все офлайн (9 + pdf_visual) PASSED, e2e ×2: 884 PASS, ALL PASSED
 - выкладка: push main (функция через deploy-functions.yml, ждать зелёный) → gh-pages; откат функции безопасен благодаря повтору без lessonDepth
+- деплой T-055 + T-056: «деплой, делай» Льва 2026-10-18. main трижды уходил вперёд — влит (конфликты только в журнале, номера сменены); e2e на финальном коде f687ccd: 913 PASS, ALL PASSED. откат сайта: db0c8fa18cc4e53b1c16a06694bd6dbac7c8f59b; откат функции: `git show db0c8fa:supabase/functions/corpus-ai/index.ts`

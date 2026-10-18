@@ -874,8 +874,10 @@ async def main():
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             async with pg.expect_download() as dl:
-                await pg.click('#layer [data-s="share"]')
+                await pg.click('#layer [data-s="file"]')
             path = await (await dl.value).path()
             exp = json.loads(pathlib.Path(path).read_text())
             check('folder exported as a file with its photo', exp['kind'] == 'folder' and exp['plates'][0]['image'].startswith('data:image/jpeg') and len(exp['cards']) == 2,
@@ -902,8 +904,10 @@ async def main():
             fid2 = await pg.evaluate("S.folders.find(f=>f.name==='Järjekord').id")
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid2}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             async with pg.expect_download() as dl:
-                await pg.click('#layer [data-s="share"]')
+                await pg.click('#layer [data-s="file"]')
             exp2 = json.loads(pathlib.Path(await (await dl.value).path()).read_text())
             check('a re-shared folder lists decks and photos in that order',
                   [d['name'] for d in exp2['decks']] == want['decks'] and [p['w'] for p in exp2['plates'] if p['deckId'] == exp2['decks'][0]['id']] == want['photos'],
@@ -1430,6 +1434,8 @@ async def main():
             # share the folder by code / QR
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             await pg.click('#layer [data-s="qr"]')
             await pg.wait_for_selector('#shareCode', timeout=15000)
             code = await pg.get_attribute('#shareCode', 'data-code') or ''
@@ -1445,10 +1451,30 @@ async def main():
                   and all('reps' not in c for c in sh[0]['data']['cards']), json.dumps(sh)[:200])
             await pg.click('#layer [data-s="ok"]')
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             await pg.click('#layer [data-s="qr"]')
             await pg.wait_for_selector('#shareCode', timeout=15000)
             check('sharing again keeps the same code (the snapshot is refreshed)', (await pg.get_attribute('#shareCode', 'data-code')) == code and len(state()['shares']) == 1)
             await pg.click('#layer [data-s="ok"]')
+
+            # «Continue where you stopped»: the deck remembers the last opened photo
+            did2 = await pg.evaluate("(()=>{const d=S.decks.find(x=>platesOf(x.id).length>1);return d?d.id:null;})()")
+            check('deck with two photos exists for the resume check', did2 is not None)
+            if did2:
+                keep = await pg.evaluate("META.lastPlate||null")
+                await pg.evaluate(f"delete META.lastPlate;go({{name:'deck',deckId:'{did2}'}})")
+                await pg.wait_for_selector('[data-act=study], .alldone')
+                no = await pg.evaluate("!!document.querySelector('[data-act=resumePlate]')")
+                p1 = await pg.evaluate(f"platesOf('{did2}')[1].id")
+                await pg.evaluate(f"openEditor('{p1}',null)")
+                await pg.evaluate(f"go({{name:'deck',deckId:'{did2}'}})")
+                await pg.wait_for_selector('[data-act=resumePlate]')
+                await pg.click('[data-act=resumePlate]')
+                await pg.wait_for_function(f"view.name==='editor' && ED.plateId==='{p1}'", timeout=5000)
+                check('deck: «continue where you stopped» appears only after a photo was opened and leads back to it', no is False)
+                await pg.evaluate("(k=>{if(k)META.lastPlate=k;else delete META.lastPlate;})(" + json.dumps(keep) + ")")
+            await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
 
             # Anki: a .apkg with image-occlusion and Basic notes
             urllib.request.urlopen(API + '/__log')                 # clear the request log

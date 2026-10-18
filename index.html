@@ -797,6 +797,58 @@ html.calm .rate button.auto::after{animation-duration:1.5s!important}
 @keyframes askPulse{0%{box-shadow:0 0 0 0 var(--primary-soft)}8%{box-shadow:0 0 0 7px rgba(110,92,240,.22)}20%,100%{box-shadow:0 0 0 12px rgba(110,92,240,0)}}
 html.calm .ibtn.plain.ask.pulse{animation:none}
 @media (prefers-reduced-motion:reduce){.ibtn.plain.ask.pulse{animation:none}}
+/* T-046 icon motion: short play on appear (finite) and again on hover/focus/press; calm/reduced = static */
+.i .a-bub,.i .a-star,.i .a-fl,.i .a-c1,.i .a-c2,.i .a-c3,.i .a-bar,.i .a-sc,.i .a-l1,.i .a-l2{transform-box:fill-box;transform-origin:center}
+.i[data-ic=flame] .a-fl{transform-origin:50% 100%}
+.i .a-sp1,.i .a-sp2{opacity:0;transform-box:fill-box;transform-origin:center}
+.i[data-ic=ai] .a-bub{animation:aiBub 1.2s ease-in-out}
+.i[data-ic=ai] .a-star{animation:aiStar 1.2s ease-in-out}
+.i[data-ic=ai] .a-sp1{animation:aiSp 1.2s ease-out .1s backwards}
+.i[data-ic=ai] .a-sp2{animation:aiSp 1.2s ease-out .45s backwards}
+.i[data-ic=chat] .a-bub{animation:chBub .6s ease-in-out 2}
+.i[data-ic=chat] .a-l1{animation:chLn .6s ease-in-out 2}
+.i[data-ic=chat] .a-l2{animation:chLn .6s ease-in-out .15s 2}
+.i[data-ic=flame] .a-fl{animation:flGrow 1.1s ease-in-out 2}
+.i[data-ic=target] .a-c1{animation:tgPop .35s cubic-bezier(.3,1.4,.5,1) backwards}
+.i[data-ic=target] .a-c2{animation:tgPop .35s cubic-bezier(.3,1.4,.5,1) .12s backwards}
+.i[data-ic=target] .a-c3{animation:tgPop .35s cubic-bezier(.3,1.4,.5,1) .24s backwards}
+.i[data-ic=scan] .a-bar{animation:scBar .28s linear 3}
+.i[data-ic=scan] .a-sc{animation:scCor .5s ease-in-out}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=ai] .a-bub{animation:aiBubB 1.2s ease-in-out}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=ai] .a-star{animation:aiStarB 1.2s ease-in-out}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=ai] .a-sp1{animation:aiSpB 1.2s ease-out .1s backwards}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=ai] .a-sp2{animation:aiSpB 1.2s ease-out .45s backwards}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=chat] .a-bub{animation:chBubB .6s ease-in-out 2}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=chat] .a-l1{animation:chLnB .6s ease-in-out 2}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=chat] .a-l2{animation:chLnB .6s ease-in-out .15s 2}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=flame] .a-fl{animation:flGrowB 1.1s ease-in-out 2}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=target] .a-c1{animation:tgPopB .35s cubic-bezier(.3,1.4,.5,1) backwards}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=target] .a-c2{animation:tgPopB .35s cubic-bezier(.3,1.4,.5,1) .12s backwards}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=target] .a-c3{animation:tgPopB .35s cubic-bezier(.3,1.4,.5,1) .24s backwards}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=scan] .a-bar{animation:scBarB .28s linear 3}
+:where(button,a,[role=button],.deck,.tile,.sitem,.crow,.mode):where(:hover,:focus-visible,:active) .i[data-ic=scan] .a-sc{animation:scCorB .5s ease-in-out}
+.streak .i[data-ic=flame] .a-fl{animation:flLoop 2.2s ease-in-out infinite}
+@keyframes flLoop{0%,100%{opacity:.88;transform:none}50%{opacity:1;transform:scale(.96,1.08) skewX(2deg)}}
+@keyframes aiStar{0%{transform:none}50%{transform:scale(1.35) rotate(45deg)}100%{transform:rotate(90deg)}}
+@keyframes aiStarB{0%{transform:none}50%{transform:scale(1.35) rotate(45deg)}100%{transform:rotate(90deg)}}
+@keyframes aiBub{0%,100%{transform:none}50%{transform:scale(1.04)}}
+@keyframes aiBubB{0%,100%{transform:none}50%{transform:scale(1.04)}}
+@keyframes aiSp{0%{opacity:0;transform:scale(.4)}50%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.4)}}
+@keyframes aiSpB{0%{opacity:0;transform:scale(.4)}50%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.4)}}
+@keyframes chBub{0%,100%{transform:none}50%{transform:scale(1.07)}}
+@keyframes chBubB{0%,100%{transform:none}50%{transform:scale(1.07)}}
+@keyframes chLn{0%,100%{transform:none}50%{transform:scaleX(1.25)}}
+@keyframes chLnB{0%,100%{transform:none}50%{transform:scaleX(1.25)}}
+@keyframes flGrow{0%{opacity:.85;transform:none}40%{opacity:1;transform:scale(.96,1.08) skewX(3deg)}70%{transform:scale(.98,1.04) skewX(-2deg)}100%{opacity:1;transform:none}}
+@keyframes flGrowB{0%{opacity:.85;transform:none}40%{opacity:1;transform:scale(.96,1.08) skewX(3deg)}70%{transform:scale(.98,1.04) skewX(-2deg)}100%{opacity:1;transform:none}}
+@keyframes tgPop{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.15)}100%{opacity:1;transform:none}}
+@keyframes tgPopB{0%{opacity:0;transform:scale(.2)}70%{opacity:1;transform:scale(1.15)}100%{opacity:1;transform:none}}
+@keyframes scBar{0%,100%{transform:none}25%{transform:translateY(-4px)}75%{transform:translateY(4px)}}
+@keyframes scBarB{0%,100%{transform:none}25%{transform:translateY(-4px)}75%{transform:translateY(4px)}}
+@keyframes scCor{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes scCorB{0%,100%{opacity:1}50%{opacity:.6}}
+html.calm .i [class^="a-"]{animation:none!important}
+@media (prefers-reduced-motion:reduce){.i [class^="a-"]{animation:none!important}}
 .ainudge{display:flex;align-items:center;gap:2px;align-self:flex-start;margin:0 0 6px;border:1px solid var(--line);border-radius:20px;background:var(--surface);padding:0 4px 0 0}
 .ainudge .go{display:flex;align-items:center;gap:6px;border:none;background:none;color:var(--accent);font-weight:600;font-size:13px;padding:7px 4px 7px 12px}
 .ainudge .x{border:none;background:none;color:var(--muted,var(--ink));opacity:.6;display:flex;align-items:center;justify-content:center;min-width:38px;min-height:38px;margin:-4px 0;padding:0}
@@ -990,7 +1042,10 @@ const ICONS={
   rotate:'<path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/>',
   repeat:'<path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7"/>',
   trash:'<path d="M4 7h16M9 7V4.5h6V7M18 7l-.8 12.5a1.5 1.5 0 01-1.5 1.5H8.3a1.5 1.5 0 01-1.5-1.5L6 7"/>',
-  spark:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+  ai:'<path class="a-bub" d="M21 12a8 8 0 01-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1121 12z"/><path class="a-star" d="M12 7.6l1.2 3.2 3.2 1.2-3.2 1.2-1.2 3.2-1.2-3.2L7.6 12l3.2-1.2z" fill="currentColor" stroke-width="1"/><path class="a-sp1" d="M19.6 2.6l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z" fill="currentColor" stroke="none"/><path class="a-sp2" d="M3.6 3.4l.4 1 1 .4-1 .4-.4 1-.4-1-1-.4 1-.4z" fill="currentColor" stroke="none"/>',
+  flame:'<path class="a-fl" d="M12 3c1 3.5 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3.2 2-4.2.2 1.2.8 2 1.6 2.4C10.2 8.5 10.5 5.5 12 3z"/>',
+  target:'<circle class="a-c1" cx="12" cy="12" r="9"/><circle class="a-c2" cx="12" cy="12" r="4.5"/><circle class="a-c3" cx="12" cy="12" r=".9" fill="currentColor" stroke="none"/>',
+  scan:'<path class="a-sc" d="M4 8V6a2 2 0 012-2h2M16 4h2a2 2 0 012 2v2M20 16v2a2 2 0 01-2 2h-2M8 20H6a2 2 0 01-2-2v-2"/><path class="a-bar" d="M8 12h8"/>',
   play:'<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   pencil:'<path d="M4 20h4L19.5 8.5a2.1 2.1 0 00-3-3L5 17z"/>',
@@ -1007,7 +1062,7 @@ const ICONS={
   search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/>',
   arrow:'<path d="M5 19L18 6"/><path d="M9.5 5.5H18.5V14.5"/>',
   cards:'<rect x="3" y="6" width="14" height="14" rx="2.5"/><path d="M7 3h11.5A2.5 2.5 0 0121 5.5V17"/><path d="M7 11h6M7 15h4"/>',
-  chat:'<path d="M21 12a8 8 0 01-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1121 12z"/><path d="M9 10.5h6M9 13.5h4"/>',
+  chat:'<path class="a-bub" d="M21 12a8 8 0 01-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1121 12z"/><path class="a-l1" d="M9 10.5h6"/><path class="a-l2" d="M9 13.5h4"/>',
   volume:'<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
   send:'<path d="M5 12h13M13 6l6 6-6 6"/>',
   help:'<circle cx="12" cy="12" r="9"/><path d="M9.4 9.4a2.7 2.7 0 015.2 1c0 1.8-2.6 2.2-2.6 3.9"/><circle cx="12" cy="17.4" r=".9" fill="currentColor" stroke="none"/>',
@@ -1015,7 +1070,7 @@ const ICONS={
   cal:'<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   link:'<path d="M10 14a4.5 4.5 0 006.4 0l3-3a4.5 4.5 0 00-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 00-6.4 0l-3 3a4.5 4.5 0 006.4 6.4l1-1"/>'
 };
-function ic(n,s){s=s||20;return '<svg class="i" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICONS[n]||'')+'</svg>';}
+function ic(n,s){s=s||20;return '<svg class="i" data-ic="'+n+'" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICONS[n]||'')+'</svg>';}
 
 /* ---------- utils ---------- */
 const $=(s,r)=>(r||document).querySelector(s);
@@ -2630,7 +2685,7 @@ async function deckMenu(did){
     ...(sharesApi()?[{v:'qr',icon:'qr',label:'Поделиться по QR-коду',sub:'Код или ссылка — колода появится у другого человека'}]:[]),
     {v:'share',icon:'layers',label:'Поделиться файлом',sub:'Фото, рамки и названия, без прогресса'},
     ...(cardsOfDeck(did).length?[{v:'cmp',icon:'list',label:'Сверить с конспектом',sub:'Лишние карточки можно удалить вместе с рамками'}]:[]),
-    ...(isTextDeck(d)?[]:(()=>{const u=cardsOfDeck(did).filter(c=>!isText(c)&&!c.term&&!isArrow(c)).length;return u?[{v:'ocrAll',icon:'spark',label:'Прочитать названия рамок',sub:pl(u,'рамка','рамки','рамок')+' без названия — распознать подписи на фото'}]:[];})()),
+    ...(isTextDeck(d)?[]:(()=>{const u=cardsOfDeck(did).filter(c=>!isText(c)&&!c.term&&!isArrow(c)).length;return u?[{v:'ocrAll',icon:'scan',label:'Прочитать названия рамок',sub:pl(u,'рамка','рамки','рамок')+' без названия — распознать подписи на фото'}]:[];})()),
     {v:'exam',icon:'cal',label:'Контрольная и план',sub:examMenuSub(examForDeck(d))},
     {v:'limit',icon:'layers',label:'Новых карточек в день',sub:planQuota(d)!=null?('Сейчас по плану контрольной: '+planQuota(d)):'Сейчас: '+(d.newPerDay==null?20:d.newPerDay)},
     {v:'del',icon:'trash',label:'Удалить колоду',danger:true}]);
@@ -2794,10 +2849,10 @@ function sessCounts(){
   return {n:Math.min(n,cap),l:l,r:r};
 }
 function countsBar(){
-  if(SS.cram||SS.hard){const sk=SS.streak||0,bump=sk!==SS._sk;SS._sk=sk;return limTag()+(sk>=3?'<span class="streak'+(bump?' bump':'')+'">'+ic('spark',14)+sk+'</span>':'')+'<span class="muted">Осталось '+(SS.cramQueue.length+(SS.cur?1:0))+'</span>';}
+  if(SS.cram||SS.hard){const sk=SS.streak||0,bump=sk!==SS._sk;SS._sk=sk;return limTag()+(sk>=3?'<span class="streak'+(bump?' bump':'')+'">'+ic('flame',14)+sk+'</span>':'')+'<span class="muted">Осталось '+(SS.cramQueue.length+(SS.cur?1:0))+'</span>';}
   const k=sessCounts();const c=cardById(SS.cur);const t=c?(c.type==='new'?'n':c.type==='review'?'r':'l'):'';
   const sk=SS.streak||0,bump=sk!==SS._sk;SS._sk=sk;
-  return limTag()+(sk>=3?'<span class="streak'+(bump?' bump':'')+'" title="Верных подряд">'+ic('spark',14)+sk+'</span>':'')+'<span class="c-new'+(t==='n'?' cur':'')+'" title="новые">'+k.n+'</span><span class="c-learn'+(t==='l'?' cur':'')+'" title="изучаются">'+k.l+'</span><span class="c-due'+(t==='r'?' cur':'')+'" title="на повтор">'+k.r+'</span>';
+  return limTag()+(sk>=3?'<span class="streak'+(bump?' bump':'')+'" title="Верных подряд">'+ic('flame',14)+sk+'</span>':'')+'<span class="c-new'+(t==='n'?' cur':'')+'" title="новые">'+k.n+'</span><span class="c-learn'+(t==='l'?' cur':'')+'" title="изучаются">'+k.l+'</span><span class="c-due'+(t==='r'?' cur':'')+'" title="на повтор">'+k.r+'</span>';
 }
 function studyMasks(){
   const c=cardById(SS.cur);if(!c)return '';const m=SS.cm,ans=SS.phase==='answer';
@@ -3218,7 +3273,7 @@ async function edLinks(){
 }
 function edHintField(c){
   return '<div class="hint-wrap"><input id="hintIn" class="hint-in" value="'+esc(c.hint||'')+'" placeholder="Подсказка — необязательно" autocomplete="off" enterkeyhint="done">'+
-    (S.sample&&c.term?'<button class="hint-ai" data-act="edHintAI" aria-label="Придумать подсказку с Claude" title="Придумать подсказку с Claude">'+ic('spark',18)+'</button>':'')+'</div>';
+    (S.sample&&c.term?'<button class="hint-ai" data-act="edHintAI" aria-label="Придумать подсказку с Claude" title="Придумать подсказку с Claude">'+ic('ai',18)+'</button>':'')+'</div>';
 }
 function edPanel(){
   if(ED.linkFrom&&cardById(ED.linkFrom))return '<div class="insp"><div class="insp-row r1 linkbar"><b>'+ic('link',18)+'<span>Связывание рамок</span></b><button class="btn line" data-act="edLinkCancel">Отмена</button></div>'+
@@ -3231,12 +3286,12 @@ function edPanel(){
     '<div id="ocrSugg">'+suggHtml(c)+'</div>'+
     '<div class="insp-row r2">'+edHintField(c)+
       (mergeCandidate(c)?'<button class="btn line" data-act="edMerge" aria-label="Склеить с нижней рамкой" title="Склеить с нижней рамкой">↓<span>Склеить</span></button>':'')+
-      '<button class="btn line" data-act="edOCR" aria-label="Распознать текст в рамке" title="Распознать текст в рамке">'+ic('spark',18)+'<span>Прочитать</span></button>'+
+      '<button class="btn line" data-act="edOCR" aria-label="Распознать текст в рамке" title="Распознать текст в рамке">'+ic('scan',18)+'<span>Прочитать</span></button>'+
       '<button class="btn line" data-act="edLink" aria-label="Связать с другой рамкой" title="Одна карточка — несколько рамок">'+ic('link',18)+'<span>Связать</span></button>'+
       '<button class="btn line danger ico" data-act="edDel" aria-label="Удалить рамку" title="Удалить">'+ic('trash',18)+'</button></div></div>';}
   const empty=!cardsOfPlate(ED.plateId).length;
   return '<div class="insp"><div class="insp-row r1 tools"><div class="seg" role="radiogroup" aria-label="Инструмент"><button role="radio" aria-checked="'+(ED.tool==='draw')+'" class="'+(ED.tool==='draw'?'on':'')+'" data-act="edTool" data-v="draw">'+ic('rect',18)+'Рамка</button><button role="radio" aria-checked="'+(ED.tool==='arrow')+'" class="'+(ED.tool==='arrow'?'on':'')+'" data-act="edTool" data-v="arrow">'+ic('arrow',18)+'Стрелка</button><button role="radio" aria-checked="'+(ED.tool==='select')+'" class="'+(ED.tool==='select'?'on':'')+'" data-act="edTool" data-v="select">'+ic('cursor',18)+'Двигать</button></div>'+
-    '<button class="btn line" data-act="edAI">'+ic('spark',18)+'Авто</button></div>'+
+    '<button class="btn line" data-act="edAI">'+ic(S.sample&&S.imgOK?'ai':'search',18)+'Авто</button></div>'+
     '<div class="insp-row r2"><div class="ed-tip">'+(empty&&ED.tool!=='arrow'?'Проведите пальцем по подписи — появится рамка. Или нажмите «Авто»: подписи найдутся и прочитаются сами.':ED.tool==='draw'?'Проведите пальцем по подписи — она закроется рамкой. Нажмите на рамку, чтобы подписать или удалить её.':ED.tool==='arrow'?'Коснитесь структуры — появится стрелка. Или проведите пальцем: остриё там, где отпустите.':'Перетаскивайте рамки, синий кружок меняет размер. Фото листается пальцем по пустому месту.')+'</div></div></div>';
 }
 SCREENS.editor={
@@ -3923,7 +3978,7 @@ function edUngrp(){
   updEd();toast('Рамка отвязана от других фото — теперь это отдельная карточка');
 }
 function edPanelProbe(){
-  return '<div class="insp"><div class="insp-row r1"><div class="term-wrap"><input placeholder="x"></div><button class="btn primary done">Готово</button></div><div class="insp-row r2"><div class="hint-wrap"><input class="hint-in" placeholder="x"></div><button class="btn line">↓<span>Склеить</span></button><button class="btn line">'+ic('spark',18)+'<span>Прочитать</span></button><button class="btn line">'+ic('link',18)+'<span>Связать</span></button><button class="btn line danger ico">'+ic('trash',18)+'</button></div></div>';
+  return '<div class="insp"><div class="insp-row r1"><div class="term-wrap"><input placeholder="x"></div><button class="btn primary done">Готово</button></div><div class="insp-row r2"><div class="hint-wrap"><input class="hint-in" placeholder="x"></div><button class="btn line">↓<span>Склеить</span></button><button class="btn line">'+ic('scan',18)+'<span>Прочитать</span></button><button class="btn line">'+ic('link',18)+'<span>Связать</span></button><button class="btn line danger ico">'+ic('trash',18)+'</button></div></div>';
 }
 function lockEdPanel(){
   const pin=$('#edPanel');if(!pin||!ED)return false;
@@ -3954,7 +4009,7 @@ function edReading(id,on){
 function suggHtml(c){
   const g=ED&&ED.sugg;if(!g||g.id!==c.id||!g.t||g.t===c.term)return '';
   if(g.undo)return '<button class="ocr-sugg" data-act="edSugg">'+ic('undo',16)+'<span>Исправлено по словарю, прочитано: <span class="latin">'+esc(g.t)+'</span></span><b>Вернуть</b></button>';
-  return '<button class="ocr-sugg" data-act="edSugg">'+ic('spark',16)+'<span>Прочитано: <span class="latin">'+esc(g.t)+'</span></span><b>Заменить</b></button>';
+  return '<button class="ocr-sugg" data-act="edSugg">'+ic('scan',16)+'<span>Прочитано: <span class="latin">'+esc(g.t)+'</span></span><b>Заменить</b></button>';
 }
 /* show a name that arrived asynchronously without rebuilding the inspector (keeps the keyboard and any drag alive) */
 function edShowTerm(c){
@@ -8045,7 +8100,7 @@ async function cmpResult(R){
       (R.missing.length?sec('Есть в конспекте, но нет в колоде','<div class="cmp-miss" data-noi18n>'+R.missing.map(it=>esc(it.text)).join(' · ')+'</div>','muted'):'')+
       (!R.extra.length&&!R.missing.length&&!R.fuzzy.length?'<p class="cmp-ok">Колода полностью совпадает с конспектом.</p>':'')+
       '</div>'+
-      (canAI?'<button class="hintai" id="cmpAI">'+ic('spark',16)+'<span>Сопоставить по смыслу с Claude</span></button>':'')+
+      (canAI?'<button class="hintai" id="cmpAI">'+ic('ai',16)+'<span>Сопоставить по смыслу с Claude</span></button>':'')+
       '<div class="dlg-btns"><button class="btn line" data-s="0">'+(nDel||nFix?'Отмена':'Закрыть')+'</button>'+(nDel||nFix?'<button class="btn '+(nDel?'dangerfill':'primary')+'" id="cmpApply">'+(nDel?'Удалить ('+nDel+')':'Исправить ('+nFix+')')+'</button>':'')+'</div></div>';
     const v=await showOverlay(html,ov=>{
       $$('.cmp-row input',ov).forEach(b=>b.onchange=()=>{if(b.checked)sel.add(b.dataset.k);else sel.delete(b.dataset.k);dismissOverlay('re');});
@@ -9018,7 +9073,7 @@ function askBtn(){return chatAvailable()?'<button class="ibtn plain ask'+(META.a
 /* a soft hint after a miss: one line above the next card, at most once a session and 3 a day, off for good once closed */
 function aiNudgeHtml(){
   if(!SS||!SS.nudge||SS.phase!=='ask'||!chatAvailable()||META.aiNudgeOff||CH.open)return '';
-  return '<div class="ainudge"><button class="go" data-act="aiNudgeGo">'+ic('spark',16)+'<span>Объяснить с Claude</span></button><button class="x" data-act="aiNudgeOff" aria-label="Больше не предлагать">'+ic('close',14)+'</button></div>';
+  return '<div class="ainudge"><button class="go" data-act="aiNudgeGo">'+ic('ai',16)+'<span>Объяснить с Claude</span></button><button class="x" data-act="aiNudgeOff" aria-label="Больше не предлагать">'+ic('close',14)+'</button></div>';
 }
 function aiNudgeMaybe(c){
   if(!SS||SS.cram||META.aiNudgeOff||!chatAvailable()||SS.nudgeShown||CH.open)return;
@@ -9103,7 +9158,7 @@ function hardCards(ids){return uniqGrp(S.cards.filter(c=>ids.indexOf(c.deckId)>=
 function hardHtml(ids){
   const hs=hardCards(ids);if(!hs.length)return '';
   return '<div class="sbox"><h3>Самые трудные</h3><div class="hardlist">'+hs.slice(0,10).map(c=>'<button class="crow" data-act="openHard" data-id="'+c.id+'"><span class="t'+(isText(c)&&c.dir==='r'?'':' latin')+'">'+esc(cardTitle(c))+'</span><span class="cnt">'+pl(hardN(c),'ошибка','ошибки','ошибок')+'</span>'+(isLeech(c)?'<span class="st st-leech">трудная</span>':'')+'</button>').join('')+'</div>'+
-    '<button class="btn line block" data-act="openHardDeck" data-folder="" style="margin-top:10px">'+ic('spark',18)+'Открыть «Трудные»</button></div>';
+    '<button class="btn line block" data-act="openHardDeck" data-folder="" style="margin-top:10px">'+ic('target',18)+'Открыть «Трудные»</button></div>';
 }
 function openHard(id){
   const c=cardById(id);if(!c)return;const back=Object.assign({},view);
@@ -9114,7 +9169,7 @@ function hardScopeIds(fid){return fid?decksInFolder(fid).map(d=>d.id):liveDecks(
 function hardPool(fid){return hardCards(hardScopeIds(fid)).filter(c=>!cardExcluded(c));}
 function hardRowHtml(fid){
   const n=hardPool(fid).length;if(!n)return '';
-  return '<button class="deck hardrow" data-act="openHardDeck" data-folder="'+esc(fid||'')+'"><span class="thumb">'+ic('spark',22)+'</span><span class="dinfo"><span class="dname">'+tr('Трудные')+'</span><span class="dmeta">Собираются автоматически</span></span><span class="cnt">'+n+'</span></button>';
+  return '<button class="deck hardrow" data-act="openHardDeck" data-folder="'+esc(fid||'')+'"><span class="thumb">'+ic('target',22)+'</span><span class="dinfo"><span class="dname">'+tr('Трудные')+'</span><span class="dmeta">Собираются автоматически</span></span><span class="cnt">'+n+'</span></button>';
 }
 function studyHard(fid){
   const hs=hardPool(fid);if(!hs.length){toast('Трудных карточек нет — отлично');return;}
@@ -9126,7 +9181,7 @@ SCREENS.hard={
     const hs=hardPool(fid);const mode=META.hardMode||'hideAll';
     return '<div class="page hardscreen"><header class="pbar"><button class="ibtn" data-act="'+(fid?'openFolderBack':'library')+'" aria-label="Назад">'+ic('back')+'</button><h1>'+tr('Трудные')+'</h1></header>'+
       '<p class="muted hardnote">Собирается автоматически: карточка уходит после 3 верных ответов подряд (по этой карточке)</p>'+
-      (hs.length?'<section class="overview">'+modeGridHtml(mode,'hardMode')+'<button class="btn primary big block hardgo" data-act="studyHard" data-folder="'+esc(fid||'')+'">'+ic('spark',18)+'Учить трудные · '+hs.length+'</button></section>'+
+      (hs.length?'<section class="overview">'+modeGridHtml(mode,'hardMode')+'<button class="btn primary big block hardgo" data-act="studyHard" data-folder="'+esc(fid||'')+'">'+ic('target',18)+'Учить трудные · '+hs.length+'</button></section>'+
         '<div class="sbox"><div class="hardlist">'+hs.slice(0,60).map(c=>'<button class="crow" data-act="openHard" data-id="'+c.id+'"><span class="t'+(isText(c)&&c.dir==='r'?'':' latin')+'">'+esc(cardTitle(c))+'</span><span class="cnt">'+pl(hardN(c),'ошибка','ошибки','ошибок')+'</span>'+(isLeech(c)?'<span class="st st-leech">трудная</span>':'')+'</button>').join('')+'</div></div>':
         '<div class="empty"><p>Трудных карточек нет — отлично</p></div>')+'</div>';
   },
@@ -9160,7 +9215,7 @@ function hintDialog(c,o){
   const term=isText(c)?c.front:c.term;const canAI=!!S.sample&&!!term;const shown=[];
   const html='<div class="dlg"><h3>'+esc(o.title)+'</h3><p>'+esc(o.text)+'</p><textarea id="hIn" rows="2" placeholder="например: «вертлужная впадина»">'+esc(c.hint||'')+'</textarea>'+
     '<div class="hvars" id="hVars" data-noi18n></div>'+
-    (canAI?'<button class="hintai" id="hAI">'+ic('spark',16)+'<span>Придумать с Claude</span></button>':'')+
+    (canAI?'<button class="hintai" id="hAI">'+ic('ai',16)+'<span>Придумать с Claude</span></button>':'')+
     '<div class="dlg-btns"><button class="btn line" data-s="0">'+esc(o.cancel||'Отмена')+'</button><button class="btn primary" data-s="1">Сохранить</button></div></div>';
   return showOverlay(html,ov=>{
     const inp=$('#hIn',ov);setTimeout(()=>{if(!matchMedia('(pointer:coarse)').matches)inp.focus();},60);
@@ -9183,7 +9238,7 @@ async function edHintAI(btn){
     setB(true);
     let vs=null;try{vs=await genMnemonics(c,shown.concat(c.hint?[c.hint]:[]));}catch(e){const d=aiErrDetail(e);toast(tr(mnemonicErr(e))+(d?' ('+d+')':''),d?6000:3000);}
     setB(false);if(!vs||!vs.length||!cardById(c.id))return;shown.push(...vs);
-    const v=await actionSheet('Выберите подсказку',vs.map((t,i)=>({v:'h'+i,icon:'spark',label:t,raw:1})).concat([{v:'more',icon:'rotate',label:'Ещё варианты'}]));
+    const v=await actionSheet('Выберите подсказку',vs.map((t,i)=>({v:'h'+i,icon:'ai',label:t,raw:1})).concat([{v:'more',icon:'rotate',label:'Ещё варианты'}]));
     if(v==='more')continue;
     if(v&&v[0]==='h'&&cardById(c.id)){const t=vs[+v.slice(1)];c.hint=t;if(!(c.hintLeft>0))c.hintLeft=hintShows();persist('terms',c.id);const i=$('#hintIn');if(i)i.value=t;toast('Подсказка сохранена — её можно поправить');}
     return;
@@ -9754,8 +9809,8 @@ function tourSlides(){
     li:[['search','Текст подписи читается сам, прямо на устройстве — фото никуда не уходит'],['check','Латинские слова сверяются со словарём анатомии']]},
   {ic:'play',t:'Учитесь по-разному',p:'',
     li:[['eyeoff','Скрыть все, Выбор, Ввод, Найти на рисунке — режим выбирается на главной и прямо во время учёбы'],['rotate','Повторения сами подбирают время (FSRS, как в современном Anki)'],['chart','Трудные карточки собираются в «Статистике» — их можно потренировать отдельно']]}];
-  if(S.sample)L.push({ic:'spark',t:'Claude под рукой',p:'',
-    li:[['spark','Придумает подсказку-ассоциацию для трудного термина'],['chat','Чат по карточке — кнопка с облачком вверху во время учёбы'],['image','Прочитает подписи на фото и сверит колоду с вашим конспектом'],['book','Переведёт уроки курса на ваш язык — текст урока уходит в Claude (Anthropic)']]});
+  if(S.sample)L.push({ic:'ai',t:'Claude под рукой',p:'',
+    li:[['ai','Придумает подсказку-ассоциацию для трудного термина'],['chat','Чат по карточке — кнопка с облачком вверху во время учёбы'],['image','Прочитает подписи на фото и сверит колоду с вашим конспектом'],['book','Переведёт уроки курса на ваш язык — текст урока уходит в Claude (Anthropic)']]});
   L.push({ic:'volume',t:TTS_OK?'Латынь вслух, три языка':'Три языка и темы',p:'',speak:TTS_OK,
     li:(TTS_OK?[['volume','Динамик у латинского термина произносит его вслух']]:[]).concat([['tag','Интерфейс на русском, English и eesti — язык можно сменить в любой момент'],['gear','Светлая, тёмная и бумажная темы, крупный текст и строгий режим — всё в «Ещё»']])});
   L.push({ic:'qr',t:'Делитесь по QR-коду',p:'Покажите QR-код колоды или папки — друг наведёт камеру и получит её у себя.',
@@ -10075,7 +10130,7 @@ if(window.__TEST__){
   window.introPlan=introPlan;window.introChunks=introChunks;window.introOrder=introOrder;window.INTRO_CHUNK=INTRO_CHUNK;window.introGo=introGo;window.introEnd=introEnd;window.metaOn=metaOn;window.persistMeta=persistMeta;
   window.startStudy=startStudy;window.startFolderStudy=startFolderStudy;window.pickNext=pickNext;
   window.doReveal=doReveal;window.doCheck=doCheck;window.doPick=doPick;window.rate=rate;
-  window.undoStudy=undoStudy;window.updStudy=updStudy;window.render=render;window.go=go;window.diffHtml=diffHtml;
+  window.undoStudy=undoStudy;window.updStudy=updStudy;window.render=render;window.countsBar=countsBar;window.ic=ic;window.edHintField=edHintField;window.go=go;window.diffHtml=diffHtml;
   window.select=select;window.openEditor=openEditor;window.recoverFromError=recoverFromError;
   window.nextCard=nextCard;window.sessSummary=sessSummary;window.nearestUnnamed=nearestUnnamed;
   window.platesOf=platesOf;window.cardsOfDeck=cardsOfDeck;window.cardsOfPlate=cardsOfPlate;

@@ -218,6 +218,8 @@ const units2 = [
   unit("k2_notem", "statement", "Keskmine osa", esrc(220, 12), 9),                                    // short, but its block is not emphasised
   unit("k2_part", "term", "Keskmine", esrc(240, 8, { emBlock: true }), 10),                           // the term is less than... its quote is whole but another unit names it
   unit("k2_part_def", "statement", "Keskmine osa jääb kõrva taha.", esrc(250, 30), 11),
+  unit("k2_fossa", "term", "Fossa cranii anterior", esrc(340, 21, { emBlock: true }), 13),           // an emphasised anatomical label with no definition: knowledge, stays
+  unit("k2_os", "term", "Os frontale", esrc(370, 11, { emBlock: true }), 14),
   unit("k2_fact", "statement", "Foramen magnum – suur ava.", esrc(300, 26, { emBlock: true }), 12),   // a short fact in an emphasised block: stays
 ];
 await ok("T-057: headings as text_fragment (flagged block, capitals) and definition-less terms are excluded with heading_only", async () => {
@@ -226,7 +228,7 @@ await ok("T-057: headings as text_fragment (flagged block, capitals) and definit
 });
 await ok("T-057: a term with a definition, an abbreviation, a non-emphasised short statement and a short fact stay", async () => {
   plan = await planOf(units2);
-  for (const id of ["k2_tw", "k2_tw_def", "k2_td", "k2_td_def", "k2_abbr", "k2_notem", "k2_part", "k2_part_def", "k2_fact"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays"); assert.ok(!exOf(id), id); }
+  for (const id of ["k2_tw", "k2_tw_def", "k2_td", "k2_td_def", "k2_abbr", "k2_notem", "k2_part", "k2_part_def", "k2_fact", "k2_fossa", "k2_os"]) { assert.ok(plan.units.some(u => u.id === id), id + " stays"); assert.ok(!exOf(id), id); }
 });
 await ok("T-057: a material of emphasised terms only (a list of structures, no statement at all) keeps every term", async () => {
   const list = ["Os frontale", "Os parietale", "Os occipitale"].map((c, i) => unit("k3_" + i, "term", c, esrc(i * 20, c.length, { emBlock: true }), i));

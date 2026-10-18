@@ -531,11 +531,11 @@ http.createServer(async (req, res) => {
         const emOf = (pg) => (pg.em && pg.em.length) ? pg.em : (pg.blocks || []).filter((b) => b.emphasis).map((b) => b.text.trim());
         const firstLine = (t) => String(t).split('\n').map((x) => x.trim()).find((x) => x) || '';
         const knowledge = [];
-        for (const pg of inp.pages || []) { let lastTerm = ''; for (const b of pg.blocks || []) {
+        for (const pg of inp.pages || []) for (const b of pg.blocks || []) {
           const t = String(b.text || '').trim();
-          if (b.emphasis) { const q = firstLine(b.text).slice(0, 240).trim(); if (q) { knowledge.push({ type: 'term', content: q, sources: [{ block_id: b.id, quote: q }] }); lastTerm = q; } }
-          else if (t.length > 20) { const q = t.slice(0, 240).trim(); knowledge.push({ type: 'statement', content: lastTerm ? lastTerm + ' – ' + q : q, sources: [{ block_id: b.id, quote: q }] }); lastTerm = ''; }   // the text after a heading speaks about it: a term with a definition is not a heading (T-057)
-        } }
+          if (b.emphasis) { const q = firstLine(b.text).slice(0, 240).trim(); if (q) knowledge.push({ type: 'term', content: q, sources: [{ block_id: b.id, quote: q }] }); }
+          else if (t.length > 20) { const q = t.slice(0, 240).trim(); knowledge.push({ type: 'statement', content: q, sources: [{ block_id: b.id, quote: q }] }); }
+        }
         ans = {
           topics: (inp.pages || []).filter((pg) => emOf(pg).length).map((pg) => {
             const text = typeof pg.text === 'string' ? pg.text : (pg.blocks || []).map((b) => b.text || '').join('\n');

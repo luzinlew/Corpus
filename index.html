@@ -5737,15 +5737,17 @@ async function cnStepExam(d,r){
 /* Build a compact, source-ordered plan request from saved KnowledgeUnits. The sidecars stay the source of truth; the request carries only the unit content and provenance needed for grouping. */
 /* T-057: a heading of the document read as a unit. Heading = the unit's every source is the WHOLE of one emphasised block (emBlock, set when the unit was extracted) or an emphasis_fragment,
    the content is that quote, at most 6 words, no closing punctuation and no «X – Y» / «X = Y». Registries made before emBlock have no flag: only a whole line in CAPITALS of 2+ words counts then.
-   A term is a heading only when no definition/statement of the material speaks about it (a material with no statement at all is a list of terms: none is a heading); a statement needs no such check. */
+   A term is a heading only when no definition/statement of the material speaks about it AND it is a whole line in CAPITALS (2+ words) or a generic heading phrase (CN_HEAD_STOP); other emphasised terms are knowledge (a material with no statement at all is a list of terms: none is a heading); a statement needs no such check. */
 const cnHeadShape=t=>{t=String(t||'').trim();return !!t&&t.split(/\s+/).length<=6&&!/[.;:!?]$/.test(t)&&!/ [–—-] | = /.test(t);};
+/* generic heading words/phrases (et/ru/en/lat), lower case: a term equal to one of them, with no definition, is a heading. Anatomical labels («Fossa cranii anterior») are NOT here: they are knowledge. */
+const CN_HEAD_STOP=new Set(['eesmine osa','keskmine osa','tagumine osa','sissejuhatus','kokkuvõte','ülevaade','sisukord','külgvaade','eestvaade','pealtvaade','tagantvaade','altvaade','введение','заключение','обзор','содержание','передняя часть','средняя часть','задняя часть','вид сбоку','вид спереди','вид сверху','introduction','summary','overview','contents','anterior part','middle part','posterior part','lateral view','pars anterior','pars media','pars posterior']);
 const cnHeadUpper=t=>{t=String(t||'').trim();return t.split(/\s+/).length>=2&&/\p{Lu}/u.test(t)&&!/\p{Ll}/u.test(t);};
 function cnHeadingIds(units){
   const norm=x=>String(x).replace(/\s+/g,' ').trim().toLowerCase(),out=new Set();
   const whole=u=>u.extractionStatus==='extracted'&&typeof u.content==='string'&&Array.isArray(u.sources)&&u.sources.length>0&&cnHeadShape(u.content)&&u.sources.every(s=>Number.isFinite(s.start)&&Number.isFinite(s.end)&&s.end-s.start===u.content.length&&(s.kind==='emphasis_fragment'||s.emBlock===true||(s.emBlock===undefined&&cnHeadUpper(u.content))));
   units.forEach(u=>{if(u.type==='statement'&&whole(u))out.add(u.id);});
   const defs=units.filter(u=>(u.type==='statement'||u.type==='definition')&&!out.has(u.id)&&u.extractionStatus==='extracted'&&typeof u.content==='string').map(u=>norm(u.content));
-  if(defs.length)units.forEach(u=>{if(u.type==='term'&&whole(u)){const t=norm(u.content);if(!defs.some(c=>c!==t&&c.includes(t)))out.add(u.id);}});
+  if(defs.length)units.forEach(u=>{if(u.type==='term'&&whole(u)){const t=norm(u.content);if((cnHeadUpper(u.content)||CN_HEAD_STOP.has(t))&&!defs.some(c=>c!==t&&c.includes(t)))out.add(u.id);}});
   return out;
 }
 async function cnKnowledgePlanInput(d,r){

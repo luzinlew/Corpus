@@ -5399,10 +5399,8 @@ async def main():
                   ku_t == {'Heat notes.pdf': (4, 'incomplete', ['outline_truncated', 'outline_truncated_partial:4']), 'Extra reading.pdf': (3, 'incomplete', ['outline_truncated', 'outline_truncated_partial:3'])}, json.dumps(ku_t))
             cp_t = mine_t(st, 'cplan')[0]['data']
             ids_t = sorted(u['id'] for r in mine_t(st, 'ctext') if '.ku1.' in r['id'] for u in r['data']['units'] if u['extractionStatus'] == 'extracted')
-            heads_t = {x['id'] for x in cp_t.get('knowledgeIndex', []) if x.get('reason') == 'heading_only'}   # T-057: the term at the cut has lost its text: a heading, not a lesson
-            ids_all_t = ids_t; ids_t = [i for i in ids_t if i not in heads_t]
-            check('truncated outline: the knowledge plan (v2) covers the 7 kept units but the term cut off from its text (a heading): 6 eligible = planned 6, 1 heading_only, missing/duplicates/unknown 0, 3 lessons',
-                  cp_t.get('planVersion') == 2 and cp_t['coverage']['expected'] == 6 == cp_t['coverage']['planned'] and len(ids_all_t) == 7 and len(heads_t) == 1 and cp_t['coverage']['missing'] == cp_t['coverage']['duplicates'] == cp_t['coverage']['unknown'] == 0
+            check('truncated outline: the knowledge plan (v2) covers exactly the 7 kept units: expected 7 = planned 7, missing/duplicates/unknown 0, 3 lessons',
+                  cp_t.get('planVersion') == 2 and cp_t['coverage']['expected'] == 7 == cp_t['coverage']['planned'] and cp_t['coverage']['missing'] == cp_t['coverage']['duplicates'] == cp_t['coverage']['unknown'] == 0
                   and sorted(i for p_ in cp_t['parts'] for l in p_['lessons'] for i in l['knowledgeIds']) == ids_t and sum(len(p_['lessons']) for p_ in cp_t['parts']) == 3, json.dumps(cp_t['coverage']))
             warn_t = {}
             for lg_ in ('ru', 'en', 'et'):

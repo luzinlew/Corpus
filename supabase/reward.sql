@@ -1,10 +1,15 @@
--- Corpus: weekly reward. The most active AND accurate person of the last full week (Mon–Sun, Tallinn time)
--- gets +20 AI requests (added to public.ai_bonus, spent after the day's own allowance, never expires).
--- Needs supabase/ai.sql and supabase/stats.sql run first. Paste into Supabase → SQL Editor → Run. Safe to run again.
+-- Corpus: weekly reward. The person in 1st place of the "correct this week" table (the rating, supabase/rating.sql) for the last full
+-- week (Mon–Sun, Tallinn time) gets +20 AI requests (added to public.ai_bonus, spent after the day's own allowance, never expires).
+-- Needs supabase/ai.sql and supabase/rating.sql run first (rating.sql before this file). Paste into Supabase → SQL Editor → Run. Safe to run again.
 --
--- Who counts: at least 3 active days, at least 30 answers and at least 70% of them not "Again". The winner is the one
--- with the most such good answers (ties: higher accuracy, then more active days). Change the rules in corpus_week_award below.
+-- Who counts: a row of public.rating_week for last Monday (so the daily caps of the rating apply), a person who is NOT hidden
+-- (anon, real and alias take part; hidden never wins), with at least 3 active days, at least 30 answers and at least 70% of them
+-- correct. The winner has the most points (ties: more answers, then the lower user id). If nobody fits, nobody gets the reward.
+-- The winner's name in the answer is the rating name ("Студент" for anon), never an email.
+-- Order: rating.sql first, then this file (without public.rating_week the function raises rating_not_installed, errcode 55000).
+-- A week with no rating data is closed as "nobody won" for good (the first week after the rating started may be incomplete; accepted).
 -- Size of the reward:  update private.settings set value = '30' where key = 'ai_week_reward';
+-- Back to the previous version (activity-based): supabase/reward_rollback.sql
 
 insert into private.settings (key, value) values ('ai_week_reward', '20') on conflict (key) do nothing;
 
@@ -24,34 +29,26 @@ create or replace function public.corpus_week_award() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   uid uuid := auth.uid();
-  today date := (now() at time zone 'Europe/Tallinn')::date;
-  ws date := date_trunc('week', (now() at time zone 'Europe/Tallinn'))::date - 7;   -- last Monday-to-Sunday week
-  we date := date_trunc('week', (now() at time zone 'Europe/Tallinn'))::date - 1;
+  ws date;
   u integer; w record; ab public.ai_bonus; fresh boolean := false; aw private.ai_awards;
 begin
   if uid is null then return jsonb_build_object('week', null); end if;
+  if to_regclass('public.rating_week') is null or to_regclass('public.rating_profile') is null then
+    raise exception 'rating_not_installed' using errcode = '55000';
+  end if;
+  ws := date_trunc('week', private.rating_today()::timestamp)::date - 7;   -- Monday of last Monday-to-Sunday week
   select * into aw from private.ai_awards where week_start = ws;
   if not found then
-    select coalesce(nullif(value, '')::integer, 20) into u from private.settings where key = 'ai_week_reward';
+    select s.value::integer into u from private.settings s where s.key = 'ai_week_reward' and s.value ~ '^[0-9]{1,6}$';
     u := coalesce(u, 20);
-    select p.owner, p.n, p.ok, p.days into w from (
-      select r.owner, sum(r.n)::integer as n, sum(r.ok)::integer as ok,
-             (select count(*) from public.activity a where a.user_id = r.owner and a.day between ws and we)::integer as days
-        from (
-          select d.owner, e.key::date as day,
-                 case when jsonb_typeof(e.value -> 'n') = 'number' then (e.value ->> 'n')::numeric else 0 end as n,
-                 case when jsonb_typeof(e.value -> 'ok') = 'number' then (e.value ->> 'ok')::numeric else 0 end as ok
-            from public.docs d
-            cross join lateral jsonb_each(case when jsonb_typeof(d.data -> 'days') = 'object' then d.data -> 'days' else '{}'::jsonb end) e
-           where d.coll = 'stats' and e.key ~ '^\d{4}-\d{2}-\d{2}$'
-             and e.key between to_char(ws, 'YYYY-MM-DD') and to_char(we, 'YYYY-MM-DD')
-        ) r group by r.owner
-    ) p
-    where p.days >= 3 and p.n >= 30 and p.ok >= 0.7 * p.n
-    order by p.ok desc, p.ok::numeric / p.n desc, p.days desc, p.owner
-    limit 1;
+    select r.user_id, r.answers, r.correct, r.active_days into w
+      from public.rating_week r left join public.rating_profile p on p.user_id = r.user_id
+     where r.week_start = ws and coalesce(p.mode, 'anon') <> 'hidden'
+       and r.active_days >= 3 and r.answers >= 30 and r.correct >= 0.7 * r.answers
+     order by r.points desc, r.answers desc, r.user_id
+     limit 1;
     insert into private.ai_awards (week_start, user_id, units, answers, good, days)
-    values (ws, w.owner, case when w.owner is null then 0 else u end, coalesce(w.n, 0), coalesce(w.ok, 0), coalesce(w.days, 0))
+    values (ws, w.user_id, case when w.user_id is null then 0 else u end, coalesce(w.answers, 0), coalesce(w.correct, 0), coalesce(w.active_days, 0))
     on conflict (week_start) do nothing
     returning * into aw;
     if aw.week_start is not null then
@@ -67,7 +64,7 @@ begin
   select * into ab from public.ai_bonus where user_id = uid;
   return jsonb_build_object(
     'week', ws, 'me', aw.user_id is not null and aw.user_id = uid, 'fresh', fresh, 'units', aw.units,
-    'winner', (select left(email, 2) || '***@' || split_part(email, '@', 2) from auth.users where id = aw.user_id),
+    'winner', case when aw.user_id is null then null else private.rating_name(aw.user_id) end,
     'balance', coalesce(ab.balance, 0));
 end $$;
 revoke execute on function public.corpus_week_award() from public, anon;

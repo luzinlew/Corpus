@@ -1,7 +1,8 @@
 -- Corpus: weekly student rating. Paste into Supabase → SQL Editor → Run. Safe to run again.
 --
 -- What it adds: one shared leaderboard for all students. The week runs Monday to Sunday by Tallinn time and starts from zero every
--- Monday. Everybody takes part by default and can switch to a nickname or hide (the site asks once, on first visit).
+-- Monday. Everybody takes part at once, anonymously (shown as "Студент"); a person can open their email name, choose a nickname or hide
+-- (the site asks once, on first visit). Modes: anon (default) / real / alias / hidden.
 --   * the app sends its per-day counts, {"YYYY-MM-DD": {"n": answers, "ok": correct}}, for the current week only;
 --   * a day counts at most 400 answers (if more are sent, the correct ones are scaled down in proportion); for the "correct this
 --     week" table at most 150 correct answers a day (the cap);
@@ -14,9 +15,10 @@
 -- Nothing is readable from the tables directly (RLS on, no policies, no grants): everything goes through the functions below.
 -- The old version of the site does not call them, so it keeps working as before.
 --
--- Display name: the nickname if chosen; otherwise, ONLY after the person has answered "how to show me" (asked), taken from the email's
--- local part, split on . _ - + and digits, letters only:  lev.luzin@x.ee -> "Lev L.", luzinlew@gmail.com -> "Luzinlew".
--- Before that answer, and when there are no letters, the name is "Студент": nobody shows up under an email name unasked.
+-- Display name: anon -> "Студент" always; alias -> the nickname; real -> (only if the person has answered "how to show me", asked)
+-- taken from the email's local part, split on . _ - + and digits, letters only:  lev.luzin@x.ee -> "Lev L.", luzinlew@gmail.com -> "Luzinlew".
+-- When there are no letters the name is "Студент". Nobody shows up under an email name unless they chose "real".
+-- Existing rows with mode real and asked=false (shown as "Студент" so far) are migrated to anon; safe to run again.
 --
 -- Check before running (read-only). Letters like õ ä ö ü ж must count as letters, otherwise their names and nicknames are refused:
 --   show lc_ctype; select upper('õ'), 'ж' ~ '[[:alpha:]]';     -- expected: 'Õ' and true
@@ -25,13 +27,22 @@
 
 create schema if not exists private;
 
+-- Same table as in ai.sql (the reward size lives there); created here too so that this file does not depend on ai.sql.
+create table if not exists private.settings (key text primary key, value text not null);
+
 create table if not exists public.rating_profile (
   user_id    uuid primary key references auth.users on delete cascade,
-  mode       text not null default 'real' check (mode in ('real', 'alias', 'hidden')),
+  mode       text not null default 'anon',
   alias      text,
   asked      boolean not null default false,
   updated_at timestamptz default now()
 );
+-- Modes: allow 'anon', default 'anon' (works for a table created by the older version too).
+alter table public.rating_profile drop constraint if exists rating_profile_mode_check;
+alter table public.rating_profile add constraint rating_profile_mode_check check (mode in ('anon', 'real', 'alias', 'hidden'));
+alter table public.rating_profile alter column mode set default 'anon';
+update public.rating_profile set mode = 'anon' where mode = 'real' and asked = false;
+
 create table if not exists public.rating_week (
   user_id     uuid references auth.users on delete cascade,
   week_start  date,
@@ -63,7 +74,7 @@ declare m text; a text; asked boolean; em text; toks text[]; t1 text; t2 text;
 begin
   select p.mode, p.alias, p.asked into m, a, asked from public.rating_profile p where p.user_id = p_uid;
   if m = 'alias' and a is not null and a <> '' then return a; end if;
-  if not coalesce(asked, false) then return 'Студент'; end if;
+  if m is distinct from 'real' or not coalesce(asked, false) then return 'Студент'; end if;
   select u.email into em from auth.users u where u.id = p_uid;
   select array_agg(s.t order by s.ord) into toks
     from (select regexp_replace(x, '[^[:alpha:]]', '', 'g') as t, ord
@@ -94,7 +105,7 @@ language sql stable security definer set search_path = '' as $$
                    else                 round((w.answers - w.correct) * 100.0 / w.answers, 1)
                  end as val
             from public.rating_week w left join public.rating_profile p on p.user_id = w.user_id
-           where w.week_start = p_week and coalesce(p.mode, 'real') <> 'hidden'
+           where w.week_start = p_week and coalesce(p.mode, 'anon') <> 'hidden'
              and case when p_metric = 'points' then w.points > 0 else w.answers >= 100 and w.active_days >= 2 end) c
 $$;
 revoke execute on function private.rating_ranked(text, date) from public, anon, authenticated;
@@ -142,13 +153,13 @@ end $$;
 revoke execute on function public.corpus_rating_submit(jsonb) from public, anon;
 grant execute on function public.corpus_rating_submit(jsonb) to authenticated;
 
--- 2. How I am shown: real / alias / hidden. Also marks that the person has been asked.
+-- 2. How I am shown: anon / real / alias / hidden. Also marks that the person has been asked.
 create or replace function public.corpus_rating_set_profile(p_mode text, p_alias text default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare uid uuid := auth.uid(); a text;
 begin
   if uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
-  if p_mode is null or p_mode not in ('real', 'alias', 'hidden') then raise exception 'bad_mode' using errcode = '22023'; end if;
+  if p_mode is null or p_mode not in ('anon', 'real', 'alias', 'hidden') then raise exception 'bad_mode' using errcode = '22023'; end if;
   if p_mode = 'alias' then
     a := btrim(p_alias);
     if a is null or char_length(a) not between 2 and 20 or a !~ '^[[:alnum:] ._-]+$' or a !~ '[[:alnum:]]' then
@@ -172,7 +183,7 @@ begin
   if uid is null then raise exception 'not_signed_in' using errcode = '42501'; end if;
   if p_metric is null or p_metric not in ('points', 'accuracy', 'errors') then raise exception 'bad_metric' using errcode = '22023'; end if;
   select p.mode, p.asked into v_mode, v_asked from public.rating_profile p where p.user_id = uid;
-  v_mode := coalesce(v_mode, 'real'); v_asked := coalesce(v_asked, false);
+  v_mode := coalesce(v_mode, 'anon'); v_asked := coalesce(v_asked, false);
   select w.answers, w.points into v_ans, v_pts from public.rating_week w where w.user_id = uid and w.week_start = ws;
   v_ans := coalesce(v_ans, 0); v_pts := coalesce(v_pts, 0);
   with r as materialized (select * from private.rating_ranked(p_metric, ws)),
@@ -186,6 +197,7 @@ begin
   return jsonb_build_object('week_start', ws, 'metric', p_metric, 'min_answers', 100, 'min_days', 2, 'total', v_tot,
     'me', jsonb_build_object('rank', v_rn, 'value', v_val, 'answers', v_ans, 'points', v_pts, 'eligible', v_rn is not null,
                              'mode', v_mode, 'asked', v_asked, 'name', private.rating_name(uid)),
+    'reward_units', coalesce((select s.value::integer from private.settings s where s.key = 'ai_week_reward' and s.value ~ '^[0-9]{1,6}$'), 20),
     'top', v_top, 'around', v_around);
 end $$;
 revoke execute on function public.corpus_rating_get(text) from public, anon;

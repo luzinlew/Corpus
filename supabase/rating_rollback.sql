@@ -1,6 +1,8 @@
 -- Rolls back supabase/rating.sql: the weekly rating functions and both tables are removed.
 -- Paste into Supabase → SQL Editor → Run. Safe to run again. WARNING: the rating results and everyone's choice of how to be shown
 -- are lost. The site then shows no rating (the app handles the missing functions); nothing else is touched.
+-- Order of rollback: first reward_rollback.sql, then rating_anon_rollback.sql (if the anon mode was rolled back) and only then
+-- rating_rollback.sql; otherwise corpus_week_award refers to objects that are already gone.
 drop function if exists public.corpus_rating_submit(jsonb);
 drop function if exists public.corpus_rating_set_profile(text, text);
 drop function if exists public.corpus_rating_get(text);

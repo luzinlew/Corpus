@@ -4293,7 +4293,7 @@ async def main():
                 {id:'l2',title:'Angulus inferior',pic:'g:'+mid+':1',off:false,terms:[T('t4','Margo medialis',2),T('t5','Angulus inferior',3),T('t6','Spina scapulae',1)]}]}]});
               go({name:'courseNew',did:did,step:3});}""", [pdf_b64, did_f, mid_f])
             await pf.wait_for_selector('[data-cn=build]:not([disabled])', timeout=30000)
-            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=rej;i.src=u+'?'+Date.now();});
+            bright = lambda pid: pf.evaluate("""async(pid)=>{const p=plateById(pid),u=plateUrl(p);const im=await new Promise((res,rej)=>{const i=new Image();if(!/^\\//.test(u))i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=async()=>{const q=u+'?'+Date.now();let f={};try{const r=await fetch(q);f={status:r.status,ok:r.ok,type:r.headers.get('content-type'),len:(await r.blob()).size};}catch(e){f={fetchErr:String(e)};}rej(new Error('PLATE-IMG '+JSON.stringify({url:u,plateId:p&&p.id,assetId:p&&p.assetId,sw:!!(navigator.serviceWorker&&navigator.serviceWorker.controller),complete:i.complete,nw:i.naturalWidth,f:f})));};i.src=u+'?'+Date.now();});
               const cv=document.createElement('canvas');cv.width=im.naturalWidth;cv.height=im.naturalHeight;const cx=cv.getContext('2d');cx.drawImage(im,0,0);const w=cv.width,h=cv.height,d=cx.getImageData(Math.floor(w*.4),Math.floor(h*.4),Math.floor(w*.2),Math.floor(h*.2)).data;
               let s=0;for(let i=0;i<d.length;i+=4)s+=d[i]+d[i+1]+d[i+2];return s/(d.length/4*3);}""", pid)
             pid_t = lambda t_: pf.evaluate("t=>(S.plates.find(p=>p.title===t)||{}).id", t_)
@@ -4317,7 +4317,8 @@ async def main():
             # 3) the page is drawn; the captions are in the picture (no text layer) → found by the text recognition on the drawn page
             await pf.evaluate("window.__CN_BLANK=0")
             await pf.click('[data-cn=resume]')
-            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'", timeout=180000)
+            # the click starts the build asynchronously: until it does, _bld.state is still the 'done' of the build above; the lesson «Spina scapulae» (not built yet) is what tells the new build has finished
+            await pf.wait_for_function("CDRAFTS.get(view.did)._bld.state==='done'&&S.plates.some(p=>p.title==='Spina scapulae')", timeout=180000)
             await pf.wait_for_timeout(500)
             p1 = await pid_t('Spina scapulae')
             b1 = await bright(p1)

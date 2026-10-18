@@ -882,8 +882,10 @@ async def main():
             fid = await pg.evaluate('S.folders[0].id')
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             async with pg.expect_download() as dl:
-                await pg.click('#layer [data-s="share"]')
+                await pg.click('#layer [data-s="file"]')
             path = await (await dl.value).path()
             exp = json.loads(pathlib.Path(path).read_text())
             check('folder exported as a file with its photo', exp['kind'] == 'folder' and exp['plates'][0]['image'].startswith('data:image/jpeg') and len(exp['cards']) == 2,
@@ -910,8 +912,10 @@ async def main():
             fid2 = await pg.evaluate("S.folders.find(f=>f.name==='Järjekord').id")
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid2}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             async with pg.expect_download() as dl:
-                await pg.click('#layer [data-s="share"]')
+                await pg.click('#layer [data-s="file"]')
             exp2 = json.loads(pathlib.Path(await (await dl.value).path()).read_text())
             check('a re-shared folder lists decks and photos in that order',
                   [d['name'] for d in exp2['decks']] == want['decks'] and [p['w'] for p in exp2['plates'] if p['deckId'] == exp2['decks'][0]['id']] == want['photos'],
@@ -1438,6 +1442,8 @@ async def main():
             # share the folder by code / QR
             await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             await pg.click('#layer [data-s="qr"]')
             await pg.wait_for_selector('#shareCode', timeout=15000)
             code = await pg.get_attribute('#shareCode', 'data-code') or ''
@@ -1453,10 +1459,30 @@ async def main():
                   and all('reps' not in c for c in sh[0]['data']['cards']), json.dumps(sh)[:200])
             await pg.click('#layer [data-s="ok"]')
             await pg.click('[data-act=folderMenu]')
+            await pg.click('#layer [data-s="share"]')
+            await pg.wait_for_selector('#layer .ov.in [data-s="file"]')
             await pg.click('#layer [data-s="qr"]')
             await pg.wait_for_selector('#shareCode', timeout=15000)
             check('sharing again keeps the same code (the snapshot is refreshed)', (await pg.get_attribute('#shareCode', 'data-code')) == code and len(state()['shares']) == 1)
             await pg.click('#layer [data-s="ok"]')
+
+            # «Continue where you stopped»: the deck remembers the last opened photo
+            did2 = await pg.evaluate("(()=>{const d=S.decks.find(x=>platesOf(x.id).length>1);return d?d.id:null;})()")
+            check('deck with two photos exists for the resume check', did2 is not None)
+            if did2:
+                keep = await pg.evaluate("META.lastPlate||null")
+                await pg.evaluate(f"delete META.lastPlate;go({{name:'deck',deckId:'{did2}'}})")
+                await pg.wait_for_selector('[data-act=study], .alldone')
+                no = await pg.evaluate("!!document.querySelector('[data-act=resumePlate]')")
+                p1 = await pg.evaluate(f"platesOf('{did2}')[1].id")
+                await pg.evaluate(f"openEditor('{p1}',null)")
+                await pg.evaluate(f"go({{name:'deck',deckId:'{did2}'}})")
+                await pg.wait_for_selector('[data-act=resumePlate]')
+                await pg.click('[data-act=resumePlate]')
+                await pg.wait_for_function(f"view.name==='editor' && ED.plateId==='{p1}'", timeout=5000)
+                check('deck: «continue where you stopped» appears only after a photo was opened and leads back to it', no is False)
+                await pg.evaluate("(k=>{if(k)META.lastPlate=k;else delete META.lastPlate;})(" + json.dumps(keep) + ")")
+            await pg.evaluate(f"go({{name:'folder',folderId:'{fid}'}})")
 
             # Anki: a .apkg with image-occlusion and Basic notes
             urllib.request.urlopen(API + '/__log')                 # clear the request log
@@ -1858,6 +1884,9 @@ async def main():
             check('AI visibility: no nudge before any miss', await pg.evaluate("!document.querySelector('.ainudge')"))
             await nudge_step(1)
             check('AI visibility: after «again» one «Explain with Claude» line appears', await pg.evaluate("document.querySelectorAll('.ainudge').length===1&&/Claude/.test(document.querySelector('.ainudge .go').textContent)&&META.aiNudge.n===1"))
+            check('own AI icon: the «Explain with Claude» line has the AI icon, not the spark', await pg.evaluate("!!document.querySelector('.ainudge .go svg[data-ic=ai]')&&!document.querySelector('.ainudge svg[data-ic=spark]')"))
+            check('own AI icon: the streak counter (not AI) uses the flame', await pg.evaluate("(()=>{const o=SS.streak;SS.streak=5;const h=document.createElement('div');h.innerHTML=countsBar();SS.streak=o;return !!h.querySelector('.streak svg[data-ic=flame]')&&!h.querySelector('svg[data-ic=ai],svg[data-ic=spark]');})()"))
+            check('own AI icon: the editor hint button (Claude) has the AI icon', await pg.evaluate("(()=>{const h=document.createElement('div');h.innerHTML=edHintField({id:'z',term:'ossa',hint:''});return !!h.querySelector('[data-act=edHintAI] svg[data-ic=ai]');})()"))
             await nudge_step(3)
             check('AI visibility: the line goes away after the next answer', await pg.evaluate("!document.querySelector('.ainudge')"))
             await nudge_step(1)
@@ -2021,11 +2050,45 @@ async def main():
             await pg.evaluate("S.sample=window.__smpN;META.aiNudge=null;0")
             src_t = open(os.path.join(ROOT, 'src', 'corpus.html'), encoding='utf-8').read()
             check('AI visibility: new strings have en/et translations', all(x in src_t for x in ['["Объяснить с Claude","Explain with Claude","Selgita Claude’iga"]', '["Дай ассоциацию","Give me an association","Anna assotsiatsioon"]', '["Больше не предлагать","Don’t suggest again","Ära paku enam"]']))
+            check('own AI icon: no ic(\'spark\' left in the source; Claude buttons use ai, OCR/streak/hard do not',
+                  "ic('spark'" not in src_t and "spark:'" not in src_t
+                  and all(("data-act=\"edAI\">'+ic(S.sample&&S.imgOK?'ai'" in src_t, "id=\"hAI\">'+ic('ai'" in src_t, "id=\"cmpAI\">'+ic('ai'" in src_t, "data-act=\"edSugg\">'+ic('scan'" in src_t, "data-act=\"edOCR\" aria-label=\"Распознать текст в рамке\" title=\"Распознать текст в рамке\">'+ic('scan'" in src_t, "icon:'ai',label:t,raw:1" in src_t)))
+            # ---------- T-046 icon motion ----------
+            ICM = """(()=>{const d=document.createElement('div');d.id='icm';d.style.cssText='position:fixed;left:0;top:0;opacity:.01';
+              d.innerHTML=['ai','chat','flame','target','scan'].map(n=>ic(n,32)).join('')+'<span class="streak">'+ic('flame',14)+'5</span>';
+              document.body.appendChild(d);
+              const q=(n,c)=>d.querySelector((n==='streak'?'.streak ':'')+'svg[data-ic='+(n==='streak'?'flame':n)+'] '+c);
+              const parts=[['ai','.a-star'],['ai','.a-bub'],['chat','.a-l1'],['chat','.a-l2'],['chat','.a-bub'],['flame','.a-fl'],['target','.a-c1'],['target','.a-c2'],['target','.a-c3'],['scan','.a-bar'],['scan','.a-sc']];
+              const r={names:parts.map(([n,c])=>q(n,c)?getComputedStyle(q(n,c)).animationName:'MISSING'),
+                iter:parts.map(([n,c])=>q(n,c)?getComputedStyle(q(n,c)).animationIterationCount:'MISSING'),
+                streak:getComputedStyle(q('streak','.a-fl')).animationIterationCount,
+                flameOwn:getComputedStyle(q('flame','.a-fl')).animationIterationCount};
+              d.remove();return r;})()"""
+            icm = await pg.evaluate(ICM)
+            check('icon motion: inner parts of ai/chat/flame/target/scan animate in the normal mode', all(x!='none' and x!='MISSING' for x in icm['names']))
+            check('icon motion: only the streak flame loops forever, the other icons play a finite number of times', icm['streak']=='infinite' and all(x!='infinite' for x in icm['iter']) and icm['flameOwn']!='infinite')
+            await pg.emulate_media(reduced_motion='reduce')
+            icm = await pg.evaluate(ICM)
+            check('icon motion: prefers-reduced-motion switches every icon animation off', all(x=='none' for x in icm['names']))
+            await pg.emulate_media(reduced_motion='no-preference')
+            await pg.evaluate("document.documentElement.classList.add('calm')")
+            icm = await pg.evaluate(ICM)
+            await pg.evaluate("document.documentElement.classList.remove('calm')")
+            check('icon motion: html.calm switches every icon animation off', all(x=='none' for x in icm['names']))
+            check('icon motion: icons keep their parts and data-ic; at rest the parts are not transformed', await pg.evaluate("""(()=>{const d=document.createElement('div');d.style.cssText='position:fixed;left:0;top:0';
+              d.innerHTML=['ai','chat','flame','target','scan'].map(n=>ic(n,32)).join('');document.body.appendChild(d);
+              d.getAnimations({subtree:true}).forEach(a=>a.finish());
+              const need={ai:['.a-bub','.a-star'],chat:['.a-bub','.a-l1','.a-l2'],flame:['.a-fl'],target:['.a-c1','.a-c2','.a-c3'],scan:['.a-bar','.a-sc']};
+              let ok=true;for(const n in need){const sv=d.querySelector('svg[data-ic='+n+']');if(!sv){ok=false;continue;}
+                for(const c of need[n]){const e=sv.querySelector(c);if(!e){ok=false;continue;}const cs=getComputedStyle(e);if(cs.transform!=='none'&&cs.transform!=='matrix(1, 0, 0, 1, 0, 0)')ok=false;if(parseFloat(cs.opacity)!==1)ok=false;}}
+              for(const e of d.querySelectorAll('.a-sp1,.a-sp2'))if(parseFloat(getComputedStyle(e).opacity)!==0)ok=false;
+              d.remove();return ok;})()"""))
             await pg.evaluate("go({name:'home'})")
             # ---------- «Hard» virtual deck: tile, all modes, schedule-affecting answers, leaving after 3 correct in a row ----------
             await pg.evaluate("go({name:'library'})")
             await pg.wait_for_selector('.page.tabbed')
             check('hard deck: tile shown in the library while a card has misses', await pg.evaluate("!!document.querySelector('.deck.hardrow[data-act=openHardDeck]') && hardCards(S.decks.map(d=>d.id)).length>0"))
+            check('own AI icon: the «Hard» tile uses the target icon, not AI/spark', await pg.evaluate("!!document.querySelector('.deck.hardrow svg[data-ic=target]')&&!document.querySelector('.deck.hardrow svg[data-ic=ai],.deck.hardrow svg[data-ic=spark]')"))
             # the name of the «Hard» tile and of its screen is a UI string, not a deck name: it is translated; the language switch lists Eesti, English, Русский in that order
             await pg.evaluate("setLang('et');go({name:'library'})")
             await pg.wait_for_timeout(200)
